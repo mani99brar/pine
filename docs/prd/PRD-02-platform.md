@@ -282,6 +282,21 @@ mismatch) before returning;
 `finalizedBlock()` reads the `finalized` tag from the primary and requires the secondary's hash at that number to match
 (mismatch → throw an integrity error); every error message redacted (RPC URLs embed keys).
 
+## 3a. platform-005 review fixes (carried by platform-006)
+- Jobs: track the in-flight renewal promise and await it (ignoring its error) before `release`, so a late renewal can never
+  overwrite the release on another pool connection.
+- Moderation admin routes write the state change and its audit entry in ONE transaction (`recordWith(tx)`); a failing audit insert
+  rolls the change back.
+- Pin outbox: an item stays selectable while any CONFIGURED target (Kubo, Pinning Service) has not confirmed it (per-target done
+  flags), so content stored before a provider was configured still reaches it; production config requires both targets.
+- Timing tests assert ranges with generous windows (≥ 1 s slack), never exact counts after a fixed sleep.
+- Required additional tests: a successful renewal moves the local deadline (a long run with renewals is NOT aborted and logs no
+  "not renewed in time"); the runner does not re-acquire before an aborted run settles (a renewal returning zero rows while no other
+  holder takes the lease, with the aborted run still pending); every gateway job (pin outbox, token re-encryption, token refresh,
+  OAuth-state purge) stops when its signal is aborted before or during a batch; `src/migrate.ts` refuses a missing or non-postgres
+  URL with a redacted fatal line and exit code 1 and prints applied ids on success (run it as a child process or through an
+  exported `main(env, io)`); multipart limits — a file above `maxUploadBytes`, two files and too many fields are refused with 413/400.
+
 ## 4. Required tests (each lane, vitest on PGlite; name the SEC id in negative tests)
 - core: config refusal cases per production rule; CSRF (missing/wrong Origin, cross-site fetch metadata, missing header, wrong
   content type, charset parameter accepted, multipart only where allowed); SIWE (replayed nonce, nonce from another pre-session,

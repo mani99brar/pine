@@ -54,6 +54,10 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
   re-acquired before an aborted run settles; rejected webhooks are audited only on the first rejection per IP (/64 for IPv6) per
   minute and at most 60 per minute overall, via the Postgres fixed-window statement; `/readyz` is cached for 5 s; a renamed branch
   (301) is NOT_A_MEMBER; a stale revoked webhook after a quick re-link deleting the new tokens is accepted (fail-safe).
+- platform-005 review fixes (platform-006): await the in-flight renewal before release; moderation change and audit in one
+  transaction; pin outbox per-target completion; tolerant timing tests; and the tests PRD-02 section 3a lists. Every lane's
+  completion includes a coverage matrix: each required test of PRD-02 section 4/3a and each decision → the test file and test name
+  that would fail if the behaviour were removed.
 - Metrics use a dedicated prom-client `Registry`. Migrations always run as the migrator role (default privileges depend on it).
 - Metrics adapter: lazy, cached by name, label names fixed at first use, mismatching samples dropped with one warning.
 - Gateways I/O injection: `createGateways(deps)` wraps an exported `buildGateways(deps, io)` (`fetch` + two viem transports);
