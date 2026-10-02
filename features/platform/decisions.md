@@ -37,9 +37,14 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - `@fastify/cors` is not registered; public routes get `Access-Control-Allow-Origin: *` from an `onSend` hook keyed on the matched
   route's config; OPTIONS is not routed.
 - Per-IP flood guard default 600/min (`PINE_IP_FLOOD_LIMIT_PER_MINUTE`, NAT-tolerant); per-user limit default 120/min.
-- SEC-AUTH-08: anonymous requests use the route's `rateLimitPerMinute` as a per-route `@fastify/rate-limit` counter (per IP; verified
-  with 11.2.0); SIWE challenge and verify are 20/min per IP and 20/min per address (`siwe:<address>` key in the Postgres fixed-window
-  table, same atomic statement).
+- Rate limiting: `@fastify/rate-limit` is only the in-memory per-IP flood guard, installed as the FIRST instance-level `onRequest`
+  hook via `app.rateLimit()` (verified: limited requests never reach later hooks; 404s are covered; no route sets
+  `config.rateLimit`). Per-user, per-route and per-address limits are Postgres fixed windows keyed `user:<id>`,
+  `user:<id>:<route>`, `ip:<ip>:<route>` (anonymous, only on routes with `rateLimitPerMinute`) and `siwe:<address>`. SEC-AUTH-08:
+  SIWE challenge and verify are 20/min per IP and 20/min per address.
+- Leases: TTL independent of the job interval (default 60 s), renewal ttl/3, acquisition polled every min(interval, 15 s).
+- `audit_log.created_at` uses database `now()` like leases and IP retention.
+- The webhook route parses JSON and form bodies as raw Buffers (64 KiB) so the HMAC covers the exact bytes.
 - Webhook: bad/missing signature → gateway throws `ApiError("UNAUTHENTICATED")` → 401 + `github.webhook.rejected`; other errors →
   500 + `github.webhook.failed`.
 - Metrics use a dedicated prom-client `Registry`. Migrations always run as the migrator role (default privileges depend on it).

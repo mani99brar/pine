@@ -56,16 +56,19 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   `gateways.githubAuth.identityOf`, set `request.session`; touch the idle expiry at most once per 5 minutes.
 - `app.requireSession`, `app.requireAdmin` (admin + session authenticated within 300 s, else `STEP_UP_REQUIRED`).
 - Error handler: `toErrorResponse(error, request.id, ctx.redact)`, `Retry-After` when present; 5xx logged with the redacted message.
-- Rate limiting in two stages: a per-IP flood guard in `onRequest` BEFORE any session lookup using `@fastify/rate-limit`'s
-  in-memory store (no database write for anonymous traffic; N processes allow N× the limit, acceptable for a flood guard; fleet-wide
-  per-IP limits belong to the edge proxy) with its own NAT-tolerant default of 600 requests/min per IP
-  (`PINE_IP_FLOOD_LIMIT_PER_MINUTE`), then the per-user limit after authentication in Postgres fixed windows; default
-  120/min; `config.pine.rateLimitPerMinute` overrides per route. A cookie that matches no session skips `identityOf`. Test that an
-  authenticated request is keyed by user id. For anonymous requests (as the frozen RouteSecurityConfig comment says: "per IP when
-  unauthenticated") core's `onRoute` hook copies a route's `config.pine.rateLimitPerMinute` into that route's own
-  `config.rateLimit` (`{ max, timeWindow: 60000 }`), which gives the route a separate per-IP in-memory counter next to the global
-  flood guard (verified with @fastify/rate-limit 11.2.0: the 21st request gets 429 while other routes and other IPs are
-  unaffected). The flood guard itself writes nothing to the database.
+- Rate limiting in two stages:
+  1. Per-IP flood guard (in memory, no database write): core registers `@fastify/rate-limit` with `global: false` and adds
+     `app.addHook("onRequest", app.rateLimit({ max: floodLimit, timeWindow: 60000 }))` as its FIRST instance-level hook, before CSRF
+     and the session lookup. Instance-level hooks also run for unmatched routes, so 404s are limited too, and a limited request
+     never reaches a later hook (verified 2026-10-02 with fastify 5 and @fastify/rate-limit 11.2.0). No route ever sets
+     `config.rateLimit` (a route-level config would REPLACE the global parameters and run after instance hooks). NAT-tolerant
+     default 600 requests/min per IP (`PINE_IP_FLOOD_LIMIT_PER_MINUTE`); N processes allow N× the limit, acceptable for a flood
+     guard; fleet-wide per-IP limits belong to the edge proxy.
+  2. Postgres fixed windows (the one atomic increment statement of section 2.5a), keyed by a string: every authenticated request
+     consumes `user:<userId>` (default 120/min); when the route sets `config.pine.rateLimitPerMinute` it also consumes
+     `user:<userId>:<route id>` (authenticated) or `ip:<ip>:<route id>` (anonymous) with that limit — the frozen "per user, or per
+     IP when unauthenticated" semantics; route id = method + route pattern. Anonymous requests to routes without a per-route limit
+     write nothing. A cookie that matches no session skips `identityOf`. Test that an authenticated request is keyed by user id.
 - Multipart: core registers `@fastify/multipart` once with `limits: { fileSize: config.evidence.maxUploadBytes, files: 1, fields: 10,
   parts: 11 }`; only routes with `config.pine.multipart` accept that content type (CSRF rules), everything else is JSON-only.
 - Errors: the core error handler maps `GitHubGatewayError` codes to ApiError codes before `toErrorResponse` (GITHUB_NOT_LINKED →
@@ -74,10 +77,9 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - Registers every module from `src/modules.ts` inside its own plugin scope, passing `ctx`.
 
 ### 2.3 Wallet authentication (SEC-AUTH-01..13)
-- SIWE rate limits (SEC-AUTH-08): `POST /auth/siwe/challenge` and `POST /auth/siwe/verify` set `rateLimitPerMinute: 20` (per IP,
-  section 2.2), and both also consume a per-address fixed window in the same Postgres table and atomic statement as the per-user
-  limit, keyed `siwe:<lowercase address>` (20 per minute; for verify the address of the stored message), returning
-  `RATE_LIMITED` with `Retry-After`. Each allowed challenge writes at most one pre-session and one nonce row; the cleanup job purges
+- SIWE rate limits (SEC-AUTH-08): `POST /auth/siwe/challenge` and `POST /auth/siwe/verify` set `rateLimitPerMinute: 20` (anonymous,
+  so `ip:<ip>:<route id>`, section 2.2), and both also consume `siwe:<lowercase address>` (20 per minute; for verify the address of
+  the stored message) in the same table and statement, returning `RATE_LIMITED` with `Retry-After`. Each allowed challenge writes at most one pre-session and one nonce row; the cleanup job purges
   expired ones.
 - `POST /api/v1/auth/siwe/challenge {address}` → sets `__Host-pine_presession` (random, 10 min), stores a nonce
   (`crypto.randomBytes(16)` hex; at most 5 outstanding per pre-session; single use) and returns the exact EIP-4361 message:
@@ -101,7 +103,10 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - `POST /api/v1/webhooks/github` (no session, CSRF-exempt, raw body ≤ 64 KiB) → `githubAuth.handleWebhook`; core audits
   `github.webhook.accepted` (details: `X-GitHub-Event`, `X-GitHub-Delivery`) when it resolves (204). The gateway throws
   `ApiError("UNAUTHENTICATED")` for a missing or invalid signature: core answers 401 and audits `github.webhook.rejected`; any other
-  error is an internal failure: 500 (GitHub redelivers) and `github.webhook.failed`. The frozen seam returns `void`, so a webhook-driven revocation is not attributed to a Pine user
+  error is an internal failure: 500 (GitHub redelivers) and `github.webhook.failed`. The HMAC covers the exact raw bytes, so the
+  webhook route's plugin scope registers content-type parsers for `application/json` and `application/x-www-form-urlencoded` with
+  `parseAs: "buffer"` and `bodyLimit: 65536` and passes that Buffer unchanged; a core test sends a body with whitespace and
+  non-ASCII characters in both content types and asserts the fake `handleWebhook` received byte-identical bytes. The frozen seam returns `void`, so a webhook-driven revocation is not attributed to a Pine user
   in the audit log; the gateways' metric and redacted log line carry it (accepted).
 
 ### 2.4 Platform services in AppContext
@@ -136,13 +141,15 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   now() + $ttl) ON CONFLICT (name) DO UPDATE SET holder = $2, started_at = now(), expires_at = now() + $ttl WHERE
   job_leases.expires_at <= now() RETURNING holder` — acquired iff a row is returned (holder = random per-process id).
 - Renew every ttl/3 while running: `UPDATE ... SET expires_at = now() + $ttl WHERE name = $1 AND holder = $2` (abort the job when
-  zero rows are updated). TTL = max(60 s, 2 × the job's interval).
+  zero rows are updated). TTL: see Timing below.
 - Release on finish: `UPDATE ... SET expires_at = started_at + $interval WHERE name = $1 AND holder = $2`, so no process (including
   this one) starts the job again before one interval has passed since this run started; `expires_at` is never NULL.
-- The TTL floor (default 60 s) and the renewal period (default ttl/3) are constructor options of the runner so tests run in real
-  time with short values: tests use a floor of 0, an interval of at least 1 s (ttl = 2 × interval) and a renewal period of at
-  least 250 ms, so every "before the interval" assertion has a window of ≥ 1 s under CPU contention; all lease tests live in one
-  file; tests never write `job_leases` directly.
+- Timing: the lease TTL is a runner option independent of the job's interval (default 60 s, so a crashed holder blocks any job for
+  at most 60 s), renewal every ttl/3, and the loop tries to acquire every `min(interval, pollPeriod)` (`pollPeriod` default 15 s),
+  so a timer firing slightly before the database's `now()` costs one cheap failed acquire, never a skipped interval. All three are
+  constructor options so tests run in real time with short values: tests use an interval of at least 1 s, a TTL of at least 1 s,
+  renewal ≥ 250 ms and pollPeriod 100 ms, so every "before the interval" assertion has a window of ≥ 1 s under CPU contention; all
+  lease tests live in one file; tests never write `job_leases` directly.
 - Required tests on PGlite with two holder ids: B cannot acquire while A holds; A releases; B cannot acquire before the interval;
   B acquires after it; an expired (crashed) holder is taken over; a holder that lost its lease aborts.
 
@@ -154,7 +161,8 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   GitHub token refresh takes `SELECT ... FOR UPDATE` inside its transaction. PGlite serialises all queries, so tests cannot prove
   these races: the statement shapes are the control and are reviewed (accepted in decisions.md).
 - Clock rule: every timestamp written or compared for sessions, nonces, pre-sessions, OAuth states, quotas, rate limits, previews
-  and plans uses `ctx.clock.now()` passed as a bound parameter; only job leases and the IP-retention function use database `now()`.
+  and plans uses `ctx.clock.now()` passed as a bound parameter; only job leases, `audit_log.created_at` (a log timestamp) and the
+  IP-retention function use database `now()` (so retention tests insert old audit rows with explicit timestamps as the superuser).
 - Keys: tables use uuid or `GENERATED ALWAYS AS IDENTITY` keys; migrations also grant `USAGE, SELECT` on existing sequences and set
   `ALTER DEFAULT PRIVILEGES ... GRANT USAGE, SELECT ON SEQUENCES TO pine_api`.
 - Cleanup job (core): purge expired nonces, pre-sessions, sessions, OAuth states (via gateways only through its own job) and
