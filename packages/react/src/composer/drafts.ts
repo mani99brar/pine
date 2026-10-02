@@ -1,0 +1,125 @@
+'use client'
+
+import { useCallback, useMemo } from 'react'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useSession } from 'next-auth/react'
+import type { ClaimDraft } from '@pine/core'
+import type { DraftStore } from '@pine/data'
+import { usePine } from '../providers/context'
+import { pineKeys } from '../queries/keys'
+import { getBrowserStorage, removeKey } from '../internal/storage'
+import { isoNow } from '../internal/util'
+import { txStorageKey } from '../tx/machine'
+import { createDefaultDraft } from './defaults'
+
+export const LOCAL_DRAFT_OWNER = 'local'
+
+interface SessionUserLike {
+  login?: string | null
+  name?: string | null
+}
+
+/** Draft owner: the signed-in GitHub login, or "local" when signed out. */
+export function useDraftOwner(): string {
+  const session = useSession()
+  const user = session.data?.user as SessionUserLike | undefined
+  return user?.login ?? LOCAL_DRAFT_OWNER
+}
+
+/** Publish runs are keyed by draft id. */
+export function publishRunKey(draftId: string): string {
+  return `publish:${draftId}`
+}
+
+function sortDrafts(list: ClaimDraft[]): ClaimDraft[] {
+  return [...list].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+}
+
+export function upsertDraftInCache(qc: QueryClient, owner: string, draft: ClaimDraft): void {
+  qc.setQueryData<ClaimDraft[]>(pineKeys.drafts(owner), (prev) => {
+    if (!prev) return prev
+    const rest = prev.filter((d) => d.id !== draft.id)
+    return sortDrafts([draft, ...rest])
+  })
+}
+
+async function listDrafts(store: DraftStore, owner: string): Promise<ClaimDraft[]> {
+  const [mine, local] = await Promise.all([
+    store.list(owner),
+    owner !== LOCAL_DRAFT_OWNER ? store.list(LOCAL_DRAFT_OWNER) : Promise.resolve([] as ClaimDraft[]),
+  ])
+  const byId = new Map<string, ClaimDraft>()
+  for (const d of [...local, ...mine]) byId.set(d.id, d)
+  return sortDrafts([...byId.values()])
+}
+
+/**
+ * Drafts and in-progress publications for the current owner (signed-in login, plus drafts created
+ * while signed out on this device). Drafts with `publication` steps are recoverable publications.
+ */
+export function useDrafts(): {
+  drafts: ClaimDraft[]
+  create(partial?: Partial<ClaimDraft>): ClaimDraft
+  save(d: ClaimDraft): Promise<ClaimDraft>
+  remove(id: string): Promise<void>
+  isLoading: boolean
+  error: Error | null
+  refetch(): void
+} {
+  const { drafts: store, env } = usePine()
+  const owner = useDraftOwner()
+  const qc = useQueryClient()
+  const q = useQuery({
+    queryKey: pineKeys.drafts(owner),
+    queryFn: () => listDrafts(store, owner),
+    staleTime: 10_000,
+  })
+
+  const create = useCallback(
+    (partial?: Partial<ClaimDraft>) => {
+      const account = qc.getQueryData<{ preferences?: { defaultSpendingLimit?: string; defaultChainId?: number } } | null>(
+        pineKeys.account(),
+      )
+      const d = createDefaultDraft({
+        owner,
+        chainId: account?.preferences?.defaultChainId ?? env.defaultChainId,
+        spendingLimit: account?.preferences?.defaultSpendingLimit,
+        partial,
+      })
+      qc.setQueryData(pineKeys.draft(d.id), d)
+      upsertDraftInCache(qc, owner, d)
+      void store.save(d)
+      return d
+    },
+    [qc, owner, env.defaultChainId, store],
+  )
+
+  const save = useCallback(
+    async (d: ClaimDraft) => {
+      const next = { ...d, owner: d.owner === LOCAL_DRAFT_OWNER ? owner : d.owner, updatedAt: isoNow() }
+      qc.setQueryData(pineKeys.draft(next.id), next)
+      upsertDraftInCache(qc, owner, next)
+      return store.save(next)
+    },
+    [qc, owner, store],
+  )
+
+  const remove = useCallback(
+    async (id: string) => {
+      await store.remove(id)
+      removeKey(getBrowserStorage(), txStorageKey(publishRunKey(id)))
+      qc.removeQueries({ queryKey: pineKeys.draft(id) })
+      qc.setQueryData<ClaimDraft[]>(pineKeys.drafts(owner), (prev) => prev?.filter((d) => d.id !== id))
+    },
+    [qc, owner, store],
+  )
+
+  const refetch = useCallback(() => {
+    void q.refetch()
+  }, [q])
+
+  return useMemo(
+    () => ({ drafts: q.data ?? [], create, save, remove, isLoading: q.isLoading, error: q.error, refetch }),
+    [q.data, q.isLoading, q.error, create, save, remove, refetch],
+  )
+}

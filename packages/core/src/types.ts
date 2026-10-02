@@ -682,6 +682,11 @@ export type TxStepId =
   | 'add_liquidity_yes'
   | 'add_liquidity_no'
   | 'register_claim'
+  // additive (core): non-publication flows
+  | 'upload_evidence'
+  | 'submit_evidence'
+  | 'redeem_positions'
+  | 'approve_outcome_tokens'
 
 export type TxStepStatus = 'idle' | 'awaiting_signature' | 'pending' | 'confirmed' | 'failed' | 'skipped'
 
@@ -821,3 +826,19 @@ export interface AgentClaimBrief {
   disclaimers: string[]
   updatedAt: IsoDate
 }
+
+// ---------------------------------------------------------------------------
+// GitHub input parsing (additive, owned by core)
+// ---------------------------------------------------------------------------
+
+/**
+ * Parsed result of a pasted GitHub URL / shorthand.
+ * Structurally identical to `ParsedGitHubRef` in packages/data/src/types.ts (data may re-export this one).
+ * Additive: `short: true` is set when the SHA has fewer than 40 hex chars; short SHAs are accepted for
+ * lookup only and must be resolved to the full 40-hex SHA via GitHub before a claim can pin them.
+ */
+export type ParsedGitHubRef =
+  | { kind: 'repo'; owner: string; repo: string }
+  | { kind: 'pull'; owner: string; repo: string; number: number }
+  | { kind: 'commit'; owner: string; repo: string; sha: string; short?: boolean }
+  | { kind: 'pull_commit'; owner: string; repo: string; number: number; sha: string; short?: boolean }

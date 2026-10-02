@@ -110,6 +110,12 @@ export function createManifestStorage(env?: PineEnv): ManifestStorage
 export function createDraftStore(env?: PineEnv): DraftStore           // browser: localStorage; server: memory
 export function createAccountStore(env?: PineEnv): AccountStore
 export { MockDataProvider, RestDataProvider, EnvioDataProvider }
+// MockDataProvider also has demo write paths so demo publishing/evidence shows up everywhere (persisted to
+// localStorage 'pine:mock:*' in the browser, memory on the server):
+//   addClaim(detail: ClaimDetail): void; addEvidence(claimId: string, e: Evidence): void; recordActivity(a: ActivityItem): void
+//   updateClaim(id: string, patch: Partial<ClaimDetail>): void; reset(): void
+export const DEMO_WALLET_ADDRESS: Address        // the simulated wallet; fixtures give it positions, LP, history
+export const DEMO_GITHUB_USER: GitHubUser          // the demo sign-in identity; owns several fixture claims
 export { parseGitHubRef } // re-export from core
 // fixtures: import { fixtures } from '@pine/data/fixtures' → { claims: ClaimDetail[], repos, pulls, commits, users, accounts, activity }
 ```
@@ -168,6 +174,9 @@ export interface TxRunner { steps: TxRunnerStep[]; current?: TxRunnerStep; state
 export function useTxRunner(key: string, steps: TxStep[], opts?: { spendingLimit?: DecimalString; onConfirmed?(step): void }): TxRunner
 export function useSubmitEvidence(claimId: string): { submit(draft: EvidenceDraft): Promise<void>; runner: TxRunner }
 export function useRedeem(claimId: string): { runner: TxRunner; redeemable: DecimalString }
+
+// unified wallet (apps use this for every wallet button/state — works for demo wallet and real wagmi wallets)
+export function useWallet(): { address?: Address; chainId?: number; isConnected: boolean; isDemo: boolean; connect(): void /* opens RainbowKit modal or connects demo */; disconnect(): void; switchChain(id: number): Promise<void>; balance?: { amount: DecimalString; symbol: string } }
 
 // demo wallet controls (mock mode)
 export function useDemoWallet(): { enabled: boolean; address?: Address; connect(): void; disconnect(): void; failNext(stepId?: TxStepId): void; balance: DecimalString }

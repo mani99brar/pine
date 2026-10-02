@@ -9,7 +9,9 @@
     "./auth": "./src/auth.ts",
     "./agent": "./src/agent/index.ts",
     "./github": "./src/github.ts",
-    "./siwe": "./src/siwe.ts"
+    "./siwe": "./src/siwe.ts",
+    "./account": "./src/siwe.ts",
+    "./ipfs": "./src/ipfs.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
