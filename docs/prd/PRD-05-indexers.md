@@ -18,8 +18,9 @@ Dependencies are frozen in each `package.json`; do not add any. Neither lane edi
 ### 2.1 Layering
 1. `apply` layer: `applyEvents(tx, events: ChainEvent[])` — pure SQL translation of the reference semantics (every case of
    `MemoryReadModel.applyOne`, including ignore rules for untracked ids, first-wins for duplicates, reveal/commit-id linking,
-   arbitrator answers, reopen tracking, bounty, Kleros stages). Idempotent: every event row is keyed by `(chain_id, block_hash,
-   log_index)` and re-applying a range is a no-op.
+   arbitrator answers, reopen tracking, bounty, Kleros stages). Idempotent through a cursor-position guard: inside its
+   transaction it skips every event at or before the stored cursor position (block, logIndex), so re-applying a range is a no-op;
+   no per-event rows are persisted (a new `0002_` migration drops the candidate's `applied_events` table; never edit `0001`).
 2. `read model`: `createNativeReadModel(pool | pglite)` implementing every `ReadModel` method with SQL (stable cursors,
    `InvalidCursorError`, `limit` 1..100) and `status()` from the cursor table (`halted`, `finalizedBlock`, `headBlock`).
 3. `ingest`: the poller (RPC → decode → apply). It never writes except through `apply` and the cursor/halt tables.
@@ -36,29 +37,36 @@ int8 and counts explicitly.
 ### 2.3 Ingestion (finalized only; SEC-IDX-01/02/04/05/06)
 - Each cycle: read `finalized` block (number and hash) from both RPC providers; `target = min(numbers)`; both providers must
   report the same hash for `target`, else record a halt (`rpc_disagreement`) and stop advancing (alert via metrics and logs).
-- Fetch `[cursor + 1, min(target, cursor + 2000)]` in ONE pass: every log of the five exact addresses (ClaimRegistry,
-  EvidenceRegistry, Reality.eth, CTF, Kleros home proxy) whose topic0 is one of the topic0s listed in `chain-events.ts` (topic0
-  OR-list per address; no tracked-id filtering in the request). Decode strictly with viem `decodeEventLog` (`strict: true`),
-  validate with zod (a log that does not decode under its topic0 is an integrity error: halt, never skipped), merge-sort ALL
-  logs by (blockNumber, logIndex) and pass the whole ordered list to `applyEvents`, which ignores untracked ids by row lookup
-  exactly as the reference does. This keeps tracking correct whatever the order of ClaimCreated, LogReopenQuestion (whose new
-  id is in topic1 and tracked id in topic2) and later answers within one range. Measured on 2026-10-02 over 2000 recent blocks:
-  Reality 2 logs, Kleros proxy 0, CTF 1504 logs of all topics (only ConditionResolution is requested), so the volume is small.
-  Required poller test: a range containing ClaimCreated, then LogReopenQuestion, then an answer and a Kleros event on the
-  replacement id ends with the replacement tracked and both events applied (as `scenarioOracle` does through `applyEvents`).
+- Fetch `[cursor + 1, min(target, cursor + chunk)]` (chunk default 500) with a request PLAN filtered to what Pine tracks, so
+  third-party spam on untracked questions is never requested (anyone can emit cheap Reality/CTF logs):
+  1. ClaimRegistry, EvidenceRegistry and Kleros home-proxy logs of their known topic0s, unfiltered (only Pine and arbitration
+     activity, which is costly to spam).
+  2. The tracked-id set as of the range end: stored tracked questions/conditions + those of this range's ClaimCreated + reopen
+     replacements found with `LogReopenQuestion` filtered on topic2 (the reopened, already tracked id; the NEW id is topic1);
+     repeat the reopen query for newly found ids until nothing new appears (bounded; one extra round suffices in practice).
+  3. Reality logs of the needed topic0s filtered on topic1 ∈ tracked question ids, and CTF `ConditionResolution` filtered on
+     topic1 ∈ tracked condition ids, with OR-lists chunked to 100 ids per request.
+  Decode strictly with viem `decodeEventLog` (`strict: true`) and validate with zod (a log that does not decode under its topic0 is
+  an integrity error: halt). Merge ALL logs of the range, sort by (blockNumber, logIndex) and apply them in ONE `applyEvents` call
+  (never apply the registry part first: the cursor guard would then skip lower-logIndex Reality logs). Required poller tests: a
+  range with ClaimCreated, then LogReopenQuestion, then an answer and a Kleros event on the replacement id ends with the replacement
+  tracked and both events applied; spam answers on an untracked question are never requested.
+- Volume on TRACKED ids (e.g. zero-value bounty loops on a Pine question, up to ~5k logs per 17M-gas block) never halts or stalls:
+  only size-type failures split ("too many results", "range too large", response-size errors, timeouts, or a response above the
+  parser caps of 16 MB / 20,000 logs, which exceed one block's worst case); the range is halved down to ONE block. Other errors
+  (429, 5xx, network) retry the SAME request with capped backoff, and the cycle gives up at the first request still failing. The
+  request plan is shared: when either provider forces a split, the refined plan is executed on BOTH providers and the
+  cross-check compares the results of the same plan. Operations docs require providers returning ≥ 10,000 logs per response.
 - Verify every log's `blockHash` against the canonical header of its block (headers fetched only for blocks that contain logs,
   plus the range end; they also give each event its `blockTimestamp`); re-run the same single-pass query on the secondary provider
   for EVERY range processed (every range of at least one block, whether or not the primary returned logs) and require the identical
   full set of `(blockHash, logIndex, topics, data)`; any difference, including the primary returning nothing where the secondary
   returns logs, → halt (`log_disagreement`). A faulty primary therefore cannot hide an oracle answer. Required tests: the primary
   omits a tracked Reality answer (halt) and the secondary omits one (halt).
-- Range size: chunk length is configurable (default 500 blocks, not 2000: many providers cap `eth_getLogs` ranges or result
-  counts); a provider error saying the range or result is too large halves the chunk (down to 50) and retries; it never halts.
 - Validation scope: strict ABI decoding applies to every fetched log (a log the contract itself emitted cannot fail it, so a
-  failure is a provider fault → halt). Domain validation beyond the ABI types (zod) applies only to Pine registry events and to
-  events of tracked ids; events of untracked ids are dropped BEFORE any such validation, and for tracked external events the zod
-  schemas accept the full on-chain domain of each field (bigint for uint256, no casing or string-content rules on third-party
-  data). Anyone can emit Reality/CTF events, so no third-party event may be able to halt the indexer.
+  failure is a provider fault → halt). The zod schemas accept the full on-chain domain of each external field (bigint for uint256,
+  no casing or string-content rules on third-party data; Reality `ts` is the block timestamp and CTF bounds outcome slots to 256),
+  so no third-party event can halt the indexer through validation.
 - Logs are requested only for the exact configured addresses; a log with a known topic0 from any other address is ignored
   (SEC-IDX-05). Decoded values must lie in the domain the frozen `ChainEvent` types allow; the ClaimRegistry guarantees that domain
   for Pine events (e.g. `1 <= repositoryId <= 2^53 - 1`, enforced on-chain by the chain hardening run), so a violation is a
@@ -124,23 +132,8 @@ int8 and counts explicitly.
 
 ## 3a. indexers-002 review fixes (carried by indexers-003)
 indexer-native:
-- Log volume is attacker-controlled (anyone can emit cheap Reality/CTF logs, e.g. zero-value `fundAnswerBounty` loops; ~5k logs
-  of one address and topic0 fit in one 17M-gas block, ~3.5 MB of JSON), so volume must never halt or stall the indexer:
-  1. Only size-type failures split: "too many results"/"range too large"/response-size errors, timeouts, and a response above the
-     parser's caps. The range is halved down to ONE block. Every other error (429, 5xx, network) retries the SAME request with
-     capped backoff, and the cycle gives up at the first request that still fails after its retries (no split storm).
-  2. The parser's caps derive from the gas bound: response size 16 MB and 20,000 logs, comfortably above one block's worst case.
-  3. Bounded fallback when a single block still exceeds a provider's cap: fetch that block's ClaimRegistry, EvidenceRegistry and
-     Kleros-proxy logs unfiltered, compute the tracked-id set as of the end of that block (including ClaimCreated and reopens in
-     it), and fetch that block's Reality and CTF logs with topic filters on the tracked ids (OR-lists chunked to 100 ids per
-     request), on both providers. Untracked spam is then never requested.
-  Only integrity conflicts halt. Operations docs require providers that return at least 10,000 logs per response. Tests: a
-  log-dense range above the cap is fetched by splitting and applied; a provider that answers "too many results" above one block
-  still progresses; a single block above the provider cap progresses through the fallback; a 429 is retried without splitting.
-- Idempotency comes from a cursor-position guard: inside its transaction `applyEvents` skips every event at or before the stored
-  cursor position (block, logIndex), as `MemoryReadModel` refuses out-of-order events, so re-applying a range is a no-op even when
-  an event that was ignored on the first pass would now be tracked. No per-event rows are persisted (an `applied_events` table, if
-  the candidate has one, is dropped or limited to tracked state changes), so neither untracked nor tracked spam grows storage.
+- Log volume, idempotency and the request plan: see section 2.1 and 2.3 (tracked-id-filtered plan, size-type splitting to one
+  block with a plan shared by both providers, cursor-position guard, `applied_events` dropped by a `0002_` migration).
 - `decodeCursor` bounds key parts to the int8/int4 ranges in the zod schema (crafted cursors → `InvalidCursorError`, never a
   database error).
 - `main.ts`: every startup step, including `pool.connect()` and connection-string parsing, runs inside the try that logs through
@@ -151,8 +144,9 @@ indexer-native:
   contract-emitted logs (Reality `ts` is the block timestamp, CTF bounds outcome slots to 256), so they cannot be used to halt.
 - Required additional tests: a PRIMARY-side stored-cursor hash mismatch halts; the range-end header of a logless chunk is
   cross-checked; a secondary differing only in topics or only in blockHash halts; headers are fetched only for blocks with logs plus
-  the range end (assert the recorded calls); `main.ts` wiring (process advisory lock refuses a second writer, DB errors redacted);
-  the migration runner's advisory lock; the node-postgres executor rolls back and releases the client when the callback throws (stub
+  the range end (assert the recorded calls); `main.ts` wiring (DB errors redacted; the process advisory lock and the migration
+  runner's advisory lock are tested with a stub executor that records the lock statements and reports "not acquired", because
+  PGlite has one session and cannot show lock contention; real-Postgres behaviour is covered by the assembly e2e); the node-postgres executor rolls back and releases the client when the callback throws (stub
   Pool/PoolClient).
 indexer-envio and read-model-envio:
 - read-model-envio rejects a `graphqlUrl` with userinfo and refuses http:// when an admin secret is set unless the explicit option

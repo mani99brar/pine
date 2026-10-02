@@ -10,18 +10,19 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
 - Each indexer owns its own storage and migrations; nothing imports `@pine/api`.
 - Native roles: `pine_indexer` (DML on `pine_index` only, no DDL) and `pine_readonly` (SELECT only, the API's read-model login),
   created idempotently by the indexer migrations and proven with `SET ROLE` on PGlite.
-- Native poller: one pass per range over the five exact addresses and the known topic0s (no tracked-id request filtering),
-  merge-sorted by (block, logIndex), `applyEvents` ignores untracked ids; the secondary re-runs the same query for every non-empty
-  range and any difference halts. Headers only for blocks with logs plus the range end.
+- Native poller (superseded by the tracked-id-filtered plan below): logs merge-sorted by (block, logIndex) in one `applyEvents`
+  call; the secondary re-runs the same plan for every processed range and any difference halts. Headers only for blocks with logs
+  plus the range end.
 - `viem` is a direct dependency of `@pine/indexer-envio` (operator change for keccak).
 - Envio read-model fake serves the committed entity snapshots produced by the real handlers (sorted, decimal bigints, event-hash
   bound, rewritten only with UPDATE_SNAPSHOTS=1).
 - The secondary cross-check runs for every processed range, including ranges where the primary returned no logs.
 - Chunk default 500 blocks, halved on "range too large" errors, never a halt.
 - Untracked third-party events: the zod domain checks run before tracking is decided but cannot fail for contract-emitted logs;
-  no per-event rows are persisted (idempotency = cursor-position guard). Log volume never halts or stalls the native indexer: only
-  size-type failures split (down to one block), other errors retry the same request, parser caps derive from the gas bound, and a
-  single oversized block uses the tracked-id-filtered fallback. Further indexers-002 review fixes in PRD-05 section 3a.
+  no per-event rows are persisted (idempotency = cursor-position guard; `applied_events` dropped by `0002_`). The native poller
+  requests Reality/CTF logs filtered to tracked ids (reopens via topic2), so untracked spam is never fetched; tracked-id volume only
+  splits on size-type failures (down to one block) with one plan shared by both providers; other errors retry the same request.
+  Further indexers-002 review fixes in PRD-05 section 3a.
 - Envio schema uses BigInt for every id/block/amount/timestamp and avoids Postgres arrays; a test pins config.yaml event
   signatures to the shared ABIs.
 - Decoded values outside the frozen `ChainEvent` domain halt (the ClaimRegistry enforces `repositoryId <= 2^53 - 1`).
