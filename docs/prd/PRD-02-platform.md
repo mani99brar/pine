@@ -28,7 +28,8 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - Production refinements: https origins; `apiOrigin === publicOrigin`; `userContentOrigin` has a different registrable domain
   (compare the last two DNS labels at least; reject subdomains of publicOrigin); `chainId === 100`; `allowDraftPolicies === false`;
   `enabledPolicyFamilies` excludes `SC-001`; the two RPC URLs differ; token-encryption keys are 32 bytes (base64) with unique ids;
-  compliance country header configured; sanctions mode `static`.
+  compliance country header configured; sanctions mode `static`; both pin targets (Kubo RPC URL; Pinning Service endpoint and
+  token) configured.
 - Sanctions screening (v1): `PINE_SANCTIONS_MODE` is `off` or `static` (default `off` outside production; production refuses
   anything but `static`). `static` requires `PINE_SANCTIONS_DENYLIST_PATH`: a UTF-8 JSON file holding an array of `0x` + 40
   lowercase-hex addresses (≤ 100000 entries, duplicates allowed); it is read once at startup and any unreadable or invalid file is
@@ -283,19 +284,28 @@ mismatch) before returning;
 (mismatch → throw an integrity error); every error message redacted (RPC URLs embed keys).
 
 ## 3a. platform-005 review fixes (carried by platform-006)
-- Jobs: track the in-flight renewal promise and await it (ignoring its error) before `release`, so a late renewal can never
-  overwrite the release on another pool connection.
+- Jobs: the release statement also marks the holder released (`SET expires_at = started_at + $interval, holder = holder ||
+  ':released' WHERE name = $1 AND holder = $2`), so a late or hung renewal (`WHERE holder = $2`) updates zero rows and can never
+  overwrite the release on another pool connection; acquire ignores the holder. Before releasing, the runner clears the renewal
+  timer and awaits an in-flight renewal for at most 2 s (a courtesy; the guarantee is the statement). The runner takes its lease
+  store as a constructor dependency, so a test may wrap it to make a renewal return zero rows without any other holder or direct
+  table write.
 - Moderation admin routes write the state change and its audit entry in ONE transaction (`recordWith(tx)`); a failing audit insert
   rolls the change back.
 - Pin outbox: an item stays selectable while any CONFIGURED target (Kubo, Pinning Service) has not confirmed it (per-target done
-  flags), so content stored before a provider was configured still reaches it; production config requires both targets.
+  flags), so content stored before a provider was configured still reaches it. Production config (core `loadConfig`, section 2.1)
+  refuses to start unless BOTH a Kubo RPC URL and a Pinning Service API endpoint with token are configured.
 - Timing tests assert ranges with generous windows (≥ 1 s slack), never exact counts after a fixed sleep.
 - Required additional tests: a successful renewal moves the local deadline (a long run with renewals is NOT aborted and logs no
   "not renewed in time"); the runner does not re-acquire before an aborted run settles (a renewal returning zero rows while no other
   holder takes the lease, with the aborted run still pending); every gateway job (pin outbox, token re-encryption, token refresh,
-  OAuth-state purge) stops when its signal is aborted before or during a batch; `src/migrate.ts` refuses a missing or non-postgres
-  URL with a redacted fatal line and exit code 1 and prints applied ids on success (run it as a child process or through an
-  exported `main(env, io)`); multipart limits — a file above `maxUploadBytes`, two files and too many fields are refused with 413/400.
+  OAuth-state purge) stops when its signal is aborted before or during a batch; `src/migrate.ts` exports `main(env, io)` (io: an
+  executor factory, stdout/stderr writers, exit): the success path runs on PGlite through an injected executor and prints the applied
+  ids; the refusal paths (missing or non-postgres URL → one redacted fatal line, exit 1) are also exercised as a child process;
+  multipart limits — core's own test app registers a test-only route that consumes the file (`toBuffer()`), and a file above
+  `maxUploadBytes`, two files and too many fields are refused (413/400); module upload routes must consume with the size limit
+  enforced (markets lane). Coverage-matrix entries for security behaviour name a test that fails when the behaviour is removed
+  (spot-check with a mutation).
 
 ## 4. Required tests (each lane, vitest on PGlite; name the SEC id in negative tests)
 - core: config refusal cases per production rule; CSRF (missing/wrong Origin, cross-site fetch metadata, missing header, wrong
