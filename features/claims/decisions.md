@@ -43,7 +43,11 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
   stays "round up to the minute, then check bounds" and the refusal message states the maximum minus 60 s.
 - Claim index `repository_id` is unbounded `numeric` (an on-chain uint64 never breaks discovery); the ClaimRegistry now also caps
   it at 2^53 - 1.
-- Tests serialize PGlite-heavy files with a module-local lock (each PGlite instance takes ~400 MB on this host).
+- Tests serialize PGlite-heavy files across vitest's fork processes with a cross-process lock: an atomic `fs.mkdir` lock
+  directory under `os.tmpdir()` holding the owner pid, taken at import before the heavy imports, released in `afterAll`, stale
+  owners (dead pid) taken over (each PGlite instance takes ~400 MB on this host). Verified by the operator on 2026-10-02: commit
+  `6e46a26` on this base passes the exact gate `pnpm --filter @pine/api exec vitest run src/modules/claims` — 10 files, 77 tests,
+  61 s, peak RSS 1.4 GB — and the bracket-title change breaks no claims test.
 - "Public routes never read cookies" is proven by the platform; this module proves its public handlers ignore sessions (identical
   responses with and without `x-test-session` and a `Cookie` header).
 
