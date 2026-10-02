@@ -80,6 +80,26 @@ export const GNOSIS_EXTERNAL: Omit<DeploymentManifest, "pine" | "version"> = {
   },
 };
 
+/**
+ * The single way to build a manifest: the verified Gnosis constants overlaid with Pine's own deployment. Every component
+ * (API plan builders, well-known document, clients) must use this so deploymentHash() agrees everywhere. Only chain 100
+ * is supported (an anvil fork of Gnosis keeps chain id 100).
+ */
+export function buildDeploymentManifest(pine: { claimRegistry: Address; evidenceRegistry: Address; deploymentBlock: number | bigint }, chainId = 100): DeploymentManifest {
+  if (chainId !== GNOSIS_EXTERNAL.chainId) throw new Error(`Unsupported chain id ${chainId}; only Gnosis (100) has a verified manifest`);
+  const block = Number(pine.deploymentBlock);
+  if (!Number.isSafeInteger(block) || block < 0) throw new Error("deploymentBlock must be a non-negative safe integer");
+  const address = (value: string): Address => {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(value)) throw new Error("invalid address in deployment");
+    return value.toLowerCase() as Address;
+  };
+  return {
+    version: 1,
+    ...structuredClone(GNOSIS_EXTERNAL),
+    pine: { claimRegistry: address(pine.claimRegistry), evidenceRegistry: address(pine.evidenceRegistry), deploymentBlock: block },
+  };
+}
+
 /** keccak256 of the RFC 8785 canonical JSON of the manifest (bigint-free by construction). Plans carry it. */
 export function deploymentHash(manifest: DeploymentManifest): Hex32 {
   return keccak256(toBytes(canonicalJson(manifest as unknown as Parameters<typeof canonicalJson>[0])));

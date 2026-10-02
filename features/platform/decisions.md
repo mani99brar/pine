@@ -12,6 +12,16 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - Chain gateway: two RPC providers; `finalizedBlock()` requires both to agree on the hash at the finalized number.
 - Runtime uses `node --import tsx` (pinned); migrations run only via `src/migrate.ts` with a separate migrator URL; the API verifies migrations at startup and refuses to start otherwise.
 
+- Jobs: cross-process exclusion through a core-internal `JobLock` seam (pg advisory xact lock on a dedicated connection in
+  production, in-memory fake in tests); real-Postgres verification of that path is a launch gate.
+- Concurrency-sensitive writes are single atomic SQL statements (quota consume, nonce consume, rate-limit increment).
+- The user-content server has no in-app per-IP rate limit; the edge proxy/CDN provides it (documented in the README).
+- Accepted deviations from docs/security/requirements.md (reviewers: these are decisions, not defects): admin sessions share the
+  normal idle/absolute expiry but every destructive admin action needs a wallet signature younger than 300 s (STEP_UP_REQUIRED is
+  401 as in the frozen contract); SIWE nonces are bound to the pre-session cookie, not to an IP hash; secrets are plain strings
+  registered with the redactor and kept out of AppConfig instead of a `Secret` wrapper type; per-IP limits come from the rate limiter
+  and `QuotaGateway` stays per-user; sessions rotate on login and GitHub link and are deleted on logout and unlink.
+
 ## Assumptions
 
 - The API is served same-origin with the web app under `/api` in production (`apiOrigin === publicOrigin`).

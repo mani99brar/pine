@@ -66,6 +66,13 @@ export class MemoryReadModel implements ReadModel {
   }
 
   /** Advances the indexed cursor without events (an indexer that scanned empty blocks). */
+  private halted = false;
+
+  /** Test switch: simulate an indexer that stopped on an integrity failure (status().halted). */
+  setHalted(halted: boolean): void {
+    this.halted = halted;
+  }
+
   markIndexed(block: bigint, timestamp: number, head: bigint | null = null, finalized: bigint | null = null): void {
     if (block < this.indexed.block) throw new OutOfOrderEventError("Indexed block cannot move backwards");
     this.indexed = { block, timestamp, head, finalized };
@@ -334,7 +341,7 @@ export class MemoryReadModel implements ReadModel {
       indexedBlockTimestamp: this.indexed.timestamp,
       headBlock: this.indexed.head,
       finalizedBlock: this.indexed.finalized,
-      halted: false,
+      halted: this.halted,
     };
   }
 

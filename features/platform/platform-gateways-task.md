@@ -9,6 +9,8 @@ Replace the stub `packages/api/src/platform/gateways/index.ts` with `createGatew
 - Frozen contracts: `packages/api/src/contracts/app.ts` (`GitHubGateway`, `CommitMembership`, `ContentStore`, `ChainGateway`, `ModerationGateway`), `platform.ts` (`Gateways`, `GitHubAuthFlow`, `ContentServer`, `PlatformSecrets`, `GatewayDependencies`), `@pine/shared/canonical` (`identify`, `RAW_CID_MAX_BYTES`, `rawCidFromSha256`).
 - Security requirements: `docs/security/requirements.md` sections 1 (SEC-GH) and 5 (SEC-EVID); GitHub behaviour notes in section 0 (fork-network commits, App token scope).
 - External HTTP (GitHub, IPFS gateways, Kubo, pinning service, RPC) must be injectable (a `fetch`-like dependency or viem transport) so tests use recorded fixtures and never touch the network.
+- The content server has no in-app per-IP rate limit (decided: edge proxy); `listPublicRepos` refreshes the login via `GET /user` first.
+- Build in this order with separate test files per area: crypto/token store → GitHub auth flow → GitHub gateway and membership → content store/retrieve/pin outbox → content server → chain gateway → createGateways.
 
 ## Constraints
 

@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { formatUtc, renderQuestion, validateTitle, QuestionInputError, type QuestionInput } from "./question.js";
-import { QUESTION_VECTORS, UTC_FORMAT_VECTORS } from "./testing/vectors.js";
+import { formatUtc, renderQuestion, tokenNames, validateTitle, QuestionInputError, type QuestionInput } from "./question.js";
+import { QUESTION_VECTORS, TOKEN_NAME_VECTORS, UTC_FORMAT_VECTORS } from "./testing/vectors.js";
 
 describe("question renderer", () => {
+  it("matches the frozen token-name vectors", () => {
+    for (const vector of TOKEN_NAME_VECTORS) expect(tokenNames(vector.claimDocumentSha256)).toEqual(vector.tokenNames);
+  });
   it("matches the frozen date vectors", () => {
     for (const [seconds, text] of UTC_FORMAT_VECTORS) expect(formatUtc(seconds)).toBe(text);
   });

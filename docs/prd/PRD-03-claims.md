@@ -14,11 +14,15 @@ read model, canonical encoding), `packages/api/src/contracts/*`, `policies/catal
 (`createTestContext`, `buildTestApp`, fakes, `MemoryReadModel`) and must not need the platform implementation.
 
 ## 2. Policy catalog
-- At module registration, load `policies/catalog/catalog.json` (path resolved from the repository root relative to this package)
+- The module is built by `createClaimsModule({ catalogDir })`; `claimsModule` (imported by `src/modules.ts`) is
+  `createClaimsModule({ catalogDir: <repo>/policies/catalog })` resolved from this file's location. Tests pass a temporary copy of
+  the catalog (never edit `policies/catalog`).
+- At module registration, load `<catalogDir>/catalog.json`
   and every referenced file; refuse to start (throw) if a file's SHA-256 differs from the catalog, a file exceeds 262144 bytes, ids
   or versions are malformed, or a version appears twice.
 - Publishable iff: status `approved`, or status `draft` and `config.claims.allowDraftPolicies`; and the id is in
-  `config.claims.enabledPolicyFamilies`; and the id is not `SC-001` (always `FEATURE_DISABLED`, any status).
+  `config.claims.enabledPolicyFamilies`; and the id is not `SC-001` (always `FEATURE_DISABLED`, any status). The gate is applied at
+  draft create and update, at preview and at publication (SEC-CLAIM-06).
 - Policy-parameter schemas (zod, per id@version, in this module): BOT-001 requires `sourceRequirement` (text ≤ 1000),
   `startingStates` (text ≤ 4000) and `simulatedAdapters` (array ≤ 20 of text ≤ 100); FUNC-001 accepts an empty object or the
   optional `formatDefinition` (text ≤ 4000). Unknown keys are refused. These schemas never change for a published version.
@@ -44,7 +48,8 @@ Another user's draft id returns NOT_FOUND (no existence oracle). Drafts are muta
 `POST /api/v1/drafts/:id/preview` (session):
 1. Policy publishable (2); GitHub: `getRepo` (public), `verifyCommitMembership` for the target commit (and for `baseCommit` when
    present, against the same ref), repository identity = numeric id.
-2. Deadlines: `evidenceDeadline = roundUpToMinute(now + window)` with `config.claims.min/max` bounds; `revealDeadline =
+2. Deadlines: `evidenceDeadline = roundUpToMinute(now + window)`; after rounding, `evidenceDeadline − now` must lie within
+   `[max(3 days, config.claims.minEvidenceWindowSeconds), min(30 days, config.claims.maxEvidenceWindowSeconds)]`; `revealDeadline =
    evidenceDeadline + config.claims.revealWindowSeconds`; min bond within API bounds (1–100 xDAI, default from config).
 3. Build the `ClaimDocument` (`@pine/shared/claim-document`): random 32-byte `nonce`, `creator = session.wallet`, addresses from
    `config` (registry, evidence registry, Seer factory, collateral, realitio, arbitrator, timeout), `openingTime = revealDeadline`,
@@ -58,21 +63,31 @@ Another user's draft id returns NOT_FOUND (no existence oracle). Drafts are muta
    chain's current gas price via `ctx.chain.publicClient.getGasPrice`) and state that funding is separate; disclosures are the fixed
    texts of policy C7 (No is not certification, price is not a probability, liquidity is not a bounty, invalid is not a refund,
    deadlines are not trading cutoffs) plus the min-bond and liveness notes of ADR D7.
+6. Token names come from `tokenNames()` and the deployment manifest from `buildDeploymentManifest(config.contracts)`
+   (`@pine/shared`); `CreateClaimParams.commit` is the `bytes20` `0x${commit}`. The preview records the draft's `updatedAt`.
 
 ## 6. Publication (transaction plan, crash-safe state machine; SEC-TX-01..11)
-- `POST /api/v1/publications {previewId}` (session; `compliance.assertAllowed(publish_claim)`; `publications_per_day`; read model
-  not stale/halted else NOT_READY): idempotent per `(user, documentSha256)` — a retry returns the same publication and plan.
-  Store the document in `contentStore.put` (must succeed before any plan is returned), then build the plan with
-  `buildStep(manifest, { allowlistId: "claimRegistry.createClaim", args: [params] })` and `newPlan`, and run `verifyPlan` on it
-  before returning it (a builder bug must fail closed). Plan expiry: `evidenceDeadline − 1 day (on-chain minimum window) − 15 min`;
-  after expiry the publication becomes `expired` and a new preview is required. If `marketOf(creator, digest)` (eth_call at the
-  latest block) is already nonzero, the publication is `confirmed` with that market and no plan is returned.
-- States: `planned → submitted → confirmed | failed | expired`. `POST /api/v1/publications/:id/submitted {txHash}` records the hash
-  (idempotent; same hash only). `GET /api/v1/publications/:id` returns state, plan, market when confirmed.
-- Job `claims.reconcile-publications` (every 30 s): for `submitted`: fetch the receipt; `success` with a `ClaimCreated` log emitted by
-  the configured registry whose creator and digest match → `confirmed` (market); `reverted` → `failed` with a redacted reason;
-  unknown after the plan expiry → `expired`. For `planned` past expiry → `expired`. Transitions are compare-and-set updates
-  (`WHERE state = <expected>`), so concurrent jobs or retries never double-apply. Every transition is audited.
+- `POST /api/v1/publications {previewId, documentSha256}` (session; `compliance.assertAllowed(publish_claim)`; read model not
+  stale/halted else NOT_READY): `409 CONFLICT` when the digest differs from the preview's or the draft was modified after the
+  preview. Idempotent per `(user, documentSha256)`: look up the existing publication first; consume `publications_per_day` only when
+  creating a new one; on every request (new or retry) re-check the chain (`marketOf(creator, digest)` at the latest block and the read
+  model) and, if a market exists, return it as `confirmed`/`mined` without any plan. Store the document with `contentStore.put`
+  (must succeed before any plan is returned), build the plan with `buildStep(buildDeploymentManifest(config.contracts), {
+  allowlistId: "claimRegistry.createClaim", args: [params] })` and `newPlan`, and run `verifyPlan` before returning it.
+- Expiry: a plan is offered only until `min(evidenceDeadline − 1 day − 15 min, previewCreatedAt + 24 h)` (the on-chain minimum
+  window would otherwise make createClaim revert, and a stale preview must not go live with a much shorter window).
+- States: `planned → submitted → mined → confirmed`, plus `failed` and `expired`. `POST /api/v1/publications/:id/submitted {txHash}`
+  records a hint (idempotent; additional hashes from speed-up/replacement are accepted and kept). `GET /api/v1/publications/:id`.
+- Job `claims.reconcile-publications` (every 30 s), compare-and-set transitions only:
+  1. For every non-final publication, look up the claim by `(creator, documentSha256)` through `readModel.listClaims` (the native
+     read model is finalized-only). If found, fetch the receipt of its indexed `createdTxHash` and confirm when the receipt has a
+     `ClaimCreated` log from the configured registry with the same creator and digest → `confirmed` (market). This covers sped-up or
+     replaced transactions, double sends and crashes before `/submitted`.
+  2. Otherwise, for recorded hashes: a successful receipt with the matching log → `mined` (fast feedback; still not final); a
+     reverted receipt → keep looking (another hash or an unreported transaction may still succeed) and record the redacted reason.
+  3. Only when the chain's latest block timestamp has passed `evidenceDeadline − 1 day` (createClaim can no longer succeed) and
+     step 1 found nothing: → `expired` if no recorded hash reverted, else `failed`.
+- Every transition is audited.
 
 ## 7. Integrity of on-chain claims (SEC-CLAIM-03..08, SEC-IDX-08)
 Job `claims.verify-integrity` (every 60 s) processes claims from the read model that have no final integrity record:
@@ -81,6 +96,13 @@ require `document.creator == claim.creator`, repository id, commit, policy sha25
 digest, any status), deadlines, min bond, evidence registry, claim registry, title, `marketName == renderQuestion(...)`. Record
 `verified` or `mismatch` (field list) or `document_unavailable` (retry with backoff for 7 days, then final). Only `verified` claims
 appear in listings and agent feeds; detail endpoints show every claim with its integrity status.
+
+## 7a. Listing index
+A table owned by this module (`claims_index`: market, integrity status, creator, claim digest, repository id, policy id, deadlines,
+created block and log index, moderation snapshot) is written by `claims.verify-integrity` and is the only source for public
+listings, agent feeds and the integrity backlog, with keyset cursors over (created block, log index). The time-based phases
+(`evidence_open`, `reveal_open`, `closed`) are computed from deadlines in SQL; oracle details are fetched per item of a page from the
+read model (bounded fan-out: at most `limit` items).
 
 ## 8. Public claim and agent endpoints (`config.pine.public`; no cookies; ETag; responses include indexer staleness)
 - `GET /api/v1/claims?phase&repositoryId&creator&cursor&limit` and `GET /api/v1/claims/:market`: platform facts from the read model,
@@ -95,7 +117,8 @@ appear in listings and agent feeds; detail endpoints show every claim with its i
   user-content URLs `userContentOrigin/c/<sha256>`), `userSupplied` (document fields) with `contentTrust: "untrusted"`,
   evidence submission instructions (registry address, `computeCommitment` formula, salt rules, manifest schema id, size limits),
   and the warning "Reproduce only in an isolated sandbox without secrets, keys or network access to production systems."
-- `GET /api/v1/schemas/claim-document.json` and `/evidence-manifest.json` (from the frozen zod schemas via `z.toJSONSchema`).
+- `GET /api/v1/schemas/claim-document.json` and `/evidence-manifest.json` (from the frozen zod schemas via
+  `z.toJSONSchema(schema, { io: "input" })`; the frozen schemas contain transforms, so never use them as Fastify response schemas).
 
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;
@@ -105,6 +128,10 @@ refusals, NOT_READY when stale; content stored before a plan is returned; reconc
 creator/registry (not confirmed), reverted tx, expiry, and concurrent reconcile runs; integrity: verified, mismatch per field,
 document unavailable, a copycat market by another creator flagged; listings exclude hidden/unverified; agent endpoints are public,
 never read cookies and label untrusted content; well-known document contents; schema endpoints validate the fixtures.
+Also: SC-001 refused at draft creation; 409 on a digest mismatch and on a draft edited after preview; a retried publication after the
+claim exists returns the market and no plan; reconciliation confirms through the read model when the user reported a different
+(replaced) hash, reported nothing (crash before `/submitted`), or reported a reverted duplicate; `expired` only after chain time passes
+evidenceDeadline − 1 day; quota consumed only for new publications; preview-to-publish 24 h cap; NOT_READY when the read model is halted.
 
 ## 10. Checks
 `pnpm --filter @pine/api typecheck`, `pnpm exec eslint packages/api/src` (typecheck), `node scripts/check-forbidden.mjs` (unit),

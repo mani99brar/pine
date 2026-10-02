@@ -50,6 +50,13 @@ function hex32(value: Hex32, name: string): string {
   return value.toLowerCase();
 }
 
+/** Seer outcome token names composed by ClaimRegistry: ["PY_" + first 4 digest bytes as 8 lowercase hex, "PN_" + same]. */
+export function tokenNames(claimDocumentSha256: Hex32): readonly [string, string] {
+  const digest = hex32(claimDocumentSha256, "claim document sha256");
+  const prefix = digest.slice(2, 10);
+  return [`PY_${prefix}`, `PN_${prefix}`] as const;
+}
+
 export function renderQuestion(input: QuestionInput): string {
   validateTitle(input.title);
   if (!/^0x[0-9a-fA-F]{40}$/.test(input.evidenceRegistry)) throw new QuestionInputError("evidence registry must be an address");

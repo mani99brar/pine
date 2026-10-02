@@ -9,6 +9,8 @@ Replace the stub `packages/api/src/modules/claims/index.ts` with the claims `Rou
 - Frozen building blocks (use, do not re-implement): `@pine/shared/claim-document` (`claimDocumentSchema`, `encodeClaimDocument`, `parseClaimDocumentBytes`, `safeText`), `@pine/shared/question` (`renderQuestion`, `validateTitle`), `@pine/shared/tx-plan` (`buildStep`, `newPlan`, `verifyPlan`), `@pine/shared/deployment` (manifest types; build the manifest from `ctx.config`), `@pine/shared/read-model` (`ReadModel`, `deriveOracleStatus`), `@pine/shared/canonical`, `@pine/shared/testing/fixtures` (`exampleClaimDocument`).
 - API contracts and harness: `packages/api/src/contracts/*.ts` (RouteModule, RouteSecurityConfig, AppContext gateways, ApiError codes, `createTestContext`, `buildTestApp`, `insertTestUser`, `FakeGitHubGateway`, `MemoryContentStore`, `FakeCompliance`, `FakeQuotas`, `MemoryReadModel`, scripted chain).
 - Policy texts and catalog: `policies/catalog/catalog.json` and the files it lists. Requirements: `docs/security/requirements.md` sections 3 (SEC-TX), 4 (SEC-CLAIM), 6 (SEC-AGENT), 8 (SEC-IDX-08).
+- `features/claims/decisions.md` settles reconciliation, expiry, window bounds, SC-001 gating, the listing index, the module factory and the helper functions to use; `MemoryReadModel` has `markIndexed(...)` (call it relative to the FakeClock) and `setHalted(true)` for NOT_READY tests.
+- Build in this order with separate test files per area so a failure points at one area: catalog → drafts → preview → publication → reconciliation → integrity and index → public listings → agent endpoints and schemas.
 
 ## Constraints
 

@@ -99,3 +99,13 @@ describe("verifyPlan", () => {
   it("rejects a pull without a preceding approval", () =>
     rejects((p) => { p.steps = [p.steps[0]!, p.steps[2]!, p.steps[3]!].map((s) => ({ ...s, dependsOn: s.dependsOn.filter((d) => d !== "approve-yes") })); }, /without a preceding exact approval/));
 });
+
+describe("buildDeploymentManifest", () => {
+  it("overlays Pine addresses on the verified Gnosis constants and has a stable hash", async () => {
+    const { buildDeploymentManifest, deploymentHash } = await import("./deployment.js");
+    const built = buildDeploymentManifest({ claimRegistry: "0x00000000000000000000000000000000000C1A10", evidenceRegistry: "0x00000000000000000000000000000000000e01de", deploymentBlock: 42_000_000n });
+    expect(built).toEqual(manifest);
+    expect(deploymentHash(built)).toBe(deploymentHash(manifest));
+    expect(() => buildDeploymentManifest({ claimRegistry: manifest.pine.claimRegistry, evidenceRegistry: manifest.pine.evidenceRegistry, deploymentBlock: 1 }, 1)).toThrow(/Unsupported chain/);
+  });
+});

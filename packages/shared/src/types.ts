@@ -21,18 +21,12 @@ export const hex32Schema = z
 
 /**
  * Git commit id: full 40-hex SHA-1, lowercase. GitHub has no SHA-256 repositories; accepting 64-hex ids would only
- * widen the input space (SEC-GH-15). On-chain the 20 bytes are left-aligned in a bytes32 (see toCommitBytes32).
+ * widen the input space (SEC-GH-15). On-chain (ClaimRegistry) it is a `bytes20`: pass `0x${commit}`.
  */
 export const gitObjectIdSchema = z
   .string()
   .regex(/^[0-9a-fA-F]{40}$/, "must be a full 40-hex git commit id")
   .transform((value) => value.toLowerCase());
-
-/** bytes32 encoding of a 40-hex commit id used by ClaimRegistry: the 20 bytes left-aligned, zero-padded on the right. */
-export function toCommitBytes32(sha: string): Hex32 {
-  if (!/^[0-9a-fA-F]{40}$/.test(sha)) throw new Error("commit id must be 40 hex characters");
-  return `0x${sha.toLowerCase()}${"0".repeat(24)}` as Hex32;
-}
 
 /** Unsigned integer amount in base units, as a decimal string at API edges. */
 export const uintStringSchema = z

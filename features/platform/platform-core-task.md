@@ -9,6 +9,8 @@ Implement the API platform core described in `docs/prd/PRD-02-platform.md` secti
 - Frozen contracts you implement or consume: `packages/api/src/contracts/app.ts` (AppContext, SessionInfo, RouteModule, RouteSecurityConfig, JobDefinition, gateways interfaces), `platform.ts` (PlatformSecrets, Gateways, GitHubAuthFlow, GatewayFactory, ReadModelFactory), `config.ts`, `errors.ts` (`toErrorResponse`), `redact.ts`, `migrations.ts` (`verifyMigrations`, `runMigrations`), `testing.ts` (harness and fakes, including the step-up semantics your `requireAdmin` must match).
 - Security requirements: `docs/security/requirements.md` sections 2 (SEC-AUTH), 9 (SEC-OPS) and 10 (SEC-LEGAL); web rules in `CLAUDE.md`.
 - `src/main.ts` must import `createGateways` from `./platform/gateways/index.js` and `createReadModel` from `./readmodel.js` (both stubs owned by other lanes) and typecheck against them.
+- PRD-02 sections 2.5 and 2.5a settle the jobs-runner lock seam, atomic statements, cleanup, audit IP retention, session rotation and CSRF details; `features/platform/decisions.md` lists the accepted deviations from the security requirements.
+- Build in this order with separate test files per area so a failure points at one area: config → buildApp/CSRF/errors → SIWE/sessions → quotas/rate limits/audit/moderation/compliance → jobs/cleanup → main/migrate → README.
 
 ## Constraints
 

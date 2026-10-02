@@ -84,9 +84,29 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - `clock` (system clock), `redact`, `db` (drizzle over `pg` Pool, statement timeout 15 s).
 
 ### 2.5 Jobs runner
-Runs `[...gateways.jobs, ...modules.flatMap(m => m.jobs ?? [])]`: one loop per job, never overlapping itself; each execution runs
-inside a transaction on a dedicated connection holding `pg_try_advisory_xact_lock(hashtext(job name))` (skip when not acquired);
-`AbortSignal` on shutdown; errors logged redacted, counted, retried next interval.
+Runs `[...gateways.jobs, ...modules.flatMap(m => m.jobs ?? [])]`: one loop per job, never overlapping itself; `AbortSignal` on
+shutdown; errors logged redacted, counted, retried next interval. Cross-process exclusion goes through an injected
+`JobLock { tryRun(name, fn): Promise<boolean> }` seam (core-internal): the production implementation takes a dedicated
+`pg` pool connection, `BEGIN; SELECT pg_try_advisory_xact_lock(hashtext($1))`, holds it across `fn` (which uses `ctx.db`, i.e.
+other connections), then `COMMIT`/`ROLLBACK` and releases on finish or abort; the test implementation is an in-memory fake that can
+simulate a foreign holder. PGlite is a single backend (advisory locks are re-entrant and `query`/`transaction` share one mutex), so
+the real cross-process path cannot be proven in the lane's checks: it is a launch-gate test against real Postgres (ADR-0001 D15).
+
+### 2.5a Concurrency-safe statements and housekeeping
+- Every concurrency-sensitive operation is ONE atomic SQL statement so PGlite's serialisation cannot hide a race: quota consume
+  (`INSERT ... ON CONFLICT DO UPDATE ... WHERE used + $n <= limit RETURNING`), nonce consume (`DELETE ... RETURNING`), rate-limit
+  increment (`INSERT ... ON CONFLICT DO UPDATE SET count = count + 1 RETURNING`), session lookup/touch.
+- Cleanup job (core): purge expired nonces, pre-sessions, sessions, OAuth states (via gateways only through its own job) and
+  rate-limit windows older than one hour; bounded batches.
+- Audit IP retention: a `SECURITY DEFINER` function created in a platform migration that only nulls `ip` on rows older than 30
+  days, executable by the API role (the API role keeps INSERT-only on `audit_log`); the cleanup job calls it.
+- Session rotation copies `authenticatedAt` (the time of the last wallet signature) from the old session: linking GitHub never
+  refreshes the admin step-up window (test it).
+- CSRF details: the checks run in `onRequest` (before body parsing) so failures are always `CSRF_REJECTED`; requests without a
+  body (no content-length or 0, no transfer-encoding) need no content type; the custom header and Origin rules always apply.
+- `termsDigest` and all digests in config are `0x`-prefixed lowercase 32-byte hex (the redactor keeps 0x-prefixed hashes).
+- Production config requires an explicit `PINE_TRUST_PROXY_HOPS` (0 allowed) and Seer/AMM addresses equal to `GNOSIS_EXTERNAL`
+  (refuse to start otherwise); the deployment manifest is always `buildDeploymentManifest(config.contracts)`.
 
 ### 2.6 Processes
 - `src/main.ts`: load config → redactor → logger → pg pool → `verifyMigrations` (refuse to start on any problem) → gateways →
@@ -113,8 +133,9 @@ inside a transaction on a dedicated connection holding `pg_try_advisory_xact_loc
 - `GitHubGateway`: `fetch` only to `https://api.github.com` (injectable for tests), `Accept: application/vnd.github+json`,
   `X-GitHub-Api-Version`, 10 s timeout, `redirect: "error"`, zod-validated responses, size cap 2 MiB. Public repositories only:
   refuse `private !== false` or `visibility !== "public"` with `REPO_NOT_PUBLIC`. Map 404→NOT_FOUND, 403/429 with rate-limit headers →
-  RATE_LIMITED, others → UPSTREAM (messages redacted). `listPublicRepos` uses `GET /users/{login}/repos?type=owner&sort=pushed`
-  (login from the stored identity); `getRepoById` uses `GET /repositories/{id}`; `listPullCommits` pages up to 250;
+  RATE_LIMITED, others → UPSTREAM (messages redacted). `listPublicRepos` first refreshes the login with `GET /user` using the user's
+  token (logins are renamed and re-registered, SEC-GH-05; the stored login is never a lookup key), then uses
+  `GET /users/{login}/repos?type=owner&sort=pushed`; `getRepoById` uses `GET /repositories/{id}`; `listPullCommits` pages up to 250;
   `verifyCommitMembership`: `pull_head` iff `GET /repos/{o}/{r}/pulls/{n}` head sha equals the commit; `pull_commit` iff listed in
   the PR commits; `branch_ancestor` iff `GET /repos/{o}/{r}/compare/{sha}...{branch}` has status `ahead` or `identical` and
   `behind_by == 0`; otherwise `NOT_A_MEMBER`.
@@ -129,10 +150,12 @@ inside a transaction on a dedicated connection holding `pg_try_advisory_xact_loc
 - Pin outbox job: `block/put?cid-codec=raw&mhtype=sha2-256` + `pin/add` on the Kubo RPC API (when configured), then
   Pinning Service API `POST /pins {cid}` (when configured); the CID returned must equal the local one, otherwise the item is marked
   `integrity_failed` and alerted. Retries with backoff; idempotent.
-- `createContentServer()`: separate Fastify instance (no cookie plugin): `GET /c/:sha256` → 451 when blocked, 404 when absent,
+- `createContentServer()`: separate Fastify instance (no cookie plugin, `trustProxy` off, **no in-app per-IP rate limit**: abuse
+  limiting for the user-content host is done by the edge proxy/CDN, documented in the README, because the frozen seam carries no
+  proxy settings and a socket-keyed limit behind a proxy would be a global throttle): `GET /c/:sha256` → 451 when blocked, 404 when absent,
   else the bytes with `Content-Type: application/octet-stream`, `Content-Disposition: attachment; filename="<sha256>.bin"`,
   `X-Content-Type-Options: nosniff`, `Content-Security-Policy: default-src 'none'; sandbox`, `Cache-Control: public, max-age=31536000, immutable`,
-  `Cross-Origin-Resource-Policy: cross-origin`; per-IP rate limit; nothing else is served.
+  `Cross-Origin-Resource-Policy: cross-origin`; nothing else is served.
 
 ### 3.3 Chain gateway
 viem public clients for both RPC URLs (http transport, 10 s timeout, limited retries); `assertChainId` at startup on both;
