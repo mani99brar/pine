@@ -30,18 +30,18 @@ Plan store (identical contract in both lanes, each in its own tables `<lane>_pla
 - Row: id (uuid), user (FK `users`), route, idempotency key, body hash, kind, market, wire steps (`planToWire`), state,
   `expires_at`, timestamps; unique (user, route, idempotency key); per step: reported tx hashes (several allowed: speed-ups and
   replacements), step state, the redacted revert reason.
-- Reveal plans are the exception: their wire steps are NOT stored (the calldata contains the salt) and their body hash covers only
-  `(submissionId, contentSha256)`; a retry rebuilds the identical calldata from the request body in memory. No table, column or
-  log ever holds the salt, with or without `0x` (tests cast every row of every module table to text and search both forms).
+- Reveals have no server-built plan at all (see 2.2): the server never receives a salt, so nothing about salts is stored, logged
+  or rebuilt.
 - `POST /api/v1/<lane>/plans/:planId/submitted {stepId, txHash}` (session, owner only, otherwise NOT_FOUND; idempotent; `<lane>` is
   `markets` or `funding`) records a hint and moves the plan `planned → submitted`.
 - States: plan `planned → submitted → confirmed | failed | expired` (compare-and-set only). One uniform confirmation rule (no
   per-function event table: router, proxy and position-manager calls emit their events from other contracts or none at all): a
   step is `confirmed` when one of its reported hashes has a successful receipt at or below `ctx.chain.finalizedBlock()` and
   `eth_getTransactionByHash` shows `to == step.to`, `from == plan.account`, `input ==` the stored step calldata and `value ==`
-  step value (sessions are EOA-only; speed-ups and replacements keep the calldata). Reveal steps (calldata not stored) and other
-  evidence/oracle steps are confirmed from read-model facts instead (evidence committed/revealed/published by that submitter for
-  that market and submission, oracle answers by answerer, question and bond). The plan is `confirmed` when every
+  step value (sessions are EOA-only; speed-ups and replacements keep the calldata). Only evidence commit/publish and oracle
+  `submitAnswer` steps may instead be confirmed from read-model facts (evidence committed/published by that submitter for that
+  market, answers by answerer, question and bond); every other kind (claimWinnings, withdraw, fundAnswerBounty, reopen, resolve,
+  handle*, report, funding steps) uses the transaction rule. The plan is `confirmed` when every
   step is; when `expires_at` + 1 h passed without that, it becomes `expired` if no step was confirmed, else `failed` (partial
   execution; the response points to the merge plan as recovery).
 - `expires_at` = min(created + 24 h, kind deadline): commit and publish `evidenceDeadline − 60 s`, reveal `revealDeadline − 60 s`,
@@ -76,13 +76,18 @@ transaction every query uses the transaction handle.
 ### 2.2 Evidence plans and browsing
 - `POST /api/v1/evidence/plans/commit {market, commitment}` → one step `evidenceRegistry.commitEvidence`; refused when
   `now >= evidenceDeadline − 60 s` (submission margin; the contract is authoritative).
-- `POST /api/v1/evidence/plans/reveal {submissionId, contentSha256, salt}` → one step `revealEvidence`; the salt is used only to
-  build calldata in the response and is never persisted or logged (assert in tests); the submission must be indexed with
-  `submitter == session.wallet` and `computeEvidenceCommitment(chainId, registry, market, session.wallet, contentSha256, salt)`
-  must equal its indexed commitment (in memory only; mismatch → UNPROCESSABLE, so a wrong salt never costs the user gas); requires the manifest to be stored (so it is
-  available to adjudicators) unless the user explicitly acknowledges `unavailableContentAcknowledged: true`, and warns that an
-  unobtainable manifest is inadmissible (policy C4). Refused when `now >= revealDeadline − 60 s`.
-- `POST /api/v1/evidence/plans/publish {market, contentSha256}` → `publishEvidence` (manifest must be stored).
+- `POST /api/v1/evidence/reveal-template {submissionId, contentSha256}` (session): NO plan and NO salt — Pine never receives a
+  salt. The submission must be indexed with `submitter == session.wallet` and still `committed`; the response is a salt-free
+  template `{ chainId, registry, function: "revealEvidence(uint256,bytes32,bytes32)", submissionId, contentSha256, commitment
+  (indexed), revealDeadline, expiresAt, warnings }` plus the instructions: the client computes `computeEvidenceCommitment(chainId,
+  registry, market, account, contentSha256, salt)` locally, compares it with `commitment`, then builds and checks the step with its
+  own copy of `@pine/shared/tx-plan` (`buildStep`/`newPlan`/`verifyPlan`). The reveal is confirmed from the read-model `revealed`
+  fact. Requests carrying any `salt` field are refused (VALIDATION_FAILED; strict schemas). The template is refused unless the
+  manifest is stored (so it is available to adjudicators) or the request sets `unavailableContentAcknowledged: true`, and it warns
+  that an unobtainable manifest is inadmissible (policy C4). Refused when `now >= revealDeadline − 60 s`.
+- `POST /api/v1/evidence/plans/publish {market, contentSha256}` → `publishEvidence` (manifest must be stored). Because
+  `verifyPlan` binds no market for evidence steps, the module itself checks that every commit/publish market is a registered claim
+  in the read model and that the plan's account is the session wallet.
 - `GET /api/v1/markets/:market/evidence?status&cursor` (public): read-model submissions joined with stored manifests (parsed with
   `parseEvidenceManifestBytes`; unparsable → `manifest: null, manifestError`), timeliness flags computed from the claim deadlines and
   the frozen operators, availability `stored` (local `contentStore.has` only: a public listing never triggers remote gateway
@@ -103,17 +108,28 @@ transaction every query uses the transaction handle.
   `bond >= max(minBond, 2 × current bond)`; `fundAnswerBounty {market, amount}`; `resolve`, `reopen`, `handleNotifiedRequest`,
   `handleRejectedRequest`, `reportArbitrationAnswer`, `claimWinnings` (arguments reconstructed from the answer history in reverse
   order exactly as Reality requires, starting from the current on-chain `getHistoryHash` so only still-unclaimed entries are
-  included after a partial claim; a reopened market also offers the claim on its original settled-too-soon question), `withdraw`. `reopenQuestion` re-creates the original content exactly: template 2, question =
+  included after a partial claim; a reopened market also offers the claim on its original settled-too-soon question), `withdraw`.
+  Reality history arguments (both `claimWinnings` and `reportArbitrationAnswer`): each `OracleAnswerRecord.historyHash` is the hash
+  AFTER that answer (`h_i = keccak256(abi.encodePacked(h_{i-1}, answer, bond, answerer, isCommitment))`, `h_0 = 0x0`); the
+  "history hash" argument for an entry is the hash BEFORE it (`h_{i-1}`, i.e. the previous record's `historyHash`, `0x0` for the
+  first answer); the answer argument is the raw `answer` field (the commitment id for commitment entries, never `revealedAnswer`).
+  So `reportArbitrationAnswer(questionId, h_{n-1}, answer_n, answerer_n)` uses the second-to-last record's hash. Before returning
+  such a plan the module recomputes the chain from its arguments and requires it to equal `getHistoryHash(questionId)` read by
+  `eth_call` at request time (mirroring Reality's `_verifyHistoryInputOrRevert`); a mismatch refuses the plan (UNPROCESSABLE), so a
+  misread argument can never reach a wallet. Tests derive expected values from an independent keccak chain over real-shaped
+  records with at least one commitment entry. `reopenQuestion` re-creates the original content exactly: template 2, question =
   `marketName` ␟ `"Yes","No"` ␟ `config.claims.questionCategory` ␟ `config.claims.questionLanguage` (asserted at registration to
   equal the ClaimRegistry constants `misc` and `en_US`), the original arbitrator, timeout, opening time and min bond from the
-  question record. `reopens_question_id` is always the ORIGINAL claim question (`ClaimRecord.questionId`; Reality v3 refuses to
+  question as read by `eth_call` at request time (`getArbitrator`, `getTimeout`, `getOpeningTS`, `getMinBond`; the question
+  record has no arbitrator field). `reopens_question_id` is always the ORIGINAL claim question (`ClaimRecord.questionId`; Reality v3 refuses to
   reopen a reopener, and the module checks this explicitly because `verifyPlan` accepts replacement ids too). The nonce is the
   smallest `n` in `0..15` whose question id `keccak256(abi.encodePacked(content_hash, arbitrator, timeout, min_bond, realitio,
   account, n))` does not exist yet (`eth_call getTimeout(id) == 0`; the frozen read model cannot count prior reopens), so a
   repeated reopen by the same account never collides; none free → CONFLICT. Test the derived id against a hand-computed value. Each plan is verified and its arguments re-derived from the read model at request
   time (never from client-supplied history).
 ### 2.4 Notifications and history
-- Job `markets.watch` (60 s): for each open claim compute due actions and deadline proximity (evidence closes in 24 h, reveal
+- Job `markets.watch` (60 s; read-model facts only, no `eth_call`; at most 200 claims per run with a persisted rotating cursor):
+  for each open claim compute due actions and deadline proximity (evidence closes in 24 h, reveal
   closes in 6 h, answers open, finalization in 24 h, arbitration stage changes, resolution) and insert idempotent notification rows
   (unique per claim, kind and target block/time) for the claim creator and evidence submitters; never notify on data the read model
   has not indexed.
@@ -153,13 +169,18 @@ in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
    `outcomeToken.approve(positionManager, S)` on the YES token;
    (optional pool creation); `positionManager.mint({token0, token1, tickLower, tickUpper, amount(YES side) = S, other side 0,
    amountMin(YES side) = S − S×50/10000, other min 0, recipient = account, deadline = now + 20 min})`.
-6. Response also gives: maximum loss if YES resolves `S × (1 − sqrt(lowerPrice × upperPrice))` in sDAI and xDAI (+ gas estimate),
+6. Response also gives: maximum loss if YES resolves `S × (1 − sqrt(p_a × p_b))` where `p_a`, `p_b` are the prices of the final
+   (inward-rounded) ticks, not the requested ones, in sDAI and xDAI (+ gas estimate),
    loss if NO or Invalid resolves (gas only, plus the 10 bps remainder is kept as full sets), the fee range of the pool, the
-   withdrawability statement (positions can be withdrawn at any time; liquidity is not a bounty), and the disclosures of policy C7.
+   withdrawability statement (withdrawable by the owner subject to the pool's `liquidityCooldown()`, read by `eth_call`: currently
+   0, governance can raise it to 1 day; liquidity is not a bounty), and the disclosures of policy C7.
 ### 3.3 Positions, withdrawal, merge and redemption
-- `GET /api/v1/funding/positions/:wallet?cursor&market` (public, bounded): the wallet's Algebra positions (`balanceOf`,
-  `tokenOfOwnerByIndex`, `positions`) in Pine market pools, 20 NFTs per page and at most 200 scanned per wallet (`truncated: true`
-  beyond); outcome token balances only for the `market` given.
+- `GET /api/v1/funding/positions/:wallet?market&cursor` (public, bounded; `market` required because the frozen read model has no
+  token → market lookup): the wallet's Algebra positions (`balanceOf`, `tokenOfOwnerByIndex`, `positions`) whose pool pairs that
+  market's YES or NO token with sDAI, 20 NFTs per page and at most 200 scanned per wallet (`truncated: true` beyond), plus the
+  wallet's outcome token balances for that market.
+- Withdraw/collect/burn plans first check `positionManager.ownerOf(tokenId) == account` by `eth_call` and that the position's pool
+  belongs to a registered claim market (`verifyPlan` binds no tokenId).
 - Plans: `withdraw {tokenId}` → `decreaseLiquidity(all, mins from a fresh quote with 50 bps slippage, deadline)`, `collect(recipient =
   account, max)`, `burn` (only when liquidity becomes zero); `merge {market, amount}` → three exact approvals (YES, NO, INVALID to the
   GnosisRouter) + `mergeToBase(market, amount)`; `redeem {market}` (after `ConditionResolution`) → exact approvals of the winning
@@ -175,13 +196,14 @@ file part.
 - markets: manifest validation (wrong submitter, wrong claim, missing artifact, non-canonical), artifact size limit enforced while
   streaming (413, nothing stored, no quota consumed; SEC-EVID-01), `expectedSha256` mismatch 422 (SEC-EVID-03), a filename like
   `../../etc/passwd` with bidi characters never reaching storage or responses (SEC-EVID-08), idempotent plan retries (same key and
-  body → identical plan, one quota unit; different body → 409; SEC-TX-08), reopen nonce for a second reopen, multipart only on that route, no salt persisted or logged (inspect DB rows and captured logs), deadline margins, every
+  body → identical plan, one quota unit; different body → 409; SEC-TX-08), reopen nonce for a second reopen, multipart only on that route, no route accepts a salt (a body with `salt` is refused) and the reveal template contains none, deadline margins, every
   plan passes `verifyPlan` and binds to the registered market/question, reveal with unavailable content requires acknowledgement,
   evidence listing timeliness at the exact deadline second, ERC-1497 output, `dueActions` for every oracle state including
   answered-too-soon/reopen, arbitration stages and finalization, `claimWinnings` argument reconstruction against a hand-computed
   history, notification idempotency, NOT_READY when stale, compliance refusals.
 - both lanes: the plan store (same-key retry, different body 409, `/submitted` owner-only and idempotent, reconcile transitions
-  including partial execution → failed, expiry per kind), reveal plans never storing the salt in any form.
+  including partial execution → failed, expiry per kind); `claimWinnings` and `reportArbitrationAnswer` arguments for a history
+  with a commitment entry (second-to-last hash, raw commitment id) and the request-time self-check refusing a mismatching chain.
 - funding: the inline integrity gate (unavailable document and each mismatching field → INTEGRITY_FAILED, no plan), splitFromBase
   omitted when the YES balance already covers S, bounded positions paging, tick/price conversion and orientation for both token orders (property tests: the range never exceeds the requested
   prices; single-sidedness), share margin, pool missing vs existing-uninitialised (initialised in the plan) vs existing correctly

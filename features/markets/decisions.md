@@ -27,7 +27,14 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - verifyPlan limits: maxTotalValueWei 10,000 xDAI; maxApprovalAmount 0 (markets) and 10^30 (funding, sanity bound).
 - Step confirmation: finalized successful receipt + transaction to/from/input/value equal to the stored step (reveal and other
   evidence/oracle steps from read-model facts).
-- Reveal plans check the commitment in memory against the indexed submission (wrong salt → 422, no plan).
+- No server-built reveal plan: `POST /api/v1/evidence/reveal-template` returns a salt-free template; the client checks the
+  commitment and builds/verifies the reveal step with its own `@pine/shared`; any `salt` in a request is refused.
+- Reality history arguments: hash BEFORE each entry (previous record's `historyHash`, 0x0 first), raw `answer` (commitment id for
+  commitments); every claimWinnings/report plan is self-checked against `getHistoryHash` at request time.
+- Modules bind what `verifyPlan` does not: registered market for evidence steps, `ownerOf(tokenId) == account` for LP steps.
+- Max loss uses the final tick prices; withdrawability mentions `liquidityCooldown()`; positions need `?market=`.
+- `markets.watch` uses read-model facts only, ≤ 200 claims per run with a rotating cursor.
+- Literal bidi/zero-width characters never appear in test files (the forbidden gate scans tests): use `\u` escapes.
 - Public evidence listings never fetch remote content (`stored` via `has`; `retrievable` only on the detail route, cached 10 min).
 - Pool initialisation price strictly outside the range (getSqrtRatioAtTick(tickLower) − 1 / getSqrtRatioAtTick(tickUpper) + 1).
 - claimWinnings starts from the current on-chain history hash (partial claims) and covers the original settled-too-soon question.
