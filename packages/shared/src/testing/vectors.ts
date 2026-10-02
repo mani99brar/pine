@@ -57,7 +57,7 @@ export const QUESTION_VECTORS = [
   {
     "input": {
       "evidenceRegistry": "0x1234567890abcdef1234567890abcdef12345678",
-      "title": " ~!#$%&'()*+,-./0123456789:;<=>?@[]^_`{|}",
+      "title": " ~!#$%&'()*+,-./0123456789:;<=>?@^_`{|}",
       "evidenceDeadline": 1709164800,
       "revealDeadline": 1709251200,
       "repositoryId": 9007199254740991,
@@ -65,6 +65,6 @@ export const QUESTION_VECTORS = [
       "claimDocumentSha256": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
       "policyDocumentSha256": "0x95772c253f93d6e36ce863fd1c374e783ee1fd75eec31e552289bac1953be5f7"
     },
-    "question": "Pine claim [ ~!#$%&'()*+,-./0123456789:;<=>?@[]^_`{|}]: was a reproducible counterexample submitted to evidence registry 0x1234567890abcdef1234567890abcdef12345678 on Gnosis, recorded before 2024-02-29 00:00:00 UTC and disclosed before 2024-03-01 00:00:00 UTC, for GitHub repository id 9007199254740991 at commit ffffffffffffffffffffffffffffffffffffffff? Terms: claim document ipfs://bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku (sha256 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855), policy ipfs://bafkreievo4wckp4t23rwz2dd7uodottyh3q725poympfkiujxlazko7f64 (sha256 0x95772c253f93d6e36ce863fd1c374e783ee1fd75eec31e552289bac1953be5f7). Yes = at least one timely admissible counterexample; No = none; admissibility per the policy."
+    "question": "Pine claim [ ~!#$%&'()*+,-./0123456789:;<=>?@^_`{|}]: was a reproducible counterexample submitted to evidence registry 0x1234567890abcdef1234567890abcdef12345678 on Gnosis, recorded before 2024-02-29 00:00:00 UTC and disclosed before 2024-03-01 00:00:00 UTC, for GitHub repository id 9007199254740991 at commit ffffffffffffffffffffffffffffffffffffffff? Terms: claim document ipfs://bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku (sha256 0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855), policy ipfs://bafkreievo4wckp4t23rwz2dd7uodottyh3q725poympfkiujxlazko7f64 (sha256 0x95772c253f93d6e36ce863fd1c374e783ee1fd75eec31e552289bac1953be5f7). Yes = at least one timely admissible counterexample; No = none; admissibility per the policy."
   }
 ] as const;

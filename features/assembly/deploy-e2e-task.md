@@ -2,6 +2,7 @@
 
 ## Goal
 
+First apply the pre-deployment hardening of `ClaimRegistry` in `docs/prd/PRD-06-assembly.md` section 2 (bracket bytes refused in titles, `repositoryId` capped at 2^53 - 1 with `RepositoryIdOutOfRange`, vectors regenerated, boundary tests). Then:
 Write the deployment script and the real-pair Gnosis fork lifecycle tests of `docs/prd/PRD-06-assembly.md` section 2: `contracts/script/Deploy.s.sol` (explicit deployer, address prediction, EvidenceRegistry first, binding and Seer-immutable assertions, JSON record), `contracts/test/e2e/**` (claim creation through evidence, oracle answers, resolution and payouts, plus a YES-ladder funding round on real Swapr/Algebra pools), and `scripts/fixtures/export-plan-vectors.mjs` with committed calldata vectors that the Solidity e2e test replays byte-for-byte.
 
 ## Context

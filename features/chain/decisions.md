@@ -8,7 +8,7 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - The market question is composed on-chain by `ClaimRegistry.renderQuestion` and must match `QUESTION_VECTORS` byte for byte: the vectors are the acceptance oracle, and Seer receives exactly that string.
 - Binding: EvidenceRegistry is deployed first with the registry's predicted address; the ClaimRegistry constructor verifies `claimRegistry() == address(this)` and asserts the Seer factory immutables against `ExpectedSeer`: each lane tests with its own mocks, the candidate runs both suites together.
 - Duplicates are keyed per `(creator, claimDocumentSha256)` (`DuplicateClaim`); another creator may publish the same digest and Seer then reuses the Reality question and condition: tests must cover the shared-question case.
-- Bounds are constants: evidence window 1–90 days, reveal window 12 h–7 days, min bond between the deploy-time floor and 10,000 xDAI (`MinBondTooHigh` above the cap), title 1–120 bytes of printable ASCII without `"` or `\`.
+- Bounds are constants: evidence window 1–90 days, reveal window 12 h–7 days, min bond between the deploy-time floor and 10,000 xDAI (`MinBondTooHigh` above the cap), title 1–120 bytes of printable ASCII without `"`, `\`, `[` or `]` (brackets added before deployment), `repositoryId` in `1..2^53 - 1`.
 - Evidence timing operators are strict `<` for commit/publish (evidence deadline) and reveal (reveal deadline); Reality opens at the reveal deadline.
 - Range errors report the effective bounds: `RevealDeadlineOutOfRange(value, earliest = evidenceDeadline + MIN_REVEAL_WINDOW,
   latest = min(evidenceDeadline + MAX_REVEAL_WINDOW, type(uint32).max))`; when `earliest > latest` every value reverts with those
@@ -16,8 +16,9 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - Twin markets (fork test): the same document from two creators must succeed twice and share the Reality question id, the CTF
   condition id and the three wrapped outcome tokens (Seer skips `prepareCondition` and `Wrapped1155Factory` returns the existing
   wrappers). If the real factory reverts instead, assert the revert, keep the per-creator duplicate rule and raise a `question`.
-- `repositoryId` above 2^53 − 1 is accepted on-chain (frozen uint64); the TypeScript renderer refuses it and the API's integrity
-  check marks such claims `mismatch` (accepted; GitHub ids are far below 2^53).
+- `repositoryId` above 2^53 − 1 is refused on-chain with `RepositoryIdOutOfRange(uint64)` (superseding the earlier acceptance: the
+  TypeScript decoders accept only safe integers and the indexer halts on an out-of-domain event, so accepting it would let anyone
+  halt every read model).
 - Gas-constancy test (evidence registry): compare the 2nd and the 501st commit, each in its own call, within 2,000 gas; the 1st
   commit pays the 0→1 counter write and cold access and is excluded.
 - Fork tests: one fork per test contract (`setUp`), at most one `createClaim` per test function and at most four fork test

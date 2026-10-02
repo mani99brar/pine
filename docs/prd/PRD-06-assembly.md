@@ -8,10 +8,16 @@ in-process, and documents deployment. Everything it touches that other features 
 ## 1. Lanes and ownership
 | Lane | Owns (path prefixes) |
 |---|---|
-| `deploy-e2e` | `contracts/script`, `contracts/test/e2e`, `scripts/fixtures` |
+| `deploy-e2e` | `contracts/script`, `contracts/test/e2e`, `scripts/fixtures`, and for the pre-deployment hardening below `contracts/src/ClaimRegistry.sol`, `contracts/test/claim-registry`, `contracts/test/fork` |
 | `composition` | `packages/api/src/readmodel.ts`, `packages/api/test/e2e`, `deploy`, `README.md` (repository root), `docs/operations`, `.github/workflows` |
 
 ## 2. deploy-e2e
+- Pre-deployment hardening of `ClaimRegistry` (PRD-01 section 2.3 as updated on 2026-10-02, before any deployment): reject `[`
+  (0x5B) and `]` (0x5D) in titles with `TitleForbiddenByte(index)`; reject `repositoryId > 2^53 - 1` with a new
+  `error RepositoryIdOutOfRange(uint64 repositoryId)` declared in `ClaimRegistry.sol` (never in the frozen interface; 0 stays
+  `ZeroValue`); regenerate `contracts/test/claim-registry/Vectors.sol` from the updated `QUESTION_VECTORS` (vector 3 lost its
+  brackets); add boundary tests (`2^53 - 1` accepted; `2^53` and `type(uint64).max` revert; a bracket at the first, a middle and the
+  last index reverts). The existing claim-registry unit and fork suites must keep passing.
 - `contracts/script/Deploy.s.sol`: explicit deployer (`vm.startBroadcast(deployer)` only in `run()`), prediction
   `vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1)`, EvidenceRegistry first, then ClaimRegistry with `ExpectedSeer` from
   `GNOSIS_EXTERNAL`, assertions of the binding and of every Seer immutable, a JSON deployment record (addresses, block, chain id,

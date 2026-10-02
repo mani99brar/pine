@@ -29,12 +29,15 @@ export interface QuestionInput {
   policyDocumentSha256: Hex32;
 }
 
-/** Printable ASCII 0x20..0x7E except '"' (0x22) and '\' (0x5C); 1..MAX_TITLE_BYTES bytes. */
+/**
+ * Printable ASCII 0x20..0x7E except '"' (0x22), '\' (0x5C), '[' (0x5B) and ']' (0x5D); 1..MAX_TITLE_BYTES bytes. Brackets are
+ * excluded so a title can never close the "Pine claim [<title>]" delimiter and pose as template text.
+ */
 export function validateTitle(title: string): void {
   if (title.length < 1 || title.length > MAX_TITLE_BYTES) throw new QuestionInputError(`title must be 1..${MAX_TITLE_BYTES} bytes`);
   for (let index = 0; index < title.length; index += 1) {
     const code = title.charCodeAt(index);
-    if (code < 0x20 || code > 0x7e || code === 0x22 || code === 0x5c) throw new QuestionInputError(`title has a forbidden character at index ${index}`);
+    if (code < 0x20 || code > 0x7e || code === 0x22 || code === 0x5c || code === 0x5b || code === 0x5d) throw new QuestionInputError(`title has a forbidden character at index ${index}`);
   }
 }
 

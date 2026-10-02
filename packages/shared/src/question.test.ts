@@ -31,7 +31,7 @@ describe("question renderer", () => {
     }
   });
   it("rejects titles that could break the Reality JSON template or hide text", () => {
-    for (const bad of ["", "a\"b", "a\\b", "line\nbreak", "tab\tx", "caf\u00e9", "bidi\u202e", "zero\u200bwidth", "sep\u241f", "x".repeat(121)]) {
+    for (const bad of ["", "a\"b", "a\\b", "a]: fake terms [b", "x[", "x]", "line\nbreak", "tab\tx", "caf\u00e9", "bidi\u202e", "zero\u200bwidth", "sep\u241f", "x".repeat(121)]) {
       expect(() => validateTitle(bad)).toThrow(QuestionInputError);
     }
     expect(() => validateTitle("Reporter deposits never use arbitration funds")).not.toThrow();

@@ -40,7 +40,10 @@ Store factory, evidence registry, minimumMinBond and `block.chainid` as immutabl
    revealDeadline <= evidenceDeadline + MAX_REVEAL_WINDOW` and `revealDeadline <= type(uint32).max`
    (`RevealDeadlineOutOfRange`); `minBond >= minimumMinBond` (`MinBondTooLow(minBond, minimumMinBond)`) and
    `minBond <= MAX_MIN_BOND` (`MinBondTooHigh(minBond, MAX_MIN_BOND)`); title 1..120 bytes
-   (`TitleLength`), each byte in 0x20..0x7E except `"` (0x22) and `\` (0x5C) (`TitleForbiddenByte(index)`).
+   (`TitleLength`), each byte in 0x20..0x7E except `"` (0x22), `\` (0x5C), `[` (0x5B) and `]` (0x5D) (`TitleForbiddenByte(index)`; brackets were
+   added before deployment so a title cannot close the `[<title>]` delimiter). `repositoryId` must be in `1..2^53 - 1`
+   (`ZeroValue` for 0; `RepositoryIdOutOfRange(uint64)`, declared in ClaimRegistry, above 2^53 - 1) so every on-chain value fits the
+   TypeScript decoders and an out-of-domain event can never halt the indexers.
 2. Duplicate check: `marketOf(msg.sender, claimDocumentSha256) == address(0)` else `DuplicateClaim(existing)`.
 3. Compose `marketName = renderQuestion(params)` (2.4) and the token names `["PY_" + hex8, "PN_" + hex8]` where hex8 is the first
    4 bytes of `claimDocumentSha256` as lowercase hex.

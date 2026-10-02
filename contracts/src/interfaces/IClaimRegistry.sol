@@ -36,7 +36,7 @@ interface IClaimRegistry {
     /// @param evidenceDeadline Unix seconds; see timing rules.
     /// @param revealDeadline Unix seconds; see timing rules. Also the Reality.eth opening time. Must fit in uint32.
     /// @param minBond Reality.eth minimum bond in native wei (xDAI); minimumMinBond() <= minBond <= MAX_MIN_BOND().
-    /// @param title Short claim title: 1..MAX_TITLE_BYTES bytes of printable ASCII (0x20..0x7E) excluding '"' and '\'.
+    /// @param title Short claim title: 1..MAX_TITLE_BYTES bytes of printable ASCII (0x20..0x7E) excluding '"', '\', '[' and ']'.
     /// Informational only: the claim document governs.
     struct CreateClaimParams {
         bytes32 claimDocumentSha256;

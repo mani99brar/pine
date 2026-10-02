@@ -12,6 +12,9 @@ Settled by the operator from ADR-0001 on 2026-10-02.
   after every other feature merges.
 - The e2e suite runs on real PostgreSQL 16 with the production driver when `PINE_E2E_DATABASE_URL` is set (required in the
   operator's verification and in CI via `PINE_E2E_REQUIRE_PG=1`), else on PGlite.
+- deploy-e2e also lands two pre-deployment `ClaimRegistry` fixes (title brackets refused; `repositoryId <= 2^53 - 1` via
+  `RepositoryIdOutOfRange`) found by the architecture review after feature chain was verified; the shared validator and vectors
+  were updated by the operator on main first.
 - Residual allowance after a mint: at most 10 wei, only toward the position manager (Algebra rounding).
 - CI adds gitleaks secret scanning; the release checklist lists every launch gate of PRD-06 section 3.
 
