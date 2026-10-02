@@ -42,9 +42,9 @@ describe("verifyPlan", () => {
   });
   it("accepts a create-claim plan", () => {
     const params = {
-      claimDocumentSha256: question, policyDocumentSha256: question, repositoryCommit: question,
+      claimDocumentSha256: question, policyDocumentSha256: question, repositoryId: 123_456n, commit: `0x${"ab".repeat(20)}`,
       evidenceDeadline: 1_900_000_000n, revealDeadline: 1_900_172_800n, minBond: 10n ** 19n,
-      marketName: "Was a counterexample submitted?", claimDocumentUri: "ipfs://bafkreiexample",
+      title: "Reporter deposits never use arbitration funds",
     };
     const plan = newPlan(manifest, "plan-2", account, [buildStep(manifest, { id: "create", allowlistId: "claimRegistry.createClaim", args: [params] })]);
     expect(verifyPlan(plan, manifest, context, limits)).toBe(0n);

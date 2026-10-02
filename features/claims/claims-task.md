@@ -1,0 +1,27 @@
+# Task: claims
+
+## Goal
+
+Replace the stub `packages/api/src/modules/claims/index.ts` with the claims `RouteModule` specified in `docs/prd/PRD-03-claims.md`: the verified policy catalog and its public routes, GitHub browsing, owner-only drafts, immutable previews that freeze a canonical claim document and its on-chain question, idempotent publication plans with a crash-safe state machine and reconciliation job, integrity verification of every on-chain claim, public claim listings, and the agent-facing discovery endpoints and schemas.
+
+## Context
+
+- Frozen building blocks (use, do not re-implement): `@pine/shared/claim-document` (`claimDocumentSchema`, `encodeClaimDocument`, `parseClaimDocumentBytes`, `safeText`), `@pine/shared/question` (`renderQuestion`, `validateTitle`), `@pine/shared/tx-plan` (`buildStep`, `newPlan`, `verifyPlan`), `@pine/shared/deployment` (manifest types; build the manifest from `ctx.config`), `@pine/shared/read-model` (`ReadModel`, `deriveOracleStatus`), `@pine/shared/canonical`, `@pine/shared/testing/fixtures` (`exampleClaimDocument`).
+- API contracts and harness: `packages/api/src/contracts/*.ts` (RouteModule, RouteSecurityConfig, AppContext gateways, ApiError codes, `createTestContext`, `buildTestApp`, `insertTestUser`, `FakeGitHubGateway`, `MemoryContentStore`, `FakeCompliance`, `FakeQuotas`, `MemoryReadModel`, scripted chain).
+- Policy texts and catalog: `policies/catalog/catalog.json` and the files it lists. Requirements: `docs/security/requirements.md` sections 3 (SEC-TX), 4 (SEC-CLAIM), 6 (SEC-AGENT), 8 (SEC-IDX-08).
+
+## Constraints
+
+- Only touch your owned paths; migrations in `packages/api/migrations/claims` from `0001_`; cross-group foreign keys only to `users`. No new dependencies.
+- Never return a transaction plan that `verifyPlan` rejects, never return a plan before the document is stored, and never build plans while the read model is stale or halted (`NOT_READY`).
+- Public routes set `config: { pine: { public: true } }` and must not depend on `request.session`. All user-supplied text is returned as data, labelled untrusted in agent endpoints, never rendered.
+- State transitions are compare-and-set updates; jobs are idempotent and safe to run concurrently.
+
+## Acceptance
+
+- Checks `typecheck`, `lint`, `forbidden`, `unit` in `features/claims/policy.json` pass (run them yourself first).
+- Every test in PRD-03 section 9 exists and asserts the behaviour through `buildTestApp`/`createTestContext` (catalog tampering, SC-001 disabled, draft-policy gating, IDOR, preview freezing, publication idempotency and plan verification, compliance/quota/NOT_READY refusals, reconciliation including wrong creator and concurrent runs, integrity results including a copycat market, public endpoints ignoring cookies).
+
+## Stop
+
+Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure. Ask a `question` when PRD-03 is ambiguous about something that changes what the immutable document or plan contains.

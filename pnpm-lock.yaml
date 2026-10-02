@@ -205,6 +205,12 @@ importers:
       '@fastify/swagger':
         specifier: 9.9.0
         version: 9.9.0(supports-color@8.1.1)
+      '@pine/indexer-native':
+        specifier: workspace:*
+        version: link:../indexer-native
+      '@pine/read-model-envio':
+        specifier: workspace:*
+        version: link:../read-model-envio
       '@pine/shared':
         specifier: workspace:*
         version: link:../shared

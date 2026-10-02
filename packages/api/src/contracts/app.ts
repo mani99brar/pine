@@ -68,11 +68,8 @@ export interface StoredContent {
   /** SHA-256 of the exact bytes, 0x-prefixed lowercase hex. The identity of the content (media type is not part of it). */
   sha256: Hex32;
   size: number;
-  /**
-   * CIDv1 (raw codec, sha2-256) of the bytes for content of at most RAW_CID_MAX_BYTES (1 MiB, a single IPFS block);
-   * null for larger content, which is retrievable only from Pine's store by sha256 (SEC-EVID-04).
-   */
-  cid: string | null;
+  /** CIDv1 (raw codec, sha2-256) of the bytes; every stored object is a single raw block (<= 256 KiB, SEC-EVID-04). */
+  cid: string;
   /** Media type declared by the first uploader. Informational only: never used as the served Content-Type. */
   declaredMediaType: string;
 }
@@ -84,10 +81,21 @@ export interface StoredContent {
  * returned by get(); serving routes return 451 for it.
  */
 export interface ContentStore {
-  /** Rejects with ApiError PAYLOAD_TOO_LARGE when bytes.length > maxBytes. */
+  /**
+   * Rejects with ApiError PAYLOAD_TOO_LARGE when bytes.length > maxBytes or > RAW_CID_MAX_BYTES (262144). Stores
+   * locally first (the source of truth for serving), then pins by CID; a pinning-service CID that differs from the
+   * locally computed one is an integrity failure.
+   */
   put(input: { bytes: Uint8Array; declaredMediaType: string; maxBytes: number }): Promise<StoredContent>;
+  /** Local store only. Null when absent or blocked. */
   get(sha256: Hex32): Promise<{ bytes: Uint8Array; record: StoredContent } | null>;
   has(sha256: Hex32): Promise<boolean>;
+  /**
+   * Local store first, then the configured trusted IPFS gateways by the raw CID derived from the digest (redirects
+   * off, response capped at maxBytes, digest verified); a verified remote copy is stored locally. Null when no source
+   * has it or it is blocked. Never fetches any other URL (SEC-EVID-09).
+   */
+  retrieve(sha256: Hex32, maxBytes: number): Promise<Uint8Array | null>;
 }
 
 export type GitHubPermission = "admin" | "maintain" | "write" | "triage" | "read" | "none";
@@ -246,6 +254,8 @@ export interface ChainGateway {
   chainId: number;
   /** Read-only client. No wallet client or key exists anywhere in the API (SEC-TX-09). */
   publicClient: PublicClient;
+  /** Latest finalized block number (the "finalized" tag), for plan pre-checks that must not trust unfinalized state. */
+  finalizedBlock(): Promise<bigint>;
 }
 
 export interface Metrics {
@@ -287,6 +297,26 @@ export interface JobDefinition {
    * read model has not reported as indexed.
    */
   run(ctx: AppContext, signal: AbortSignal): Promise<void>;
+}
+
+/**
+ * Per-route security options, set by modules as `config: { pine: { ... } }` in the route definition and enforced by the
+ * platform (fastify `request.routeOptions.config.pine`). Defaults: not public, JSON only, CSRF enforced.
+ */
+export interface RouteSecurityConfig {
+  /** Public, cookie-free route: the platform never reads cookies for it (request.session stays null), adds
+   *  `Access-Control-Allow-Origin: *` without credentials, and only GET/HEAD are allowed. */
+  public?: boolean;
+  /** Accept multipart/form-data (only the evidence upload route); CSRF origin/header rules still apply. */
+  multipart?: boolean;
+  /** Per-route rate limit override (requests per minute per user, or per IP when unauthenticated). */
+  rateLimitPerMinute?: number;
+}
+
+declare module "fastify" {
+  interface FastifyContextConfig {
+    pine?: RouteSecurityConfig;
+  }
 }
 
 /**

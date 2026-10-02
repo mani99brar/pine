@@ -1,6 +1,6 @@
 // FROZEN cross-lane contract. Secret redaction (SEC-OPS-03).
 //
-// Scope: every ERROR, LOG, AUDIT and NOTIFICATION string — anything derived from an exception, an upstream response
+// Scope: every ERROR, LOG, AUDIT and NOTIFICATION string - anything derived from an exception, an upstream response
 // or a request line. Never apply it to domain data (claim text, URLs inside claim documents, evidence names): it is
 // lossy by design. Upstream libraries embed secrets in error text (viem puts the RPC URL, often containing an API key,
 // into HttpRequestError; pg errors can echo connection strings; OAuth errors can echo codes), so every such string must
@@ -82,7 +82,7 @@ export function createRedactor(knownSecrets: readonly string[] = []): Redactor {
     output = output.replace(USERINFO_PATTERN, REDACTED);
     for (const pattern of TOKEN_PATTERNS) output = output.replace(pattern, REDACTED);
     output = output.replace(LABEL_PATTERN, (_match: string, label: string) => `${label}${REDACTED}`);
-    return output.length > MAX_OUTPUT ? `${output.slice(0, MAX_OUTPUT)}…` : output;
+    return output.length > MAX_OUTPUT ? `${output.slice(0, MAX_OUTPUT)}...` : output;
   };
 }
 

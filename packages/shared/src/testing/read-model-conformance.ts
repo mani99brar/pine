@@ -95,8 +95,8 @@ export function describeReadModelConformance(label: string, factory: ReadModelFa
         }
         const revealed = await reference.getEvidence(SCENARIO_ADDRESSES.evidenceRegistry, 1n);
         expect(revealed?.status).toBe("revealed");
-        expect(revealed?.mirrors.length).toBe(16);
-        expect((await reference.getEvidence(SCENARIO_ADDRESSES.evidenceRegistry, 3n))?.mirrors).toEqual([]);
+        expect(revealed?.contentSha256).not.toBeNull();
+        expect((await reference.getEvidence(SCENARIO_ADDRESSES.evidenceRegistry, 3n))?.status).toBe("committed");
         expect(await reference.getEvidence(SCENARIO_ADDRESSES.evidenceRegistry, 99n)).toBeNull();
         for (const limit of [1, 2, 100]) {
           for (const query of [
@@ -194,6 +194,7 @@ export function describeReadModelConformance(label: string, factory: ReadModelFa
 
         const status = await implementation.status();
         expect(status.chainId).toBe(SETUP.chainId);
+        expect(status.halted).toBe(false);
         expect(status.indexedBlock >= events.at(-1)!.blockNumber).toBe(true);
       } finally {
         await close();

@@ -8,7 +8,6 @@ import type { ChainEvent } from "../chain-events.js";
 import { compareEvents } from "../chain-events.js";
 import {
   InvalidCursorError,
-  MAX_MIRRORS,
   type ArbitrationRecord,
   type ClaimRecord,
   type ConditionResolutionRecord,
@@ -47,7 +46,7 @@ export class MemoryReadModel implements ReadModel {
   private readonly resolutions = new Map<Hex32, ConditionResolutionRecord>();
   private readonly trackedConditions = new Set<Hex32>();
   private last: { blockNumber: bigint; logIndex: number } | null = null;
-  private indexed: { block: bigint; timestamp: number; head: bigint | null } = { block: 0n, timestamp: 0, head: null };
+  private indexed: { block: bigint; timestamp: number; head: bigint | null; finalized: bigint | null } = { block: 0n, timestamp: 0, head: null, finalized: null };
 
   constructor(private readonly options: MemoryReadModelOptions) {}
 
@@ -67,9 +66,9 @@ export class MemoryReadModel implements ReadModel {
   }
 
   /** Advances the indexed cursor without events (an indexer that scanned empty blocks). */
-  markIndexed(block: bigint, timestamp: number, head: bigint | null = null): void {
+  markIndexed(block: bigint, timestamp: number, head: bigint | null = null, finalized: bigint | null = null): void {
     if (block < this.indexed.block) throw new OutOfOrderEventError("Indexed block cannot move backwards");
-    this.indexed = { block, timestamp, head };
+    this.indexed = { block, timestamp, head, finalized };
   }
 
   private applyOne(event: ChainEvent): void {
@@ -83,14 +82,19 @@ export class MemoryReadModel implements ReadModel {
           creator: lower(event.creator),
           claimDocumentSha256: lower(event.claimDocumentSha256),
           policyDocumentSha256: lower(event.policyDocumentSha256),
-          repositoryCommit: lower(event.repositoryCommit),
+          repositoryId: event.repositoryId,
+          commit: event.commit.toLowerCase(),
           questionId: lower(event.questionId),
           conditionId: lower(event.conditionId),
           evidenceDeadline: event.evidenceDeadline,
           revealDeadline: event.revealDeadline,
           minBond: event.minBond,
+          title: event.title,
           marketName: event.marketName,
-          claimDocumentUri: event.claimDocumentUri,
+          marketNameHash: lower(event.marketNameHash),
+          yesToken: lower(event.yesToken),
+          noToken: lower(event.noToken),
+          invalidToken: lower(event.invalidToken),
           createdAt: event.blockTimestamp,
           createdBlock: event.blockNumber,
           createdTxHash: lower(event.transactionHash),
@@ -118,8 +122,6 @@ export class MemoryReadModel implements ReadModel {
           status: "committed",
           commitment: lower(event.commitment),
           contentSha256: null,
-          uri: null,
-          mirrors: [],
           committedAt: event.committedAt,
           revealedAt: null,
           committedTxHash: lower(event.transactionHash),
@@ -133,7 +135,6 @@ export class MemoryReadModel implements ReadModel {
         if (!record || record.status !== "committed") return; // Unknown or already disclosed: ignore (never crash).
         record.status = "revealed";
         record.contentSha256 = lower(event.contentSha256);
-        record.uri = event.uri;
         record.revealedAt = event.revealedAt;
         return;
       }
@@ -148,20 +149,12 @@ export class MemoryReadModel implements ReadModel {
           status: "published",
           commitment: null,
           contentSha256: lower(event.contentSha256),
-          uri: event.uri,
-          mirrors: [],
           committedAt: event.publishedAt,
           revealedAt: event.publishedAt,
           committedTxHash: lower(event.transactionHash),
           committedBlock: event.blockNumber,
           committedLogIndex: event.logIndex,
         });
-        return;
-      }
-      case "EvidenceMirrorAdded": {
-        const record = this.evidence.get(this.evidenceKey(event.address, event.submissionId));
-        if (!record || record.status === "committed") return;
-        if (record.mirrors.length < MAX_MIRRORS) record.mirrors.push(event.uri);
         return;
       }
       case "RealityNewAnswer": {
@@ -334,7 +327,15 @@ export class MemoryReadModel implements ReadModel {
   // ------------------------------------------------------------------------------------------------- queries
 
   async status(): Promise<IndexerStatus> {
-    return { backend: "memory", chainId: this.options.chainId, indexedBlock: this.indexed.block, indexedBlockTimestamp: this.indexed.timestamp, headBlock: this.indexed.head };
+    return {
+      backend: "memory",
+      chainId: this.options.chainId,
+      indexedBlock: this.indexed.block,
+      indexedBlockTimestamp: this.indexed.timestamp,
+      headBlock: this.indexed.head,
+      finalizedBlock: this.indexed.finalized,
+      halted: false,
+    };
   }
 
   async getClaim(market: Address): Promise<ClaimRecord | null> {

@@ -16,16 +16,23 @@ export interface ClaimRecord {
   creator: Address;
   claimDocumentSha256: Hex32;
   policyDocumentSha256: Hex32;
-  repositoryCommit: Hex32;
+  /** GitHub numeric repository id. */
+  repositoryId: number;
+  /** Target commit, 40 lowercase hex, no 0x. */
+  commit: string;
   questionId: Hex32;
   conditionId: Hex32;
   evidenceDeadline: number;
   revealDeadline: number;
   minBond: bigint;
-  /** Untrusted on-chain text; render as plain text only. */
+  /** Validated printable ASCII from the registry; still render as plain text only. */
+  title: string;
+  /** The question composed on-chain (ASCII). Render as plain text only. */
   marketName: string;
-  /** Untrusted locator; never fetched server-side except through the content store's own IPFS gateway by CID. */
-  claimDocumentUri: string;
+  marketNameHash: Hex32;
+  yesToken: Address;
+  noToken: Address;
+  invalidToken: Address;
   createdAt: number;
   createdBlock: bigint;
   createdTxHash: Hex32;
@@ -43,12 +50,8 @@ export interface EvidenceRecord {
   status: EvidenceStatus;
   /** Null for published submissions. */
   commitment: Hex32 | null;
-  /** Null while only committed. */
+  /** Null while only committed. Locate the manifest by its raw CID (rawCidFromSha256) or Pine's content store. */
   contentSha256: Hex32 | null;
-  /** Locator from the reveal/publish; null while only committed. Untrusted. */
-  uri: string | null;
-  /** Additional locators from EvidenceMirrorAdded, in event order, at most MAX_MIRRORS (later ones are ignored). */
-  mirrors: string[];
   committedAt: number;
   /** Null while only committed; equals committedAt for published submissions. */
   revealedAt: number | null;
@@ -56,8 +59,6 @@ export interface EvidenceRecord {
   committedBlock: bigint;
   committedLogIndex: number;
 }
-
-export const MAX_MIRRORS = 16;
 
 export interface OracleAnswerRecord {
   questionId: Hex32;
@@ -129,11 +130,15 @@ export interface ConditionResolutionRecord {
 export interface IndexerStatus {
   backend: "native" | "envio" | "memory";
   chainId: number;
-  /** Highest block whose events are fully applied. */
+  /** Highest block whose events are fully applied. Every record served is at or below it. */
   indexedBlock: bigint;
   indexedBlockTimestamp: number;
-  /** Chain head the indexer last observed (finalized head for the native indexer), or null if unknown. */
+  /** Latest chain head the indexer observed, or null if unknown. */
   headBlock: bigint | null;
+  /** Latest finalized block the indexer observed (native: what it ingests up to), or null if unknown. */
+  finalizedBlock: bigint | null;
+  /** True when the indexer stopped on an integrity failure (finalized-hash conflict, RPC disagreement); data is frozen. */
+  halted: boolean;
 }
 
 export interface Page<T> {

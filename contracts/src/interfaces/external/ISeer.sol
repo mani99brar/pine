@@ -32,7 +32,7 @@ interface ISeerMarketFactory {
     );
 
     /// @dev Permissionless. Asks (or reuses an identical existing) Reality.eth question with template 2 and
-    /// encoded question `marketName ␟ "o1","o2" ␟ category ␟ lang`, prepares (or reuses) the CTF condition with
+    /// encoded question `marketName <U+241F> "o1","o2" <U+241F> category <U+241F> lang`, prepares (or reuses) the CTF condition with
     /// outcomes.length + 1 slots (last slot = invalid), deploys (or reuses) the wrapped ERC20 outcome tokens and
     /// clones a new Market. Each tokenNames entry must be 1..31 bytes.
     function createCategoricalMarket(CreateMarketParams calldata params) external returns (address);

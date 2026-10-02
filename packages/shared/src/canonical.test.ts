@@ -19,8 +19,8 @@ describe("content identity", () => {
     expect(id.cid).toBe("bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku");
     expect(rawCidFromSha256(id.sha256)).toBe(id.cid);
     expect(sha256FromRawCid(id.cid!)).toBe(id.sha256);
-    expect(identify(new Uint8Array(1024 * 1024 + 1)).cid).toBeNull();
-    expect(identify(new Uint8Array(1024 * 1024)).cid).not.toBeNull();
+    expect(identify(new Uint8Array(262_145)).cid).toBeNull();
+    expect(identify(new Uint8Array(262_144)).cid).not.toBeNull();
   });
   it("refuses non-raw CIDs", () => {
     expect(sha256FromRawCid("QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG")).toBeNull();

@@ -77,6 +77,7 @@ export const realityV3Abi = parseAbi([
   "function isSettledTooSoon(bytes32 question_id) view returns (bool)",
   "function resultFor(bytes32 question_id) view returns (bytes32)",
   "function resultForOnceSettled(bytes32 question_id) view returns (bytes32)",
+  "function reopenQuestion(uint256 template_id, string question, address arbitrator, uint32 timeout, uint32 opening_ts, uint256 nonce, uint256 min_bond, bytes32 reopens_question_id) payable returns (bytes32)",
   "function reopened_questions(bytes32 question_id) view returns (bytes32)",
   "event LogNewQuestion(bytes32 indexed question_id, address indexed user, uint256 template_id, string question, bytes32 indexed content_hash, address arbitrator, uint32 timeout, uint32 opening_ts, uint256 nonce, uint256 created)",
   "event LogMinimumBond(bytes32 indexed question_id, uint256 min_bond)",
@@ -106,6 +107,10 @@ export const conditionalTokensAbi = parseAbi([
 
 /** Kleros RealitioHomeArbitrationProxy on Gnosis: arbitration lifecycle as seen on the home chain. */
 export const klerosHomeProxyAbi = parseAbi([
+  // Permissionless relay steps (selectors verified in deployed bytecode 2026-10-02).
+  "function handleNotifiedRequest(bytes32 _questionID, address _requester)",
+  "function handleRejectedRequest(bytes32 _questionID, address _requester)",
+  "function reportArbitrationAnswer(bytes32 _questionID, bytes32 _lastHistoryHash, bytes32 _lastAnswerOrCommitmentID, address _lastAnswerer)",
   "event RequestNotified(bytes32 indexed _questionID, address indexed _requester, uint256 _maxPrevious)",
   "event RequestRejected(bytes32 indexed _questionID, address indexed _requester, uint256 _maxPrevious, string _reason)",
   "event RequestAcknowledged(bytes32 indexed _questionID, address indexed _requester)",

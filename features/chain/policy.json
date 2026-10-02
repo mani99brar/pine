@@ -1,0 +1,43 @@
+{
+  "version": "1.2.0",
+  "feature": "Chain contracts: ClaimRegistry and EvidenceRegistry",
+  "independent_review": true,
+  "integration_approval": true,
+  "max_verification_attempts": 3,
+  "workers": [
+    {
+      "node_id": "claim-registry",
+      "role": "contracts",
+      "required_check_kinds": ["build", "unit", "integration", "typecheck"],
+      "owned_paths": [
+        "contracts/src/ClaimRegistry.sol",
+        "contracts/src/libraries",
+        "contracts/test/claim-registry",
+        "contracts/test/fork",
+        "contracts/script"
+      ],
+      "checks": [
+        { "id": "build", "kind": "build", "argv": ["forge", "build", "--root", "contracts"], "timeout_seconds": 1200, "scenarios": [] },
+        { "id": "abi", "kind": "typecheck", "argv": ["node", "scripts/export-abis.mjs", "--check"], "timeout_seconds": 120, "scenarios": [] },
+        { "id": "unit", "kind": "unit", "argv": ["node", "scripts/forge-test-tap.mjs", "--match-path", "test/claim-registry/**/*.sol"], "timeout_seconds": 2400, "scenarios": [] },
+        { "id": "fork", "kind": "integration", "argv": ["node", "scripts/forge-test-tap.mjs", "--match-path", "test/fork/**/*.sol"], "timeout_seconds": 2400, "scenarios": [] },
+        { "id": "forbidden", "kind": "unit", "argv": ["node", "scripts/check-forbidden.mjs"], "timeout_seconds": 120, "scenarios": [] }
+      ]
+    },
+    {
+      "node_id": "evidence-registry",
+      "role": "contracts",
+      "required_check_kinds": ["build", "unit", "typecheck"],
+      "owned_paths": [
+        "contracts/src/EvidenceRegistry.sol",
+        "contracts/test/evidence-registry"
+      ],
+      "checks": [
+        { "id": "build", "kind": "build", "argv": ["forge", "build", "--root", "contracts"], "timeout_seconds": 1200, "scenarios": [] },
+        { "id": "abi", "kind": "typecheck", "argv": ["node", "scripts/export-abis.mjs", "--check"], "timeout_seconds": 120, "scenarios": [] },
+        { "id": "unit", "kind": "unit", "argv": ["node", "scripts/forge-test-tap.mjs", "--match-path", "test/evidence-registry/**/*.sol"], "timeout_seconds": 2400, "scenarios": [] },
+        { "id": "forbidden", "kind": "unit", "argv": ["node", "scripts/check-forbidden.mjs"], "timeout_seconds": 120, "scenarios": [] }
+      ]
+    }
+  ]
+}

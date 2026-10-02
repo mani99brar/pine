@@ -15,12 +15,20 @@
 
 import { encodeFunctionData, getAddress, type Abi, type AbiFunction, type Hex } from "viem";
 import { claimRegistryAbi, evidenceRegistryAbi } from "./abi/generated.js";
-import { erc20Abi, realityV3Abi, seerGnosisRouterAbi, seerRealityProxyAbi } from "./abi/external.js";
+import { erc20Abi, klerosHomeProxyAbi, realityV3Abi, seerGnosisRouterAbi, seerRealityProxyAbi } from "./abi/external.js";
 import { algebraPositionManagerAbi } from "./abi/algebra.js";
 import { deploymentHash, type DeploymentManifest } from "./deployment.js";
 import type { Address, Hex32 } from "./types.js";
 
-export type StaticTarget = "claimRegistry" | "evidenceRegistry" | "gnosisRouter" | "collateralToken" | "positionManager" | "realitio" | "realityProxy";
+export type StaticTarget =
+  | "claimRegistry"
+  | "evidenceRegistry"
+  | "gnosisRouter"
+  | "collateralToken"
+  | "positionManager"
+  | "realitio"
+  | "realityProxy"
+  | "klerosHomeProxy";
 
 export interface AllowlistEntry {
   id: string;
@@ -41,7 +49,6 @@ export const TX_ALLOWLIST: readonly AllowlistEntry[] = [
   entry("evidenceRegistry.commitEvidence", { kind: "static", key: "evidenceRegistry" }, evidenceRegistryAbi, "commitEvidence"),
   entry("evidenceRegistry.revealEvidence", { kind: "static", key: "evidenceRegistry" }, evidenceRegistryAbi, "revealEvidence"),
   entry("evidenceRegistry.publishEvidence", { kind: "static", key: "evidenceRegistry" }, evidenceRegistryAbi, "publishEvidence"),
-  entry("evidenceRegistry.addMirror", { kind: "static", key: "evidenceRegistry" }, evidenceRegistryAbi, "addMirror"),
   entry("gnosisRouter.splitFromBase", { kind: "static", key: "gnosisRouter" }, seerGnosisRouterAbi, "splitFromBase", "positive"),
   entry("gnosisRouter.splitPosition", { kind: "static", key: "gnosisRouter" }, seerGnosisRouterAbi, "splitPosition"),
   entry("gnosisRouter.mergeToBase", { kind: "static", key: "gnosisRouter" }, seerGnosisRouterAbi, "mergeToBase"),
@@ -57,7 +64,11 @@ export const TX_ALLOWLIST: readonly AllowlistEntry[] = [
   entry("realitio.fundAnswerBounty", { kind: "static", key: "realitio" }, realityV3Abi, "fundAnswerBounty", "positive"),
   entry("realitio.claimWinnings", { kind: "static", key: "realitio" }, realityV3Abi, "claimWinnings"),
   entry("realitio.withdraw", { kind: "static", key: "realitio" }, realityV3Abi, "withdraw"),
+  entry("realitio.reopenQuestion", { kind: "static", key: "realitio" }, realityV3Abi, "reopenQuestion"),
   entry("realityProxy.resolve", { kind: "static", key: "realityProxy" }, seerRealityProxyAbi, "resolve"),
+  entry("klerosHomeProxy.handleNotifiedRequest", { kind: "static", key: "klerosHomeProxy" }, klerosHomeProxyAbi, "handleNotifiedRequest"),
+  entry("klerosHomeProxy.handleRejectedRequest", { kind: "static", key: "klerosHomeProxy" }, klerosHomeProxyAbi, "handleRejectedRequest"),
+  entry("klerosHomeProxy.reportArbitrationAnswer", { kind: "static", key: "klerosHomeProxy" }, klerosHomeProxyAbi, "reportArbitrationAnswer"),
 ];
 
 const ALLOWLIST = new Map(TX_ALLOWLIST.map((item) => [item.id, item]));
@@ -129,6 +140,8 @@ function resolveStatic(manifest: DeploymentManifest, key: StaticTarget): Address
       return lower(manifest.seer.realitio);
     case "realityProxy":
       return lower(manifest.seer.realityProxy);
+    case "klerosHomeProxy":
+      return lower(manifest.kleros.homeProxy);
   }
 }
 
@@ -282,7 +295,15 @@ export function verifyPlan(plan: TxPlan, manifest: DeploymentManifest, context: 
       case "realitio.submitAnswer":
       case "realitio.fundAnswerBounty":
       case "realitio.claimWinnings":
+      case "klerosHomeProxy.handleNotifiedRequest":
+      case "klerosHomeProxy.handleRejectedRequest":
+      case "klerosHomeProxy.reportArbitrationAnswer":
         requireQuestion(args[0]);
+        break;
+      case "realitio.reopenQuestion":
+        // The question being reopened (last argument) must be a registered claim question; Reality itself enforces
+        // that the reopened content, arbitrator, timeout, opening time and min bond equal the original's.
+        requireQuestion(args[7]);
         break;
       case "realityProxy.resolve":
         requireMarket(args[0]);

@@ -42,7 +42,7 @@ describe("redactor", () => {
     expect(redact('{"password":"correct horse battery"}')).not.toContain("horse");
     expect(redact("insufficient token approval for spender")).toBe("insufficient token approval for spender");
     expect(redact("see https://github.com/org/repo/pull/12 for details")).toBe("see https://github.com/org/repo/pull/12 for details");
-    expect(redact("x".repeat(100_000)).length).toBeLessThanOrEqual(2_001);
+    expect(redact("x".repeat(100_000)).length).toBeLessThanOrEqual(2_003);
   });
   it("keeps public 0x data intact", () => {
     const hash = `0x${"ab".repeat(32)}`;

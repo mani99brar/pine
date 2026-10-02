@@ -3,10 +3,10 @@
 export const claimRegistryAbi = [
   {
     "type": "error",
-    "name": "AlreadyRegistered",
+    "name": "DuplicateClaim",
     "inputs": [
       {
-        "name": "market",
+        "name": "existingMarket",
         "type": "address",
         "internalType": "address"
       }
@@ -35,21 +35,15 @@ export const claimRegistryAbi = [
   },
   {
     "type": "error",
-    "name": "MarketNameForbiddenByte",
+    "name": "MinBondTooHigh",
     "inputs": [
       {
-        "name": "index",
+        "name": "minBond",
         "type": "uint256",
         "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "MarketNameLength",
-    "inputs": [
+      },
       {
-        "name": "length",
+        "name": "maximum",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -73,7 +67,7 @@ export const claimRegistryAbi = [
   },
   {
     "type": "error",
-    "name": "RevealWindowOutOfRange",
+    "name": "RevealDeadlineOutOfRange",
     "inputs": [
       {
         "name": "revealDeadline",
@@ -89,6 +83,28 @@ export const claimRegistryAbi = [
         "name": "latest",
         "type": "uint64",
         "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TitleForbiddenByte",
+    "inputs": [
+      {
+        "name": "index",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TitleLength",
+    "inputs": [
+      {
+        "name": "length",
+        "type": "uint256",
+        "internalType": "uint256"
       }
     ]
   },
@@ -116,18 +132,7 @@ export const claimRegistryAbi = [
   },
   {
     "type": "error",
-    "name": "UriLength",
-    "inputs": [
-      {
-        "name": "length",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "ZeroHash",
+    "name": "ZeroValue",
     "inputs": []
   },
   {
@@ -153,55 +158,96 @@ export const claimRegistryAbi = [
         "internalType": "bytes32"
       },
       {
-        "name": "policyDocumentSha256",
-        "type": "bytes32",
+        "name": "claim",
+        "type": "tuple",
         "indexed": false,
-        "internalType": "bytes32"
+        "internalType": "struct IClaimRegistry.Claim",
+        "components": [
+          {
+            "name": "creator",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "createdAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "evidenceDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "revealDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "repositoryId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "commit",
+            "type": "bytes20",
+            "internalType": "bytes20"
+          },
+          {
+            "name": "claimDocumentSha256",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "policyDocumentSha256",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "questionId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "conditionId",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "marketNameHash",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "minBond",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "yesToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "noToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "invalidToken",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
       },
       {
-        "name": "repositoryCommit",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "questionId",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "conditionId",
-        "type": "bytes32",
-        "indexed": false,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "evidenceDeadline",
-        "type": "uint64",
-        "indexed": false,
-        "internalType": "uint64"
-      },
-      {
-        "name": "revealDeadline",
-        "type": "uint64",
-        "indexed": false,
-        "internalType": "uint64"
-      },
-      {
-        "name": "minBond",
-        "type": "uint256",
-        "indexed": false,
-        "internalType": "uint256"
-      },
-      {
-        "name": "marketName",
+        "name": "title",
         "type": "string",
         "indexed": false,
         "internalType": "string"
       },
       {
-        "name": "claimDocumentUri",
+        "name": "marketName",
         "type": "string",
         "indexed": false,
         "internalType": "string"
@@ -242,9 +288,14 @@ export const claimRegistryAbi = [
             "internalType": "bytes32"
           },
           {
-            "name": "repositoryCommit",
-            "type": "bytes32",
-            "internalType": "bytes32"
+            "name": "repositoryId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "commit",
+            "type": "bytes20",
+            "internalType": "bytes20"
           },
           {
             "name": "evidenceDeadline",
@@ -262,12 +313,7 @@ export const claimRegistryAbi = [
             "internalType": "uint256"
           },
           {
-            "name": "marketName",
-            "type": "string",
-            "internalType": "string"
-          },
-          {
-            "name": "claimDocumentUri",
+            "name": "title",
             "type": "string",
             "internalType": "string"
           }
@@ -282,6 +328,19 @@ export const claimRegistryAbi = [
       }
     ],
     "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "evidenceRegistry",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -320,17 +379,22 @@ export const claimRegistryAbi = [
             "internalType": "uint64"
           },
           {
+            "name": "repositoryId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "commit",
+            "type": "bytes20",
+            "internalType": "bytes20"
+          },
+          {
             "name": "claimDocumentSha256",
             "type": "bytes32",
             "internalType": "bytes32"
           },
           {
             "name": "policyDocumentSha256",
-            "type": "bytes32",
-            "internalType": "bytes32"
-          },
-          {
-            "name": "repositoryCommit",
             "type": "bytes32",
             "internalType": "bytes32"
           },
@@ -353,6 +417,21 @@ export const claimRegistryAbi = [
             "name": "minBond",
             "type": "uint256",
             "internalType": "uint256"
+          },
+          {
+            "name": "yesToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "noToken",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "invalidToken",
+            "type": "address",
+            "internalType": "address"
           }
         ]
       }
@@ -380,6 +459,30 @@ export const claimRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "marketOf",
+    "inputs": [
+      {
+        "name": "creator",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "claimDocumentSha256",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_EVIDENCE_WINDOW",
     "inputs": [],
     "outputs": [
@@ -393,7 +496,7 @@ export const claimRegistryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_MARKET_NAME_BYTES",
+    "name": "MAX_MIN_BOND",
     "inputs": [],
     "outputs": [
       {
@@ -419,7 +522,7 @@ export const claimRegistryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_URI_BYTES",
+    "name": "MAX_TITLE_BYTES",
     "inputs": [],
     "outputs": [
       {
@@ -471,6 +574,67 @@ export const claimRegistryAbi = [
   },
   {
     "type": "function",
+    "name": "renderQuestion",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IClaimRegistry.CreateClaimParams",
+        "components": [
+          {
+            "name": "claimDocumentSha256",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "policyDocumentSha256",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "repositoryId",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "commit",
+            "type": "bytes20",
+            "internalType": "bytes20"
+          },
+          {
+            "name": "evidenceDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "revealDeadline",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "minBond",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "title",
+            "type": "string",
+            "internalType": "string"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "string",
+        "internalType": "string"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "seerMarketFactory",
     "inputs": [],
     "outputs": [
@@ -511,6 +675,11 @@ export const evidenceRegistryAbi = [
         "internalType": "uint64"
       }
     ]
+  },
+  {
+    "type": "error",
+    "name": "NotClaimRegistry",
+    "inputs": []
   },
   {
     "type": "error",
@@ -556,17 +725,6 @@ export const evidenceRegistryAbi = [
     "inputs": [
       {
         "name": "submissionId",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ]
-  },
-  {
-    "type": "error",
-    "name": "UriLength",
-    "inputs": [
-      {
-        "name": "length",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -632,31 +790,6 @@ export const evidenceRegistryAbi = [
   },
   {
     "type": "event",
-    "name": "EvidenceMirrorAdded",
-    "inputs": [
-      {
-        "name": "submissionId",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
-      },
-      {
-        "name": "submitter",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "uri",
-        "type": "string",
-        "indexed": false,
-        "internalType": "string"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "EvidencePublished",
     "inputs": [
       {
@@ -682,12 +815,6 @@ export const evidenceRegistryAbi = [
         "type": "bytes32",
         "indexed": false,
         "internalType": "bytes32"
-      },
-      {
-        "name": "uri",
-        "type": "string",
-        "indexed": false,
-        "internalType": "string"
       },
       {
         "name": "publishedAt",
@@ -727,12 +854,6 @@ export const evidenceRegistryAbi = [
         "internalType": "bytes32"
       },
       {
-        "name": "uri",
-        "type": "string",
-        "indexed": false,
-        "internalType": "string"
-      },
-      {
         "name": "committedAt",
         "type": "uint64",
         "indexed": false,
@@ -746,24 +867,6 @@ export const evidenceRegistryAbi = [
       }
     ],
     "anonymous": false
-  },
-  {
-    "type": "function",
-    "name": "addMirror",
-    "inputs": [
-      {
-        "name": "submissionId",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "uri",
-        "type": "string",
-        "internalType": "string"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -907,19 +1010,6 @@ export const evidenceRegistryAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_URI_BYTES",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "publishEvidence",
     "inputs": [
       {
@@ -931,11 +1021,6 @@ export const evidenceRegistryAbi = [
         "name": "contentSha256",
         "type": "bytes32",
         "internalType": "bytes32"
-      },
-      {
-        "name": "uri",
-        "type": "string",
-        "internalType": "string"
       }
     ],
     "outputs": [
@@ -965,11 +1050,6 @@ export const evidenceRegistryAbi = [
         "name": "salt",
         "type": "bytes32",
         "internalType": "bytes32"
-      },
-      {
-        "name": "uri",
-        "type": "string",
-        "internalType": "string"
       }
     ],
     "outputs": [],

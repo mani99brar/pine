@@ -2,12 +2,14 @@
 //
 // Layout: packages/api/migrations/<group>/<NNNN>_<snake_name>.sql, groups applied in MIGRATION_GROUPS order, files
 // within a group in ascending NNNN order. Each lane owns exactly one group directory:
-//   platform -> migrations/platform (0001_core.sql is frozen; the platform lane adds 0002+)
-//   claims   -> migrations/claims
-//   markets  -> migrations/markets
+//   platform -> migrations/platform  (0001_core.sql is frozen; the platform-core lane adds 0002+)
+//   gateways -> migrations/gateways  (platform-gateways lane)
+//   claims   -> migrations/claims    (claims lane)
+//   markets  -> migrations/markets   (markets lane)
+//   funding  -> migrations/funding   (funding lane)
 // Rules (SEC-OPS-10): migrations are append-only and run by a separate `migrate` command under a DDL-capable role.
 // The API process only calls verifyMigrations() at startup and refuses to start when anything is pending, modified,
-// out of order or unknown. Cross-group foreign keys may only reference platform tables. Each file runs in its own
+// out of order or unknown. Cross-group foreign keys may only reference the frozen `users` table. Each file runs in its own
 // transaction with lock and statement timeouts. SQL files must use LF line endings (.gitattributes).
 
 import { createHash } from "node:crypto";
@@ -15,7 +17,7 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const MIGRATION_GROUPS = ["platform", "claims", "markets"] as const;
+export const MIGRATION_GROUPS = ["platform", "gateways", "claims", "markets", "funding"] as const;
 export type MigrationGroup = (typeof MIGRATION_GROUPS)[number];
 
 const FILE_PATTERN = /^(\d{4})_[a-z0-9_]+\.sql$/;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeEvidenceCommitment, EVIDENCE_COMMITMENT_TYPEHASH, evidenceManifestSchema } from "./evidence.js";
+import { computeEvidenceCommitment, encodeEvidenceManifest, EVIDENCE_COMMITMENT_TYPEHASH, evidenceManifestSchema, parseEvidenceManifestBytes } from "./evidence.js";
 import { EVIDENCE_COMMITMENT_VECTOR } from "./testing/vectors.js";
 
 describe("evidence commitment", () => {
@@ -29,17 +29,20 @@ describe("evidence commitment", () => {
 describe("evidence manifest", () => {
   const manifest = {
     schema: "urn:pine:evidence-manifest:v1",
+    submitter: "0x3333333333333333333333333333333333333333",
     claim: { chainId: 100, market: "0x2222222222222222222222222222222222222222", claimDocumentSha256: `0x${"ab".repeat(32)}`, commit: "a".repeat(40) },
     title: "Reporter deposit drawn from arbitration allocation",
     violatedRequirement: "Reporter-deposit principal must not be funded from arbitration allocations.",
     summary: "s",
     expectedBehavior: "e",
     actualBehavior: "a",
-    reproduction: { environment: "node 24", setup: "pnpm i", command: "pnpm test repro" },
-    artifacts: [{ name: "repro.tar.gz", sha256: `0x${"cd".repeat(32)}`, size: 10, mediaType: "application/gzip" }],
+    reproduction: { environment: "node 24", setup: "pnpm i", command: "pnpm test repro", initialState: "", notes: "" },
+    artifacts: [{ name: "repro.tar.gz", sha256: `0x${"cd".repeat(32)}`, size: 10, mediaType: "application/gzip", locators: [], description: "" }],
   };
-  it("accepts a valid manifest", () => {
-    expect(evidenceManifestSchema.parse(manifest).artifacts[0]?.uris).toEqual([]);
+  it("accepts a valid manifest and round-trips canonical bytes", () => {
+    const { bytes, sha256 } = encodeEvidenceManifest(manifest as never);
+    expect(parseEvidenceManifestBytes(bytes, sha256).submitter).toBe(manifest.submitter);
+    expect(() => parseEvidenceManifestBytes(new TextEncoder().encode(` ${new TextDecoder().decode(bytes)}`))).toThrow(/canonical/);
   });
   it("rejects unknown keys, path-like artifact names and bad schema ids", () => {
     expect(() => evidenceManifestSchema.parse({ ...manifest, extra: 1 })).toThrow();

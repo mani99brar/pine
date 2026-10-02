@@ -82,14 +82,19 @@ export function claimCreated(b: EventBuilder, seed: string, overrides: Partial<C
     creator: fixture.creator,
     claimDocumentSha256: hex32(`doc:${seed}`),
     policyDocumentSha256: hex32("policy:BOT-001@0.1.0"),
-    repositoryCommit: `0x${"ab".repeat(20)}${"00".repeat(12)}` as Hex32,
+    repositoryId: 123_456_789,
+    commit: "ab".repeat(20),
     questionId: fixture.questionId,
     conditionId: fixture.conditionId,
     evidenceDeadline: fixture.evidenceDeadline,
     revealDeadline: fixture.revealDeadline,
     minBond: 10n ** 18n,
-    marketName: `Was a reproducible counterexample to claim ${seed} submitted?`,
-    claimDocumentUri: `ipfs://bafkrei${seed.replace(/[^a-z2-7]/g, "a").padEnd(52, "a").slice(0, 52)}`,
+    title: `Claim ${seed}`,
+    marketName: `Pine claim "Claim ${seed}": was a reproducible counterexample submitted?`,
+    marketNameHash: hex32(`Pine claim "Claim ${seed}": was a reproducible counterexample submitted?`),
+    yesToken: address(`yes:${seed}`),
+    noToken: address(`no:${seed}`),
+    invalidToken: address(`invalid:${seed}`),
   };
 }
 
@@ -108,18 +113,15 @@ export function scenarioClaimsAndEvidence(): { events: ChainEvent[]; claims: Cla
   const researcher = address("researcher");
   const other = address("other");
   events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceCommitted", submissionId: 1n, market: first.market, submitter: researcher, commitment: hex32("c1"), committedAt: b.now() });
-  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidencePublished", submissionId: 2n, market: second.market, submitter: other, contentSha256: hex32("content2"), uri: "ipfs://bafkreicontent2", publishedAt: b.now() });
+  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidencePublished", submissionId: 2n, market: second.market, submitter: other, contentSha256: hex32("content2"), publishedAt: b.now() });
   b.nextBlock(3600);
   events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceCommitted", submissionId: 3n, market: first.market, submitter: other, commitment: hex32("c3"), committedAt: b.now() });
   b.nextBlock(86_400);
-  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceRevealed", submissionId: 1n, market: first.market, submitter: researcher, contentSha256: hex32("content1"), uri: "ipfs://bafkreicontent1", committedAt: b.now() - 86_400 - 3_605, revealedAt: b.now() });
+  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceRevealed", submissionId: 1n, market: first.market, submitter: researcher, contentSha256: hex32("content1"), committedAt: b.now() - 86_400 - 3_605, revealedAt: b.now() });
   // A reveal for an id that was never committed is ignored, never a crash.
-  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceRevealed", submissionId: 99n, market: first.market, submitter: researcher, contentSha256: hex32("ghost"), uri: "ipfs://ghost", committedAt: 1, revealedAt: b.now() });
-  // Mirrors: only for disclosed submissions, capped at MAX_MIRRORS (16).
-  for (let index = 0; index < 18; index += 1) {
-    events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceMirrorAdded", submissionId: 1n, submitter: researcher, uri: `https://mirror${index}.example/c1` });
-  }
-  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceMirrorAdded", submissionId: 3n, submitter: other, uri: "https://ignored.example" });
+  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceRevealed", submissionId: 99n, market: first.market, submitter: researcher, contentSha256: hex32("ghost"), committedAt: 1, revealedAt: b.now() });
+  // A second reveal of an already revealed submission is ignored (the registry reverts it; defensive).
+  events.push({ ...b.envelope(SCENARIO_ADDRESSES.evidenceRegistry), kind: "EvidenceRevealed", submissionId: 1n, market: first.market, submitter: researcher, contentSha256: hex32("other-content"), committedAt: 1, revealedAt: b.now() });
   return { events, claims: [first, twin, second].map(toFixture), builder: b };
 }
 

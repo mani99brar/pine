@@ -22,10 +22,34 @@ conflict, the requirement wins; when a requirement is ambiguous, choose the safe
 
 ## Frozen shared contracts (never modify inside a lane)
 
-- `contracts/src/interfaces/**`, `packages/shared/src/**`, `packages/api/src/contracts/**`,
+- `contracts/src/interfaces/**`, `packages/shared/src/**`, `packages/api/src/contracts/**`, `packages/api/src/modules.ts`,
   `packages/api/migrations/platform/0001_core.sql`, `policies/catalog/**`, `docs/**`, `SPEC.md`, `features/**`, root config files.
 - Implement against these interfaces exactly. If an interface is wrong or insufficient, stop and ask a question
   (completion status `question`) instead of working around it.
+
+## Security requirements
+
+`docs/security/requirements.md` lists every requirement with a stable id (SEC-AUTH-*, SEC-GH-*, SEC-TX-*, SEC-CLAIM-*,
+SEC-EVID-*, SEC-AGENT-*, SEC-SC-*, SEC-IDX-*, SEC-OPS-*, SEC-LEGAL-*). Decisions that override or settle them are in
+`docs/adr/`. When you implement a requirement, name its id in the negative test that proves the attack fails
+(e.g. `it("SEC-AUTH-04 rejects a SIWE message for another chain", ...)`).
+
+## Web security (API)
+
+- Sessions: opaque 256-bit tokens prefixed `pine_s1_`, stored as SHA-256; cookie `__Host-pine_session`, Secure, HttpOnly,
+  SameSite=Lax, Path=/. Rotate on login, GitHub link and privilege change.
+- CSRF: unsafe methods require an exact Origin allowlist match, a non-cross-site `Sec-Fetch-Site`, the custom header
+  `x-pine-csrf: 1` and `content-type: application/json` (multipart only on the upload route).
+- SIWE: never use viem's `generateSiweNonce` (Math.random) or rely on `verifySiweMessage` alone; verify every EIP-4361
+  field explicitly and recover EOA signatures locally (no RPC-first ERC-6492 path). Smart-contract-wallet login is off.
+- Untrusted content is served only from the separate user-content origin, as `application/octet-stream` with
+  `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox; default-src 'none'`.
+  Never render HTML/Markdown server-side.
+- Logs: Fastify request logging must not include query strings, cookies or authorization headers; pass log, error,
+  audit and notification strings through the redactor (`packages/api/src/contracts/redact.ts`).
+- SSRF: the only server-side fetches allowed are the configured GitHub API, the configured RPC endpoints, and
+  content-addressed reads from configured IPFS gateways (redirects disabled, size-capped, digest verified after download).
+- `trustProxy` is off unless explicitly configured; client IPs come only from the configured proxy hop.
 
 ## Code rules
 
@@ -40,8 +64,14 @@ conflict, the requirement wins; when a requirement is ambiguous, choose the safe
 - Time: UTC everywhere; inject a clock; deadlines compare with the exact operator stated by the spec (`<` means strictly before).
 - Idempotency: every chain-facing or multi-step operation is a persisted state machine with idempotency keys; a crash
   between steps must never cause a duplicate transaction plan, double count or lost record.
-- Solidity: checks-effects-interactions, custom errors, no upgradeability, no `tx.origin`, no unbounded loops over
-  user-growable storage, explicit `uint64` timestamps, events for every state change an indexer needs.
+- Solidity: checks-effects-interactions plus `nonReentrant` on every function that makes an external call, custom
+  errors, no upgradeability, no owner/admin/pause, no `tx.origin`, no unbounded loops over user-growable storage, explicit
+  `uint64` timestamps with SafeCast for narrowing, events for every state change an indexer needs. Treat every token
+  transfer as a possible callback (ERC-677/ERC-777/ERC-1155 hooks exist on Gnosis). Contracts never hold user funds.
+  Deadline operators are frozen in the interface NatSpec (commit/publish: `block.timestamp < evidenceDeadline`;
+  reveal: `block.timestamp < revealDeadline`; Reality opening time = `revealDeadline`).
+- Avoid solc patterns with known bug classes even on 0.8.37: no named parameters in `require` with custom errors,
+  no `delete` of memory `bytes` elements, no mutual recursion.
 
 ## Tests
 

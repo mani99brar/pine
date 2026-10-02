@@ -4,7 +4,7 @@
 //
 // Sources (all on the configured chain, Gnosis = 100):
 //   ClaimRegistry          ClaimCreated
-//   EvidenceRegistry       EvidenceCommitted, EvidenceRevealed, EvidencePublished, EvidenceMirrorAdded
+//   EvidenceRegistry       EvidenceCommitted, EvidenceRevealed, EvidencePublished
 //   Reality.eth v3         LogNewAnswer, LogAnswerReveal, LogNotifyOfArbitrationRequest, LogCancelArbitration,
 //                          LogFinalize, LogReopenQuestion, LogFundAnswerBounty   (only for tracked question ids)
 //   ConditionalTokens      ConditionResolution                                     (only for tracked condition ids)
@@ -34,14 +34,24 @@ export interface ClaimCreatedEvent extends EventEnvelope {
   creator: Address;
   claimDocumentSha256: Hex32;
   policyDocumentSha256: Hex32;
-  repositoryCommit: Hex32;
+  /** GitHub numeric repository id (uint64 on-chain; < 2^53 in practice, enforced by decoders). */
+  repositoryId: number;
+  /** 40 lowercase hex characters, no 0x (bytes20 on-chain). */
+  commit: string;
   questionId: Hex32;
   conditionId: Hex32;
   evidenceDeadline: number;
   revealDeadline: number;
   minBond: bigint;
+  title: string;
+  /** The question composed on-chain by the registry. */
   marketName: string;
-  claimDocumentUri: string;
+  /** keccak256 of marketName (from the event's Claim struct). */
+  marketNameHash: Hex32;
+  /** Wrapped outcome tokens (Yes, No, Invalid), lowercase. */
+  yesToken: Address;
+  noToken: Address;
+  invalidToken: Address;
 }
 
 export interface EvidenceCommittedEvent extends EventEnvelope {
@@ -59,7 +69,6 @@ export interface EvidenceRevealedEvent extends EventEnvelope {
   market: Address;
   submitter: Address;
   contentSha256: Hex32;
-  uri: string;
   committedAt: number;
   revealedAt: number;
 }
@@ -70,15 +79,7 @@ export interface EvidencePublishedEvent extends EventEnvelope {
   market: Address;
   submitter: Address;
   contentSha256: Hex32;
-  uri: string;
   publishedAt: number;
-}
-
-export interface EvidenceMirrorAddedEvent extends EventEnvelope {
-  kind: "EvidenceMirrorAdded";
-  submissionId: bigint;
-  submitter: Address;
-  uri: string;
 }
 
 /** Reality LogNewAnswer. For a commitment (isCommitment), `answer` is the commitment id until LogAnswerReveal. */
@@ -175,7 +176,6 @@ export type ChainEvent =
   | EvidenceCommittedEvent
   | EvidenceRevealedEvent
   | EvidencePublishedEvent
-  | EvidenceMirrorAddedEvent
   | RealityNewAnswerEvent
   | RealityAnswerRevealEvent
   | RealityArbitrationRequestedEvent

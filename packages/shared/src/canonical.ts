@@ -64,8 +64,11 @@ export function sha256FromRawCid(cidText: string): Hex32 | null {
   return `0x${Buffer.from(cid.multihash.digest).toString("hex")}` as Hex32;
 }
 
-/** Largest content addressed by a raw-codec CID: one IPFS block (larger raw blocks do not transfer over Bitswap). */
-export const RAW_CID_MAX_BYTES = 1024 * 1024;
+/**
+ * Largest content Pine stores: one raw IPFS block of the default chunk size, so the raw CID computed here equals what
+ * `ipfs add --cid-version=1 --raw-leaves` (and pinning services) return for the same bytes.
+ */
+export const RAW_CID_MAX_BYTES = 262_144;
 
 export interface ContentIdentity {
   sha256: Hex32;

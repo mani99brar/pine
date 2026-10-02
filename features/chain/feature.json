@@ -1,0 +1,17 @@
+{
+  "version": "2.3.0",
+  "name": "Immutable ClaimRegistry and EvidenceRegistry contracts for Seer claim markets on Gnosis",
+  "branch_prefix": "feature/chain",
+  "prd": "docs/prd/PRD-01-chain.md",
+  "policy": "policy.json",
+  "workers": [
+    { "node_id": "claim-registry", "task": "claim-registry-task.md" },
+    { "node_id": "evidence-registry", "task": "evidence-registry-task.md" }
+  ],
+  "reviewers": [
+    { "reviewer_id": "general", "prompt": "builtin:general" },
+    { "reviewer_id": "coverage", "prompt": "builtin:coverage" },
+    { "reviewer_id": "security", "prompt": "security-review.md" }
+  ],
+  "sidecar": { "prompt": "builtin:senior-review", "cadence_seconds": 1800, "max_passes": 12 }
+}

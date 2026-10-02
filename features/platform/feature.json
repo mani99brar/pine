@@ -1,0 +1,17 @@
+{
+  "version": "2.3.0",
+  "name": "API platform: hardened HTTP app, SIWE sessions, CSRF, quotas, audit, moderation, compliance, jobs, GitHub, content and chain gateways",
+  "branch_prefix": "feature/platform",
+  "prd": "docs/prd/PRD-02-platform.md",
+  "policy": "policy.json",
+  "workers": [
+    { "node_id": "platform-core", "task": "platform-core-task.md" },
+    { "node_id": "platform-gateways", "task": "platform-gateways-task.md" }
+  ],
+  "reviewers": [
+    { "reviewer_id": "general", "prompt": "builtin:general" },
+    { "reviewer_id": "coverage", "prompt": "builtin:coverage" },
+    { "reviewer_id": "security", "prompt": "security-review.md" }
+  ],
+  "sidecar": { "prompt": "builtin:senior-review", "cadence_seconds": 1800, "max_passes": 12 }
+}

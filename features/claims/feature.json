@@ -1,0 +1,16 @@
+{
+  "version": "2.3.0",
+  "name": "Claims module: policy catalog, GitHub browsing, drafts, immutable previews, publication plans, integrity verification and agent feeds",
+  "branch_prefix": "feature/claims",
+  "prd": "docs/prd/PRD-03-claims.md",
+  "policy": "policy.json",
+  "workers": [
+    { "node_id": "claims", "task": "claims-task.md" }
+  ],
+  "reviewers": [
+    { "reviewer_id": "general", "prompt": "builtin:general" },
+    { "reviewer_id": "coverage", "prompt": "builtin:coverage" },
+    { "reviewer_id": "security", "prompt": "security-review.md" }
+  ],
+  "sidecar": { "prompt": "builtin:senior-review", "cadence_seconds": 1800, "max_passes": 12 }
+}

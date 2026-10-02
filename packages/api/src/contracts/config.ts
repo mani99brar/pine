@@ -39,11 +39,11 @@ export interface SeerAddresses {
 }
 
 export interface AmmAddresses {
-  /** Swapr v3 (Algebra) factory on Gnosis. */
+  /** Swapr v3 (Algebra V1.9) factory on Gnosis. */
   factory: Address;
   /** Swapr v3 (Algebra) NonfungiblePositionManager. */
   positionManager: Address;
-  swapRouter: Address;
+  /** Algebra Quoter (eth_call only) for executable depth. No swap plans exist, so no router is configured. */
   quoter: Address;
 }
 
@@ -68,7 +68,7 @@ export interface ClaimRules {
 }
 
 export interface EvidenceRules {
-  /** Largest accepted upload, bytes. */
+  /** Largest accepted upload, bytes; at most 262144 (one raw IPFS block). */
   maxUploadBytes: number;
   /** Media types accepted for artifact uploads (manifests are always application/json). */
   allowedArtifactMediaTypes: string[];
@@ -78,11 +78,11 @@ export interface AppConfig {
   environment: DeploymentEnvironment;
   /** Public origin of the web app, e.g. https://verify.example.org (SIWE domain/uri and links derive from it). */
   publicOrigin: string;
-  /** Public origin of this API, e.g. https://api.verify.example.org. */
+  /** Public origin of this API. Must equal publicOrigin in production (the API is served same-origin under /api). */
   apiOrigin: string;
   /**
    * Separate origin that serves untrusted user content (evidence downloads) with attachment disposition and a
-   * sandbox CSP, e.g. https://usercontent.verify.example.org. Must differ from publicOrigin and apiOrigin.
+   * sandbox CSP. Must be a different registrable domain (not a subdomain) from publicOrigin, e.g. https://pine-usercontent.net.
    */
   userContentOrigin: string;
   chainId: number;

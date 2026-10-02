@@ -7,7 +7,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
 import { createPublicClient, custom, type PublicClient } from "viem";
 import { gnosis } from "viem/chains";
-import { identify } from "@pine/shared/canonical";
+import { identify, RAW_CID_MAX_BYTES } from "@pine/shared/canonical";
 import { MemoryReadModel } from "@pine/shared/testing/memory-read-model";
 import type { Address, Hex32 } from "@pine/shared/types";
 import type {
@@ -93,8 +93,8 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   return {
     environment: "test",
     publicOrigin: "https://app.pine.test",
-    apiOrigin: "https://api.pine.test",
-    userContentOrigin: "https://usercontent.pine.test",
+    apiOrigin: "https://app.pine.test",
+    userContentOrigin: "https://pine-usercontent.test",
     chainId: 100,
     contracts: { claimRegistry: TEST_ADDRESSES.claimRegistry, evidenceRegistry: TEST_ADDRESSES.evidenceRegistry, deploymentBlock: 1_000n },
     seer: {
@@ -113,8 +113,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     amm: {
       factory: "0xa0864cca6e114013ab0e27cbd5b6f4c8947da766",
       positionManager: "0x91fd594c46d8b01e62dbdebed2401dde01817834",
-      swapRouter: "0x0000000000000000000000000000000000005a9e",
-      quoter: "0x0000000000000000000000000000000000000a07",
+      quoter: "0xcbad9fdf0d2814659eb26f600efdeaf005eda0f7",
     },
     claims: {
       minEvidenceWindowSeconds: 72 * 3_600,
@@ -128,7 +127,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       questionLanguage: "en_US",
     },
     evidence: {
-      maxUploadBytes: 25 * 1024 * 1024,
+      maxUploadBytes: 262_144,
       allowedArtifactMediaTypes: ["application/json", "text/plain", "application/gzip", "application/zip", "application/x-tar", "image/png", "image/jpeg"],
     },
     indexerBackend: "native",
@@ -159,8 +158,9 @@ export class FakeClock implements Clock {
 export class MemoryContentStore implements ContentStore {
   readonly items = new Map<Hex32, { bytes: Uint8Array; record: StoredContent }>();
   async put(input: { bytes: Uint8Array; declaredMediaType: string; maxBytes: number }): Promise<StoredContent> {
-    if (input.bytes.byteLength > input.maxBytes) throw new ApiError("PAYLOAD_TOO_LARGE", "Content exceeds the size limit");
+    if (input.bytes.byteLength > Math.min(input.maxBytes, RAW_CID_MAX_BYTES)) throw new ApiError("PAYLOAD_TOO_LARGE", "Content exceeds the size limit");
     const id = identify(input.bytes);
+    if (id.cid === null) throw new ApiError("PAYLOAD_TOO_LARGE", "Content exceeds the size limit");
     const existing = this.items.get(id.sha256);
     if (existing) return { ...existing.record };
     const record: StoredContent = { sha256: id.sha256, cid: id.cid, size: id.size, declaredMediaType: input.declaredMediaType };
@@ -173,6 +173,17 @@ export class MemoryContentStore implements ContentStore {
   }
   async has(sha256: Hex32): Promise<boolean> {
     return this.items.has(sha256.toLowerCase() as Hex32);
+  }
+  /** Simulated remote IPFS copies (tests put bytes here to model content pinned elsewhere). */
+  readonly remote = new Map<Hex32, Uint8Array>();
+  async retrieve(sha256: Hex32, maxBytes: number): Promise<Uint8Array | null> {
+    const key = sha256.toLowerCase() as Hex32;
+    const local = this.items.get(key);
+    if (local) return new Uint8Array(local.bytes);
+    const remote = this.remote.get(key);
+    if (!remote || remote.byteLength > maxBytes || identify(remote).sha256 !== key) return null;
+    await this.put({ bytes: remote, declaredMediaType: "application/octet-stream", maxBytes });
+    return new Uint8Array(remote);
   }
 }
 
@@ -366,6 +377,11 @@ export function createScriptedChain(handler: RpcHandler = async (method) => {
   return {
     chainId: 100,
     publicClient,
+    async finalizedBlock() {
+      const block = (await current("eth_getBlockByNumber", ["finalized", false])) as { number?: string } | null;
+      if (!block?.number) throw new Error("Unscripted finalized block");
+      return BigInt(block.number);
+    },
     setHandler(next: RpcHandler) {
       current = next;
     },

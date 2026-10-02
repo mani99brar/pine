@@ -2,6 +2,7 @@
 
 import { encodeAbiParameters, keccak256, toBytes } from "viem";
 import { z } from "zod";
+import { canonicalBytes, RAW_CID_MAX_BYTES, sha256Hex, type JsonValue } from "./canonical.js";
 import type { Address, Hex32 } from "./types.js";
 import { addressSchema, gitObjectIdSchema, hex32Schema } from "./types.js";
 
@@ -49,30 +50,36 @@ export function computeEvidenceCommitment(input: CommitmentInput): Hex32 {
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Evidence manifest v1: the document whose SHA-256 is committed/revealed on-chain. Small UTF-8 JSON (RFC 8785
-// canonical form recommended, not required: the hash is over the exact bytes). Artifacts are referenced by SHA-256
-// and are opaque, untrusted blobs that the platform never extracts, renders or executes.
+// Evidence manifest v1: the document whose SHA-256 is committed/revealed on-chain. RFC 8785 canonical UTF-8 JSON of
+// at most 256 KiB (one raw IPFS block; its CID is derivable from the digest). It names its submitter, so a copied
+// manifest revealed by someone else is attributable to the original author. Artifacts are referenced by SHA-256 (each
+// at most 256 KiB) and are opaque, untrusted blobs that the platform never extracts, renders or executes.
 // ---------------------------------------------------------------------------------------------------------------
 
 export const EVIDENCE_MANIFEST_SCHEMA_ID = "urn:pine:evidence-manifest:v1";
-export const EVIDENCE_MANIFEST_MAX_BYTES = 256 * 1024;
+export const EVIDENCE_MANIFEST_MAX_BYTES = RAW_CID_MAX_BYTES;
+export const EVIDENCE_ARTIFACT_MAX_BYTES = RAW_CID_MAX_BYTES;
 
 const text = (max: number) => z.string().min(1).max(max);
 
 export const evidenceArtifactSchema = z
   .object({
+    // eslint-disable-next-line no-control-regex -- rejects control characters in file names
     name: text(200).regex(/^[^/\\\u0000-\u001f]+$/, "plain file name without path separators or control characters"),
     sha256: hex32Schema,
-    size: z.number().int().nonnegative().max(1024 * 1024 * 1024),
-    mediaType: text(100).regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/i),
-    uris: z.array(text(512)).max(8).default([]),
-    description: z.string().max(2_000).optional(),
+    size: z.number().int().nonnegative().max(EVIDENCE_ARTIFACT_MAX_BYTES),
+    mediaType: text(100).regex(/^[a-z0-9][a-z0-9!#$&^_.+-]*\/[a-z0-9][a-z0-9!#$&^_.+-]*$/),
+    /** Inert, untrusted text the platform never fetches; the artifact is located by its sha256 (raw CID). */
+    locators: z.array(text(512)).max(4),
+    description: z.string().max(2_000),
   })
   .strict();
 
 export const evidenceManifestSchema = z
   .object({
     schema: z.literal(EVIDENCE_MANIFEST_SCHEMA_ID),
+    /** The wallet that commits/publishes this manifest on the EvidenceRegistry. */
+    submitter: addressSchema,
     claim: z
       .object({
         chainId: z.number().int().positive(),
@@ -92,13 +99,47 @@ export const evidenceManifestSchema = z
         environment: text(4_000),
         setup: text(10_000),
         command: text(2_000),
-        initialState: z.string().max(10_000).optional(),
-        notes: z.string().max(10_000).optional(),
+        initialState: z.string().max(10_000),
+        notes: z.string().max(10_000),
       })
       .strict(),
-    artifacts: z.array(evidenceArtifactSchema).max(32).default([]),
+    artifacts: z.array(evidenceArtifactSchema).max(16),
   })
   .strict();
 
 export type EvidenceManifest = z.infer<typeof evidenceManifestSchema>;
 export type EvidenceArtifact = z.infer<typeof evidenceArtifactSchema>;
+
+export class EvidenceManifestError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "EvidenceManifestError";
+  }
+}
+
+export function encodeEvidenceManifest(manifest: EvidenceManifest): { bytes: Uint8Array; sha256: Hex32 } {
+  const parsed = evidenceManifestSchema.safeParse(manifest);
+  if (!parsed.success) throw new EvidenceManifestError("invalid evidence manifest");
+  const bytes = canonicalBytes(parsed.data as unknown as JsonValue);
+  if (bytes.byteLength > EVIDENCE_MANIFEST_MAX_BYTES) throw new EvidenceManifestError("evidence manifest exceeds 256 KiB");
+  return { bytes, sha256: sha256Hex(bytes) };
+}
+
+/** Accepts only valid UTF-8 JSON that matches the schema and is byte-identical to its RFC 8785 canonical form. */
+export function parseEvidenceManifestBytes(bytes: Uint8Array, expectedSha256?: Hex32): EvidenceManifest {
+  if (bytes.byteLength > EVIDENCE_MANIFEST_MAX_BYTES) throw new EvidenceManifestError("evidence manifest exceeds 256 KiB");
+  if (expectedSha256 !== undefined && sha256Hex(bytes) !== expectedSha256.toLowerCase()) throw new EvidenceManifestError("evidence manifest digest mismatch");
+  let json: unknown;
+  try {
+    json = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new EvidenceManifestError("evidence manifest is not valid UTF-8 JSON");
+  }
+  const parsed = evidenceManifestSchema.safeParse(json);
+  if (!parsed.success) throw new EvidenceManifestError("evidence manifest does not match urn:pine:evidence-manifest:v1");
+  const canonical = canonicalBytes(parsed.data as unknown as JsonValue);
+  if (canonical.byteLength !== bytes.byteLength || !canonical.every((byte, index) => byte === bytes[index])) {
+    throw new EvidenceManifestError("evidence manifest bytes are not in canonical form");
+  }
+  return parsed.data;
+}
