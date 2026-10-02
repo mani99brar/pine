@@ -193,21 +193,29 @@ The integrity job runs in two phases so that a run that stops partway never lose
 
 ## 8b. claims-006 review fixes (carried by claims-007)
 - ETags (operator decision, replacing "computed before the expensive work"): an ETag is the SHA-256 of the final serialized body
-  with `indexer.lagSeconds` left out of the hashed form (it changes every second); correctness over a cheaper 304. Tests assert
-  the ETag changes when moderation, phase, integrity, listability, oracle status or resolution change, and not when only the lag
-  changes.
-- The draft delete locks the draft AND its previews (`SELECT ... FROM claim_previews WHERE draft_id = $1 FOR UPDATE`) before the
-  publication check, so a concurrent first publication cannot deadlock it on real Postgres; a deadlock (40P01) or serialization
-  failure (40001) on either path still maps to 409 CONFLICT, never 500.
+  with every clock-only field left out of the hashed form (`indexer.lagSeconds` and any generated-at or seconds-remaining value;
+  `indexer.indexedBlock` and the `stale`/`halted` booleans stay in); correctness over a cheaper 304. Tests assert the ETag changes
+  when moderation, phase, integrity, listability, oracle status, resolution or staleness change, and stays equal when only the
+  clock advances within a phase.
+- Lock order (deadlock freedom on real Postgres): both paths lock the DRAFT row first — the draft delete takes `FOR UPDATE` on the
+  draft and then on its previews before the publication check; the first-publication transaction takes `FOR SHARE` on the draft
+  row before its insert (so its foreign-key checks never wait on the delete in the opposite order). A deadlock (40P01) or
+  serialization failure (40001) on either path still maps to 409 CONFLICT, never 500. Proof on PGlite (single connection, no real
+  concurrency): tests build `ctx.db` as `drizzle(database.client, { logger })` with a recording logger and assert the exact lock
+  statements and their order on both paths; a unit test maps wrapped 40P01/40001/23503 errors (`cause` chain) to 409/NOT_FOUND;
+  the concurrent case on real Postgres is part of the assembly e2e.
 - `POST /publications` applies the publishability gate only when it would create a row or build a plan; a retry whose claim is
   already on-chain returns the market without a plan even if the policy is no longer publishable.
 - Required tests (each must fail when its behaviour is removed): SEC-IDX-08 — a NewMarket from the configured factory for a
   DIFFERENT market, a different conditionId and a different questionId each make integrity fail; integrity per field — only
   `document.market.chainId` wrong, only `document.evidence.chainId` wrong, and a document naming the wrong `market.claimRegistry`
   on an event from the right registry; phases `oracle_open`, `pending_arbitration`, `finalized` and `resolved` and the derived
-  oracle status from MemoryReadModel facts; the test lock's stale takeover (dead-pid owner taken over; live owner not); a reverted
-  receipt stores a redacted reason (inject a secret into the revert text); the publication retry after the policy stopped being
-  publishable.
+  oracle status from MemoryReadModel facts; the test lock's stale takeover (the lock module takes an injectable path; a test uses
+  a temporary path, a fake dead pid such as 999999 and a live pid, never `child_process`); a reverted receipt stores only its
+  status, never free text from RPC or revert data (assert the stored row); the publication retry after the policy stopped being
+  publishable. Publishability gate positions: on the new-row path before the quota and the insert (the SC-001 test still sees no
+  row and no quota consumed); on the existing-row path after the chain re-check and before content and plan. The coverage matrix
+  goes in the completion file, not in a repository file.
 
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;
