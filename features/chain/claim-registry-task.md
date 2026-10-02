@@ -10,6 +10,9 @@ Implement `contracts/src/ClaimRegistry.sol` (and pure helper libraries under `co
 - Byte-exact targets: `QUESTION_VECTORS`, `UTC_FORMAT_VECTORS`, `RAW_CID_VECTORS`, `TOKEN_NAME_VECTORS` in `packages/shared/src/testing/vectors.ts`; the TypeScript reference renderer is `packages/shared/src/question.ts`. Transcribe the vectors into a Solidity test file (tests cannot read files).
 - Verified Gnosis addresses: `GNOSIS_EXTERNAL` in `packages/shared/src/deployment.ts`.
 - The EvidenceRegistry implementation is written by another lane; your tests use a test-local mock that returns `claimRegistry()`.
+- PRD-01 section 2.1 and `features/chain/decisions.md` govern the constructor (four arguments including `ExpectedSeer`; the
+  EvidenceRegistry is deployed first at the predicted address). The interface NatSpec defers to PRD-01 for the constructor.
+- Pin the fork at block 48550000 on `https://rpc.gnosischain.com` (archive). Twin markets share question, condition and outcome tokens.
 
 ## Constraints
 

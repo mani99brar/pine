@@ -7,8 +7,9 @@ pragma solidity 0.8.37;
 /// composed ON-CHAIN from the validated parameters (see renderQuestion), so the question can never disagree with the
 /// registry record: the claim-document digest, policy digest, repository id, commit, evidence registry and deadlines
 /// in the question are exactly the recorded values.
-/// @dev There is no owner, no pause and no upgrade path. All configuration is immutable and set at deployment:
-/// constructor(address seerMarketFactory, address evidenceRegistry, uint256 minimumMinBond). The deploy script deploys
+/// @dev There is no owner, no pause and no upgrade path. All configuration is immutable and set at deployment. The
+/// constructor is implementation-defined (docs/prd/PRD-01-chain.md section 2.1): it takes the Seer factory, the evidence
+/// registry, the min-bond floor and the expected Seer immutables, and refuses any mismatch. The deploy script deploys
 /// the EvidenceRegistry first, passing this registry's predicted CREATE address; this constructor requires
 /// code at both addresses and IEvidenceRegistry(evidenceRegistry).claimRegistry() == address(this), so the pair is
 /// mutually and immutably bound. No URI or other free text is
@@ -94,12 +95,13 @@ interface IClaimRegistry {
 
     /// @notice The exact market question createClaim composes for these parameters (validated identically; reverts on
     /// invalid input). One line of printable ASCII; byte-identical to renderQuestion() in packages/shared/src/question.ts:
-    /// `Pine claim "<title>": was a reproducible counterexample submitted to evidence registry <0x registry, lowercase>
+    /// `Pine claim [<title>]: was a reproducible counterexample submitted to evidence registry <0x registry, lowercase>
     /// on Gnosis, recorded before <YYYY-MM-DD HH:MM:SS> UTC and disclosed before <YYYY-MM-DD HH:MM:SS> UTC, for GitHub
     /// repository id <decimal> at commit <40 lowercase hex>? Terms: claim document ipfs://<claim CID> (sha256 <0x + 64
     /// lowercase hex>), policy ipfs://<policy CID> (sha256 <0x + 64 lowercase hex>). Yes = at least one timely
     /// admissible counterexample; No = none; admissibility per the policy.`
     /// The first timestamp is evidenceDeadline, the second revealDeadline (both UTC, zero-padded, 24-hour clock).
+    /// The result never contains '"', '\' or control characters, so it is safe inside Reality template 2's JSON string.
     function renderQuestion(CreateClaimParams calldata params) external view returns (string memory);
 
     /// @notice Reverts UnknownMarket for a market this registry did not create.
@@ -113,7 +115,7 @@ interface IClaimRegistry {
     /// @notice Number of claims created by this registry.
     function claimCount() external view returns (uint256);
 
-    /// @notice The EvidenceRegistry deployed by this registry's constructor (immutable).
+    /// @notice The EvidenceRegistry bound to this registry at construction (immutable).
     function evidenceRegistry() external view returns (address);
 
     /// @notice Seer MarketFactory used to create markets (immutable; code checked at construction).

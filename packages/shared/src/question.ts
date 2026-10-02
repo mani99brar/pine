@@ -1,6 +1,9 @@
 // FROZEN. The market question, byte-identical to ClaimRegistry.renderQuestion() on-chain (cross-language vectors in
 // testing/vectors.ts). The registry composes the question itself; this twin lets the API preview it and lets clients
-// verify a market's question offline. Inputs are validated with exactly the registry's rules.
+// verify a market's question offline. It validates the format rules (title, digests, commit, repository id, uint32
+// timestamps); the on-chain function additionally enforces the deadline windows and min-bond bounds relative to the block.
+// The question is pasted raw by Seer into Reality template 2 (`{"title": "%s", ...}`), so it must never contain `"`, `\`
+// or control characters: the title is delimited with brackets and its own `"`/`\` are forbidden.
 
 import { rawCidFromSha256 } from "./canonical.js";
 import type { Address, Hex32 } from "./types.js";
@@ -55,7 +58,7 @@ export function renderQuestion(input: QuestionInput): string {
   const claimSha = hex32(input.claimDocumentSha256, "claim document sha256") as Hex32;
   const policySha = hex32(input.policyDocumentSha256, "policy sha256") as Hex32;
   return (
-    `Pine claim "${input.title}": was a reproducible counterexample submitted to evidence registry ${input.evidenceRegistry.toLowerCase()} ` +
+    `Pine claim [${input.title}]: was a reproducible counterexample submitted to evidence registry ${input.evidenceRegistry.toLowerCase()} ` +
     `on Gnosis, recorded before ${formatUtc(input.evidenceDeadline)} UTC and disclosed before ${formatUtc(input.revealDeadline)} UTC, ` +
     `for GitHub repository id ${input.repositoryId} at commit ${input.commit.toLowerCase()}? ` +
     `Terms: claim document ipfs://${rawCidFromSha256(claimSha)} (sha256 ${claimSha}), ` +
