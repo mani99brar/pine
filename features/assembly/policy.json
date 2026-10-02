@@ -74,6 +74,23 @@
           ],
           "timeout_seconds": 120,
           "scenarios": []
+        },
+        {
+          "id": "vectors",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "node",
+            "--import",
+            "tsx",
+            "../../scripts/fixtures/export-plan-vectors.mts",
+            "--check"
+          ],
+          "timeout_seconds": 600,
+          "scenarios": []
         }
       ]
     },

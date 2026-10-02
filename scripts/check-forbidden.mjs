@@ -17,7 +17,7 @@ const rules = [
   { name: "SEC-AUTH-02 never use viem generateSiweNonce", dirs: ["packages/api/src"], ext: [".ts"], pattern: /generateSiweNonce/ },
   { name: "No dynamic code execution", dirs: ["packages/api/src", "packages/shared/src", "packages/indexer-native/src", "packages/read-model-envio/src", "packages/indexer-envio/src"], ext: [".ts"],
     pattern: /(\beval\s*\(|new Function\s*\(|child_process|\bvm\.runIn)/ },
-  { name: "Trojan Source: no literal bidi or zero-width characters in source", dirs: ["packages", "contracts/src", "contracts/test", "contracts/script", "scripts"], ext: [".ts", ".mjs", ".js", ".sol"],
+  { name: "Trojan Source: no literal bidi or zero-width characters in source", dirs: ["packages", "contracts/src", "contracts/test", "contracts/script", "scripts"], ext: [".ts", ".mts", ".mjs", ".js", ".sol", ".json"],
     pattern: /[\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/, includeComments: true, includeTests: true },
   { name: "No unlimited approvals", dirs: ["packages/api/src", "packages/shared/src"], ext: [".ts"],
     pattern: /(maxUint256|MaxUint256|2n\s*\*\*\s*256n\s*-\s*1n|0xf{64}n)/ },

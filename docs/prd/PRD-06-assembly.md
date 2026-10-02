@@ -20,7 +20,8 @@ in-process, and documents deployment. Everything it touches that other features 
   or script reads or writes files. The ClaimRegistry constructor does not pin the factory (chain-005 security review, P2), so the
   script refuses to deploy unless `seerMarketFactory == 0x83183DA839Ce8228E31Ae41222EaD9EDBb5cDcf1` and its `EXTCODEHASH` equals
   `0x387f37b6df5c9faf28875b9b108cd4bf56c27152989d3362600516a2381e2fe6` (runtime code at block 48550000 and today, read on
-  2026-10-02); the record also lists the code hashes of every external contract it relies on (Reality, RealityProxy, CTF,
+  2026-10-02); its look-alike test `vm.etch`es a mock with identical getters AT the real factory address, so the code-hash branch
+  (not the address check) must refuse it, with a code-hash-specific revert; the record also lists the code hashes of every external contract it relies on (Reality, RealityProxy, CTF,
   Wrapped1155Factory, sDAI, GnosisRouter, Algebra factory and position manager), read at deploy time. An internal `_deploy(deployer)` function holds the logic so tests run it under `vm.startPrank(deployer)`.
 - `contracts/test/e2e` (Gnosis fork pinned at block 48550000, archive RPC `https://rpc.gnosischain.com` or `GNOSIS_RPC_URL`): deploy
   the REAL pair with the script logic; full lifecycle: `createClaim` → `commitEvidence` → (warp) `revealEvidence` → (warp past the
@@ -39,9 +40,19 @@ in-process, and documents deployment. Everything it touches that other features 
   (`buildStep`/`newPlan`/`verifyPlan`, imported by relative path `../../packages/shared/src/*.ts`), and writes the JSON vectors in
   `scripts/fixtures/` plus a generated `contracts/test/e2e/generated/PlanVectors.sol` holding the same calldata as `bytes`
   constants. Run it as `pnpm --filter @pine/api exec node --import tsx ../../scripts/fixtures/export-plan-vectors.mts [--check]`
-  (verified to resolve; the root has no `tsx`); `--check` regenerates both files and fails on any difference. The e2e test first
-  asserts the observed fork values equal the constants, then replays each step with `vm.prank(account); target.call{value}(data)`
-  byte for byte.
+  (verified to resolve; the root has no `tsx`); `--check` regenerates both files and fails on any difference, and it is a gate of
+  this lane (`vectors` check in policy.json). Determinism: every input (claim params, deployer label, salt, plan ids such as
+  `"vector-create-claim"`, prices) is a constant in the script and emitted into `PlanVectors.sol`, so the probe and e2e tests take
+  them from the generated file; JSON is written with sorted keys and bigints as decimal strings. Bare packages (viem) do not resolve
+  from `scripts/fixtures/`: import `@pine/shared` code by relative path and, where a bare package is unavoidable, resolve it from
+  `packages/shared` with `createRequire(new URL("../../packages/shared/package.json", import.meta.url))` and a dynamic `import()`.
+  Ladder math: choose `lowerPrice`/`upperPrice` at exact tick prices (multiples of the spacing 60), compute ticks and sqrt prices with
+  a BigInt port of TickMath, and initialise strictly outside the range as PRD-04 requires (YES = token0 →
+  `getSqrtRatioAtTick(tickLower) − 1`; YES = token1 → `getSqrtRatioAtTick(tickUpper) + 1`); cover the other YES/sDAI orientation
+  too when a second claim digest probed on the fork yields it (otherwise record the gap). Time-bound values (mint deadline, commit
+  and reveal deadlines) derive from the observed fork timestamp, and the e2e test executes each step before them. The e2e test
+  first asserts the observed fork values equal the constants, then replays each step with
+  `vm.prank(account); target.call{value}(data)` byte for byte.
 - Deployment-logic tests inherit the script contract (so `new` runs in the test's own frame under `vm.startPrank(deployer)` and
   the n / n+1 prediction holds), and every external read before the second CREATE is a `view` call (under broadcast a non-view
   call would consume a deployer nonce and break the binding only in production).

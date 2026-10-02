@@ -15,6 +15,8 @@ Settled by the operator from ADR-0001 on 2026-10-02.
 - No filesystem cheatcodes (foundry.toml keeps `fs_permissions = []`): plan vectors are generated into
   `contracts/test/e2e/generated/PlanVectors.sol` from committed fork observations; the deploy record is printed with
   `vm.serializeJson`.
+- The vector `--check` is a gate of the deploy-e2e lane (policy check `vectors`); inputs are constants emitted into
+  `PlanVectors.sol`; output is deterministic (sorted keys, decimal bigints, fixed plan ids).
 - The vector script is TypeScript run with `pnpm --filter @pine/api exec node --import tsx ../../scripts/fixtures/export-plan-vectors.mts`.
 - Residual allowance after a mint: at most 10 wei, only toward the position manager (Algebra rounding).
 - CI adds gitleaks secret scanning; the release checklist lists every launch gate of PRD-06 section 3.

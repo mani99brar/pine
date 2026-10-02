@@ -2,7 +2,7 @@
 
 ## Goal
 
-Write the deployment script and the real-pair Gnosis fork lifecycle tests of `docs/prd/PRD-06-assembly.md` section 2: `contracts/script/Deploy.s.sol` (explicit deployer, address prediction, EvidenceRegistry first, binding and Seer-immutable assertions, JSON record), `contracts/test/e2e/**` (claim creation through evidence, oracle answers, resolution and payouts, plus a YES-ladder funding round on real Swapr/Algebra pools), and `scripts/fixtures/export-plan-vectors.mjs` with committed calldata vectors that the Solidity e2e test replays byte-for-byte.
+Write the deployment script and the real-pair Gnosis fork lifecycle tests of `docs/prd/PRD-06-assembly.md` section 2: `contracts/script/Deploy.s.sol` (explicit deployer, address prediction, EvidenceRegistry first, binding and Seer-immutable assertions, JSON record), `contracts/test/e2e/**` (claim creation through evidence, oracle answers, resolution and payouts, plus a YES-ladder funding round on real Swapr/Algebra pools), and `scripts/fixtures/export-plan-vectors.mts` with committed calldata vectors (JSON plus the generated `contracts/test/e2e/generated/PlanVectors.sol`) that the Solidity e2e test replays byte-for-byte.
 
 ## Context
 
