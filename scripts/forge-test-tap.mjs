@@ -20,7 +20,15 @@ if (run.error) {
   console.error(`forge could not be started: ${run.error.message}`);
   process.exit(2);
 }
-if (run.stderr) process.stderr.write(run.stderr);
+// RPC URLs (GNOSIS_RPC_URL) often embed API keys and forge prints them on fork errors: never copy a URL or the configured
+// RPC value into logs or TAP output (SEC-OPS-18).
+const secretValues = [process.env.GNOSIS_RPC_URL].filter((value) => typeof value === "string" && value.length > 0);
+function redact(text) {
+  let out = String(text);
+  for (const value of secretValues) out = out.split(value).join("<redacted-rpc-url>");
+  return out.replace(/\b(?:https?|wss?):\/\/[^\s"'<>]+/gi, "<redacted-url>");
+}
+if (run.stderr) process.stderr.write(redact(run.stderr));
 
 // forge prints the JSON result object on stdout; compiler output may precede it.
 const stdout = run.stdout ?? "";
@@ -34,7 +42,7 @@ if (start !== -1) {
   }
 }
 if (suites === null || typeof suites !== "object") {
-  process.stdout.write(stdout);
+  process.stdout.write(redact(stdout));
   console.error("Could not parse `forge test --json` output; no test evidence.");
   process.exit(run.status === 0 ? 2 : run.status ?? 2);
 }
@@ -55,8 +63,8 @@ function record(label, status, result) {
   } else {
     fail += 1;
     lines.push(`not ok ${n} - ${label}`);
-    const reason = result.reason ? String(result.reason) : "failed";
-    lines.push(`  ---\n  reason: ${JSON.stringify(reason)}\n  counterexample: ${JSON.stringify(result.counterexample ?? null)}\n  ...`);
+    const reason = result.reason ? redact(result.reason) : "failed";
+    lines.push(`  ---\n  reason: ${JSON.stringify(reason)}\n  counterexample: ${redact(JSON.stringify(result.counterexample ?? null))}\n  ...`);
   }
 }
 
