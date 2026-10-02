@@ -8,7 +8,7 @@ features own is read-only; it owns only the paths below.
 | Lane | Owns (path prefixes) |
 |---|---|
 | `deploy-e2e` | `contracts/script`, `contracts/test/e2e`, `scripts/fixtures` |
-| `composition` | `packages/api/src/readmodel.ts`, `packages/api/test/e2e`, `deploy`, `README.md` (repository root), `docs/operations` |
+| `composition` | `packages/api/src/readmodel.ts`, `packages/api/test/e2e`, `deploy`, `README.md` (repository root), `docs/operations`, `.github/workflows` |
 
 ## 2. deploy-e2e
 - `contracts/script/Deploy.s.sol`: explicit deployer (`vm.startBroadcast(deployer)` only in `run()`), prediction
@@ -39,6 +39,10 @@ features own is read-only; it owns only the paths below.
   example (same-origin API, separate user-content domain, per-IP limits on the user-content host, TLS), Postgres role bootstrap SQL
   (pine_migrator, pine_api, pine_indexer, pine_readonly), Kubo and pinning setup, backup and key-rotation procedures.
 - `README.md` (root): what Pine is, architecture, packages, how to run tests, how to deploy, the launch gates of ADR-0001.
+- `.github/workflows/ci.yml`: on push and pull request, with pinned action SHAs and `permissions: contents: read`: corepack pnpm
+  12.8.1, `pnpm install --frozen-lockfile`, `pnpm audit --prod` (fails on high), `node scripts/check-forbidden.mjs`,
+  `node scripts/export-abis.mjs --check` after `forge build --root contracts`, `pnpm -r typecheck`, `pnpm exec eslint packages`,
+  `pnpm -r test`, forge unit tests via the TAP wrapper, and the fork tests in a separate job using a `GNOSIS_RPC_URL` secret.
 - `docs/operations/`: runbooks for indexer halts, RPC disagreement, pin failures, stuck oracle steps (due actions), key rotation, incident
   response, and the release checklist (external audit, policy approval, legal review, GitHub App spike, real-Postgres lease test,
   Envio live conformance).

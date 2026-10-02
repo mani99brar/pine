@@ -1,0 +1,17 @@
+{
+  "version": "2.3.0",
+  "name": "Assembly: deploy script and real-pair Gnosis fork lifecycle tests, read-model wiring, full-app end-to-end tests, CI and operations documentation",
+  "branch_prefix": "feature/assembly",
+  "prd": "docs/prd/PRD-06-assembly.md",
+  "policy": "policy.json",
+  "workers": [
+    { "node_id": "deploy-e2e", "task": "deploy-e2e-task.md" },
+    { "node_id": "composition", "task": "composition-task.md" }
+  ],
+  "reviewers": [
+    { "reviewer_id": "general", "prompt": "builtin:general" },
+    { "reviewer_id": "coverage", "prompt": "builtin:coverage" },
+    { "reviewer_id": "security", "prompt": "security-review.md" }
+  ],
+  "sidecar": { "prompt": "builtin:senior-review", "cadence_seconds": 1800, "max_passes": 12 }
+}

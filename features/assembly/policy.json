@@ -1,0 +1,37 @@
+{
+  "version": "1.2.0",
+  "feature": "Assembly and end-to-end verification",
+  "independent_review": true,
+  "integration_approval": true,
+  "max_verification_attempts": 3,
+  "setup": [
+    { "argv": ["pnpm", "install", "--frozen-lockfile", "--prefer-offline"], "timeout_seconds": 1200 }
+  ],
+  "workers": [
+    {
+      "node_id": "deploy-e2e",
+      "role": "contracts",
+      "required_check_kinds": ["build", "integration", "typecheck"],
+      "owned_paths": ["contracts/script", "contracts/test/e2e", "scripts/fixtures"],
+      "checks": [
+        { "id": "build", "kind": "build", "argv": ["forge", "build", "--root", "contracts"], "timeout_seconds": 1200, "scenarios": [] },
+        { "id": "abi", "kind": "typecheck", "argv": ["node", "scripts/export-abis.mjs", "--check"], "timeout_seconds": 120, "scenarios": [] },
+        { "id": "e2e", "kind": "integration", "argv": ["node", "scripts/forge-test-tap.mjs", "--match-path", "test/e2e/**/*.sol"], "timeout_seconds": 3000, "scenarios": [] },
+        { "id": "forbidden", "kind": "unit", "argv": ["node", "scripts/check-forbidden.mjs"], "timeout_seconds": 120, "scenarios": [] }
+      ]
+    },
+    {
+      "node_id": "composition",
+      "role": "backend",
+      "required_check_kinds": ["typecheck", "unit", "integration"],
+      "owned_paths": ["packages/api/src/readmodel.ts", "packages/api/test/e2e", "deploy", "README.md", "docs/operations", ".github/workflows"],
+      "checks": [
+        { "id": "typecheck", "kind": "typecheck", "argv": ["pnpm", "-r", "typecheck"], "timeout_seconds": 1500, "scenarios": [] },
+        { "id": "lint", "kind": "typecheck", "argv": ["pnpm", "exec", "eslint", "packages"], "timeout_seconds": 1200, "scenarios": [] },
+        { "id": "forbidden", "kind": "unit", "argv": ["node", "scripts/check-forbidden.mjs"], "timeout_seconds": 120, "scenarios": [] },
+        { "id": "e2e", "kind": "integration", "argv": ["pnpm", "--filter", "@pine/api", "exec", "vitest", "run", "test/e2e"], "timeout_seconds": 2400, "scenarios": [] },
+        { "id": "api-unit", "kind": "unit", "argv": ["pnpm", "--filter", "@pine/api", "test"], "timeout_seconds": 2400, "scenarios": [] }
+      ]
+    }
+  ]
+}
