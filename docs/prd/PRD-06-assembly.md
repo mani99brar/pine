@@ -15,7 +15,11 @@ in-process, and documents deployment. Everything it touches that other features 
 - `contracts/script/Deploy.s.sol`: explicit deployer (`vm.startBroadcast(deployer)` only in `run()`), prediction
   `vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1)`, EvidenceRegistry first, then ClaimRegistry with `ExpectedSeer` from
   `GNOSIS_EXTERNAL`, assertions of the binding and of every Seer immutable, a JSON deployment record (addresses, block, chain id,
-  constructor args, deployer). An internal `_deploy(deployer)` function holds the logic so tests run it under `vm.startPrank(deployer)`.
+  constructor args, deployer). The ClaimRegistry constructor does not pin the factory (chain-005 security review, P2), so the
+  script refuses to deploy unless `seerMarketFactory == 0x83183DA839Ce8228E31Ae41222EaD9EDBb5cDcf1` and its `EXTCODEHASH` equals
+  `0x387f37b6df5c9faf28875b9b108cd4bf56c27152989d3362600516a2381e2fe6` (runtime code at block 48550000 and today, read on
+  2026-10-02); the record also lists the code hashes of every external contract it relies on (Reality, RealityProxy, CTF,
+  Wrapped1155Factory, sDAI, GnosisRouter, Algebra factory and position manager), read at deploy time. An internal `_deploy(deployer)` function holds the logic so tests run it under `vm.startPrank(deployer)`.
 - `contracts/test/e2e` (Gnosis fork pinned at block 48550000, archive RPC `https://rpc.gnosischain.com` or `GNOSIS_RPC_URL`): deploy
   the REAL pair with the script logic; full lifecycle: `createClaim` → `commitEvidence` → (warp) `revealEvidence` → (warp past the
   reveal deadline) Reality `submitAnswer{value: bond}` (Yes and No variants) → warp past the 302400 s timeout → `RealityProxy.resolve`
