@@ -12,7 +12,7 @@ This repository contains **three alternative, production-grade frontends**. They
 | v2 **Pine Docket** | [`apps/docket`](apps/docket) | 3002 | Procedural clarity. Claims as case files, evidence as exhibits, a procedural timeline, a guided filing wizard, a print-ready filing | Team leads and newcomers to prediction markets |
 | v3 **Pine Field** | [`apps/field`](apps/field) | 3003 | The open challenge board. Live data glyphs (tension bar, time ring, depth bars), a price-impact simulator and a sentence-template claim builder | Investigators, traders, and live tracking |
 
-Each app's README covers its concept, routes and signature interactions.
+Each app's README covers its concept, routes and signature interactions; [`docs/frontend/versions.md`](docs/frontend/versions.md) compares them side by side.
 
 ## Quick start (no setup, no credentials)
 
