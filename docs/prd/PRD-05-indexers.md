@@ -48,8 +48,17 @@ int8 and counts explicitly.
   replacement id ends with the replacement tracked and both events applied (as `scenarioOracle` does through `applyEvents`).
 - Verify every log's `blockHash` against the canonical header of its block (headers fetched only for blocks that contain logs,
   plus the range end; they also give each event its `blockTimestamp`); re-run the same single-pass query on the secondary provider
-  for every non-empty range and require the identical full set of `(blockHash, logIndex, topics, data)`; any difference → halt
-  (`log_disagreement`). A faulty primary therefore cannot hide an oracle answer.
+  for EVERY range processed (every range of at least one block, whether or not the primary returned logs) and require the identical
+  full set of `(blockHash, logIndex, topics, data)`; any difference, including the primary returning nothing where the secondary
+  returns logs, → halt (`log_disagreement`). A faulty primary therefore cannot hide an oracle answer. Required tests: the primary
+  omits a tracked Reality answer (halt) and the secondary omits one (halt).
+- Range size: chunk length is configurable (default 500 blocks, not 2000: many providers cap `eth_getLogs` ranges or result
+  counts); a provider error saying the range or result is too large halves the chunk (down to 50) and retries; it never halts.
+- Validation scope: strict ABI decoding applies to every fetched log (a log the contract itself emitted cannot fail it, so a
+  failure is a provider fault → halt). Domain validation beyond the ABI types (zod) applies only to Pine registry events and to
+  events of tracked ids; events of untracked ids are dropped BEFORE any such validation, and for tracked external events the zod
+  schemas accept the full on-chain domain of each field (bigint for uint256, no casing or string-content rules on third-party
+  data). Anyone can emit Reality/CTF events, so no third-party event may be able to halt the indexer.
 - Logs are requested only for the exact configured addresses; a log with a known topic0 from any other address is ignored
   (SEC-IDX-05). Decoded values must lie in the domain the frozen `ChainEvent` types allow; the ClaimRegistry guarantees that domain
   for Pine events (e.g. `1 <= repositoryId <= 2^53 - 1`, enforced on-chain by the chain hardening run), so a violation is a
@@ -73,7 +82,9 @@ int8 and counts explicitly.
   omitting a tracked Reality answer → halt, and the role grants above (SEC-IDX-11).
 - Decoding fixtures: real Gnosis logs (raw topics/data captured with `cast logs` during development and committed as JSON) for
   Reality `LogNewAnswer`, `LogNotifyOfArbitrationRequest`, `LogFinalize`, CTF `ConditionResolution` and a Kleros home-proxy event,
-  decoded into the expected `ChainEvent`s (proves topic0 and field order against real chain data).
+  decoded into the expected `ChainEvent`s (proves topic0 and field order against real chain data). Proxy events are rare (none in
+  2000 recent blocks): search a bounded window (e.g. the last 2 million blocks in 50,000-block steps); if none is found, use a log
+  ABI-encoded with viem from the shared ABI, marked synthetic in the fixture, and record the gap.
 
 ## 3. indexer-envio (option) and read-model-envio
 ### 3.1 indexer-envio (Envio HyperIndex v3, envio 3.12.1)
@@ -81,6 +92,11 @@ int8 and counts explicitly.
   KlerosHomeProxy (addresses from `GNOSIS_EXTERNAL`), the events of `chain-events.ts`, `field_selection` with block hash and
   transaction hash, `rollback_on_reorg: true`, a confirmation lag (`block_lag` ≈ 40 blocks) so served rows are effectively final,
   RPC fallback configured from env (HyperSync token optional).
+- Types: every id, block number, log index, timestamp, amount, bond and `repositoryId` is `BigInt` (Envio maps `Int` to Postgres
+  int4); `Int` only for small enums and counts. Lists that the read model returns (payout numerators, market lists) are stored as
+  child entities or `Json`, never Postgres arrays, so the read-model fake does not depend on unverified Hasura array encoding.
+- A test parses `config.yaml` and checks every event signature (names, parameter order, indexed flags) against
+  `@pine/shared/abi/external` and `generated` (`simulate` passes decoded params, so nothing else would notice a mismatch).
 - `schema.graphql` entities mirroring the read-model records (Claim, EvidenceSubmission, OracleQuestion, OracleAnswer,
   Arbitration + ArbitrationStage, ConditionResolution, TrackedQuestion/TrackedCondition), lowercase hex ids.
 - Handlers implement the reference semantics exactly; they are deterministic, make no external calls (Envio runs handlers twice:
@@ -91,15 +107,17 @@ int8 and counts explicitly.
   indexes nothing).
 - Tests (vitest, `createTestIndexer()`, no Docker): for each frozen scenario, convert the `ChainEvent`s to simulated Envio events
   with explicit block numbers/log indexes, process them, and assert the resulting entities equal the records of
-  `MemoryReadModel` for the same events (field by field, after mapping). The same tests write a committed JSON snapshot of the
-  actual entity rows per scenario (`packages/read-model-envio/test/fixtures/<scenario>.entities.json`, regenerated and compared
-  with `--check` semantics: a test fails when the snapshot differs).
+  `MemoryReadModel` for the same events (field by field, after mapping). The same tests compare the actual entity rows per
+  scenario with a committed JSON snapshot (`packages/read-model-envio/test/fixtures/<scenario>.entities.json`: rows sorted by entity
+  and id, bigints as decimal strings, plus the SHA-256 of the scenario's events); they rewrite it only when `UPDATE_SNAPSHOTS=1` is
+  set, so a gate run never dirties the worktree and fails on any difference.
 ### 3.2 read-model-envio
 - `createEnvioReadModel({ graphqlUrl, adminSecret?, fetch })` implementing `ReadModel` with Hasura GraphQL queries over the entities
   (where/order_by/limit, keyset pagination encoded in opaque cursors), zod-validated responses, 10 s timeouts, redacted errors, and
   `status()` from `_meta` / `chain_metadata` (indexed block, head, `halted: false` unless the endpoint reports errors).
 - Tests: the conformance suite with a factory that builds a fake GraphQL endpoint (an in-test `fetch` serving the lane's own
-  queries from the committed entity snapshots that the indexer-envio handlers actually produced, never from rows mapped by hand),
+  queries from the committed entity snapshots that the indexer-envio handlers actually produced, never from rows mapped by hand;
+  the factory recomputes the SHA-256 of the events it receives and throws unless it equals the snapshot's recorded hash),
   with Hasura semantics stated and tested (numerics and bigints as strings, `_gt`/`_lt` on numerics, `order_by`, `limit`), plus
   unit tests of query construction and validation failures. A `test:live` script (excluded from the default test run) runs the conformance queries against a real Envio endpoint
   given `ENVIO_GRAPHQL_URL`; running it against a real deployment is a launch gate for choosing the Envio option.

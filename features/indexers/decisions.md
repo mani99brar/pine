@@ -14,7 +14,13 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
   merge-sorted by (block, logIndex), `applyEvents` ignores untracked ids; the secondary re-runs the same query for every non-empty
   range and any difference halts. Headers only for blocks with logs plus the range end.
 - `viem` is a direct dependency of `@pine/indexer-envio` (operator change for keccak).
-- Envio read-model fake serves the committed entity snapshots produced by the real handlers.
+- Envio read-model fake serves the committed entity snapshots produced by the real handlers (sorted, decimal bigints, event-hash
+  bound, rewritten only with UPDATE_SNAPSHOTS=1).
+- The secondary cross-check runs for every processed range, including ranges where the primary returned no logs.
+- Chunk default 500 blocks, halved on "range too large" errors, never a halt.
+- Untracked third-party events are dropped before domain validation; tracked external events accept the full on-chain domain.
+- Envio schema uses BigInt for every id/block/amount/timestamp and avoids Postgres arrays; a test pins config.yaml event
+  signatures to the shared ABIs.
 - Decoded values outside the frozen `ChainEvent` domain halt (the ClaimRegistry enforces `repositoryId <= 2^53 - 1`).
 - Driver portability: never read `rowCount`/`affectedRows`; explicit int8/count casts in raw SQL.
 - Test memory: a PGlite instance takes several hundred MB on this host and vitest runs test files in parallel fork processes; the
