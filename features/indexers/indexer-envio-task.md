@@ -6,6 +6,8 @@ Implement the Envio option per `docs/prd/PRD-05-indexers.md` section 3: the Envi
 
 ## Context
 
+- Rerun: run indexers-002 produced a candidate (commit `207b1546ebf3de529c9b4cb97b784b78a77db876`, ref `keep/indexers-002-candidate`) that passed every check and was approved by the general and coverage reviewers; the security reviewer blocked it on a P1 (attacker log floods could halt or stall the native indexer) with P2s. Start from it with one `git checkout 207b1546ebf3de529c9b4cb97b784b78a77db876 -- <path>` per owned path (packages/indexer-envio packages/read-model-envio), then implement PRD-05 section 3a for this lane, write the coverage matrix decisions.md asks for, keep the operator-settled choices and list them again.
+
 - Envio v3 facts verified on this machine (vitest works, no Docker needed, codegen offline and deterministic, handlers run twice, `contractRegister` rules, tuple event params decode to named objects): `docs/research/envio-hyperindex.md`.
 - Executable specification and fixtures: `packages/shared/src/testing/{memory-read-model,read-model-scenarios,read-model-conformance}.ts`; event shapes: `packages/shared/src/chain-events.ts`; ABIs: `packages/shared/src/abi/*`.
 

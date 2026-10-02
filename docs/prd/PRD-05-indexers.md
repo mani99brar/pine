@@ -122,6 +122,37 @@ int8 and counts explicitly.
   unit tests of query construction and validation failures. A `test:live` script (excluded from the default test run) runs the conformance queries against a real Envio endpoint
   given `ENVIO_GRAPHQL_URL`; running it against a real deployment is a launch gate for choosing the Envio option.
 
+## 3a. indexers-002 review fixes (carried by indexers-003)
+indexer-native:
+- Log volume is attacker-controlled (anyone can emit cheap Reality/CTF logs, e.g. zero-value `fundAnswerBounty` loops), so volume
+  must never halt or stall the indexer: any RPC error, any "too many results"/range error and any oversized response (including
+  the response-size cap of the log parser) splits the range in halves down to ONE block; a single block is then split per address
+  and then per topic0. Block gas bounds the logs per block (~5k), so splitting always converges; only genuine provider failures
+  after retries back off, and only integrity conflicts halt. Tests: a log-dense range that exceeds the cap is fetched by splitting
+  and applied; a provider that answers "too many results" for ranges above 1 block still progresses.
+- Ignored (untracked) logs are not persisted: `applied_events` records only logs that changed state, so attacker logs cannot grow
+  storage (the cursor and the ordered application already prevent re-application).
+- `decodeCursor` bounds key parts to the int8/int4 ranges in the zod schema (crafted cursors → `InvalidCursorError`, never a
+  database error).
+- `main.ts`: every startup step, including `pool.connect()` and connection-string parsing, runs inside the try that logs through
+  the redactor; the top-level call has a handler (no unhandled rejection prints a raw error).
+- RPC providers must be independent: their normalized hostnames must differ, and production requires https.
+- Decided (recorded): the zod domain checks run on every decoded external log before tracking is decided; they cannot fail for
+  contract-emitted logs (Reality `ts` is the block timestamp, CTF bounds outcome slots to 256), so they cannot be used to halt.
+- Required additional tests: a PRIMARY-side stored-cursor hash mismatch halts; the range-end header of a logless chunk is
+  cross-checked; a secondary differing only in topics or only in blockHash halts; headers are fetched only for blocks with logs plus
+  the range end (assert the recorded calls); `main.ts` wiring (process advisory lock refuses a second writer, DB errors redacted);
+  the migration runner's advisory lock; the node-postgres executor rolls back and releases the client when the callback throws (stub
+  Pool/PoolClient).
+indexer-envio and read-model-envio:
+- read-model-envio rejects a `graphqlUrl` with userinfo and refuses http:// when an admin secret is set (outside tests); reads the
+  response as a stream with a byte cap; documents a read-only Hasura role for the API; list queries without pagination send an
+  explicit limit and request one extra row, throwing when the cap is exceeded.
+- indexer-envio: production must not run with the placeholder addresses or start block (documented fail-closed check in the start
+  script: refuse when `NODE_ENV=production` and the env is unset); `ENVIO_BLOCK_LAG` has a lower bound (≥ 40); docs state that the
+  Envio option trusts one data source unless HyperSync or a second verified RPC is configured, which is part of its launch gate.
+- A test pins that `schema.graphql` has no list-typed fields.
+
 ## 4. Checks (per lane)
 - indexer-native: `pnpm --filter @pine/indexer-native typecheck` (typecheck), `pnpm exec eslint packages/indexer-native/src`
   (typecheck), `node scripts/check-forbidden.mjs` (unit), `pnpm --filter @pine/indexer-native test` (unit).

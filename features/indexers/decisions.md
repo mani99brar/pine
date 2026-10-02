@@ -18,7 +18,9 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
   bound, rewritten only with UPDATE_SNAPSHOTS=1).
 - The secondary cross-check runs for every processed range, including ranges where the primary returned no logs.
 - Chunk default 500 blocks, halved on "range too large" errors, never a halt.
-- Untracked third-party events are dropped before domain validation; tracked external events accept the full on-chain domain.
+- Untracked third-party events: the zod domain checks run before tracking is decided but cannot fail for contract-emitted logs;
+  untracked logs are not persisted. Log volume never halts or stalls the native indexer (split to one block, then per address and
+  topic0). Further indexers-002 review fixes in PRD-05 section 3a (indexers-003).
 - Envio schema uses BigInt for every id/block/amount/timestamp and avoids Postgres arrays; a test pins config.yaml event
   signatures to the shared ABIs.
 - Decoded values outside the frozen `ChainEvent` domain halt (the ClaimRegistry enforces `repositoryId <= 2^53 - 1`).

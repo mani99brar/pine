@@ -6,6 +6,8 @@ Implement `@pine/indexer-native` per `docs/prd/PRD-05-indexers.md` section 2: th
 
 ## Context
 
+- Rerun: run indexers-002 produced a candidate (commit `207b1546ebf3de529c9b4cb97b784b78a77db876`, ref `keep/indexers-002-candidate`) that passed every check and was approved by the general and coverage reviewers; the security reviewer blocked it on a P1 (attacker log floods could halt or stall the native indexer) with P2s. Start from it with one `git checkout 207b1546ebf3de529c9b4cb97b784b78a77db876 -- <path>` per owned path (packages/indexer-native), then implement PRD-05 section 3a for this lane, write the coverage matrix decisions.md asks for, keep the operator-settled choices and list them again.
+
 - Executable specification: `packages/shared/src/testing/memory-read-model.ts`; conformance suite and scenarios: `testing/read-model-conformance.ts`, `testing/read-model-scenarios.ts`; event shapes and tracked-id rules: `src/chain-events.ts`; ABIs: `src/abi/generated.ts`, `src/abi/external.ts`; addresses: `GNOSIS_EXTERNAL` in `src/deployment.ts`.
 - Reality/Kleros event semantics: `docs/research/reality-kleros.md`; Gnosis finality (~2 epochs) and RPC behaviour: `docs/security/requirements.md` section 8 (SEC-IDX).
 - Dependencies available (frozen): viem, drizzle-orm, pg, zod, pino, prom-client, tsx, @electric-sql/pglite (dev), @pine/shared.
