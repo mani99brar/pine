@@ -124,19 +124,29 @@ int8 and counts explicitly.
 
 ## 3a. indexers-002 review fixes (carried by indexers-003)
 indexer-native:
-- Log volume is attacker-controlled (anyone can emit cheap Reality/CTF logs, e.g. zero-value `fundAnswerBounty` loops), so volume
-  must never halt or stall the indexer: any RPC error, any "too many results"/range error and any oversized response (including
-  the response-size cap of the log parser) splits the range in halves down to ONE block; a single block is then split per address
-  and then per topic0. Block gas bounds the logs per block (~5k), so splitting always converges; only genuine provider failures
-  after retries back off, and only integrity conflicts halt. Tests: a log-dense range that exceeds the cap is fetched by splitting
-  and applied; a provider that answers "too many results" for ranges above 1 block still progresses.
-- Ignored (untracked) logs are not persisted: `applied_events` records only logs that changed state, so attacker logs cannot grow
-  storage (the cursor and the ordered application already prevent re-application).
+- Log volume is attacker-controlled (anyone can emit cheap Reality/CTF logs, e.g. zero-value `fundAnswerBounty` loops; ~5k logs
+  of one address and topic0 fit in one 17M-gas block, ~3.5 MB of JSON), so volume must never halt or stall the indexer:
+  1. Only size-type failures split: "too many results"/"range too large"/response-size errors, timeouts, and a response above the
+     parser's caps. The range is halved down to ONE block. Every other error (429, 5xx, network) retries the SAME request with
+     capped backoff, and the cycle gives up at the first request that still fails after its retries (no split storm).
+  2. The parser's caps derive from the gas bound: response size 16 MB and 20,000 logs, comfortably above one block's worst case.
+  3. Bounded fallback when a single block still exceeds a provider's cap: fetch that block's ClaimRegistry, EvidenceRegistry and
+     Kleros-proxy logs unfiltered, compute the tracked-id set as of the end of that block (including ClaimCreated and reopens in
+     it), and fetch that block's Reality and CTF logs with topic filters on the tracked ids (OR-lists chunked to 100 ids per
+     request), on both providers. Untracked spam is then never requested.
+  Only integrity conflicts halt. Operations docs require providers that return at least 10,000 logs per response. Tests: a
+  log-dense range above the cap is fetched by splitting and applied; a provider that answers "too many results" above one block
+  still progresses; a single block above the provider cap progresses through the fallback; a 429 is retried without splitting.
+- Idempotency comes from a cursor-position guard: inside its transaction `applyEvents` skips every event at or before the stored
+  cursor position (block, logIndex), as `MemoryReadModel` refuses out-of-order events, so re-applying a range is a no-op even when
+  an event that was ignored on the first pass would now be tracked. No per-event rows are persisted (an `applied_events` table, if
+  the candidate has one, is dropped or limited to tracked state changes), so neither untracked nor tracked spam grows storage.
 - `decodeCursor` bounds key parts to the int8/int4 ranges in the zod schema (crafted cursors → `InvalidCursorError`, never a
   database error).
 - `main.ts`: every startup step, including `pool.connect()` and connection-string parsing, runs inside the try that logs through
   the redactor; the top-level call has a handler (no unhandled rejection prints a raw error).
-- RPC providers must be independent: their normalized hostnames must differ, and production requires https.
+- RPC providers must be independent: the last two DNS labels of their hostnames (a registrable-domain heuristic; no public-suffix
+  list is available under the frozen dependencies) must differ, documented as a heuristic; production requires https.
 - Decided (recorded): the zod domain checks run on every decoded external log before tracking is decided; they cannot fail for
   contract-emitted logs (Reality `ts` is the block timestamp, CTF bounds outcome slots to 256), so they cannot be used to halt.
 - Required additional tests: a PRIMARY-side stored-cursor hash mismatch halts; the range-end header of a logless chunk is
@@ -145,11 +155,13 @@ indexer-native:
   the migration runner's advisory lock; the node-postgres executor rolls back and releases the client when the callback throws (stub
   Pool/PoolClient).
 indexer-envio and read-model-envio:
-- read-model-envio rejects a `graphqlUrl` with userinfo and refuses http:// when an admin secret is set (outside tests); reads the
-  response as a stream with a byte cap; documents a read-only Hasura role for the API; list queries without pagination send an
-  explicit limit and request one extra row, throwing when the cap is exceeded.
-- indexer-envio: production must not run with the placeholder addresses or start block (documented fail-closed check in the start
-  script: refuse when `NODE_ENV=production` and the env is unset); `ENVIO_BLOCK_LAG` has a lower bound (≥ 40); docs state that the
+- read-model-envio rejects a `graphqlUrl` with userinfo and refuses http:// when an admin secret is set unless the explicit option
+  `allowInsecureTransport: true` is passed (tests only; never derived from NODE_ENV/VITEST); reads the response as a stream with a
+  byte cap; documents a read-only Hasura role for the API; list queries without pagination send an explicit limit of 10,000 and
+  request one extra row, throwing when exceeded (documented divergence from the native backend, which has no cap).
+- indexer-envio: production must not run with the placeholder addresses or start block (fail-closed check in the package's start
+  script, the only supported entry point; docs say never to invoke `envio start` directly); `ENVIO_BLOCK_LAG` has a lower bound
+  (≥ 40) enforced by the same script; docs state that the
   Envio option trusts one data source unless HyperSync or a second verified RPC is configured, which is part of its launch gate.
 - A test pins that `schema.graphql` has no list-typed fields.
 
