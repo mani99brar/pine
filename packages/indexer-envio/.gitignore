@@ -1,0 +1,2 @@
+# envio codegen output (reproducible, offline): regenerate with `pnpm codegen`
+.envio/

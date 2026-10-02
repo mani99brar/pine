@@ -1,0 +1,16 @@
+packages:
+  - "packages/*"
+
+# Do not install versions published less than 3 days ago (typosquat/compromised-release window).
+minimumReleaseAge: 4320
+
+autoInstallPeers: true
+strictPeerDependencies: false
+
+# Supply-chain hardening: dependency lifecycle scripts are blocked unless allowed here.
+allowBuilds:
+  esbuild: true
+
+saveExact: true
+# envio 3.12.x depends on @fuel-ts/*@0.96.1 which declares only Node 18/20/22; strict engines would refuse Node 24.
+engineStrict: false
