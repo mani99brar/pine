@@ -11,6 +11,8 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - Bounds are constants: evidence window 1–90 days, reveal window 12 h–7 days, min bond between the deploy-time floor and 10,000 xDAI (`MinBondTooHigh` above the cap), title 1–120 bytes of printable ASCII without `"` or `\`.
 - Evidence timing operators are strict `<` for commit/publish (evidence deadline) and reveal (reveal deadline); Reality opens at the reveal deadline.
 
+- The deployment script and the real-pair fork round trip move to the `assembly` feature (after both lanes merge); this feature writes no `contracts/script` files, and the EvidenceRegistry constructor never requires code at the registry address.
+
 ## Assumptions
 
 - The real Seer `MarketFactory` at 0x83183DA8…cDcf1 behaves as its verified source (docs/research/seer-protocol.md); the fork test is the evidence.

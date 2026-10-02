@@ -9,6 +9,7 @@ Implement `contracts/src/EvidenceRegistry.sol` exactly as specified in `docs/prd
 - The commitment formula and TYPEHASH are frozen in the interface NatSpec; the cross-language vector is `EVIDENCE_COMMITMENT_VECTOR` in `packages/shared/src/testing/vectors.ts` (TypeScript twin: `packages/shared/src/evidence.ts`).
 - Claim deadlines come from `IClaimRegistry.getClaim(market)`; registration from `isRegistered(market)`. The ClaimRegistry implementation is written by another lane: use a test-local mock claim registry that you control (deadlines, registration).
 - Timing operators (frozen): commit and publish iff `block.timestamp < evidenceDeadline`; reveal iff `block.timestamp < revealDeadline`.
+- The constructor must not require code at, or call, the claim registry address (it is deployed first in the real order); test construction against an empty address.
 
 ## Constraints
 

@@ -9,7 +9,7 @@ OpenZeppelin 5.7.0 (`contracts/lib`, never edited). Tests print a TAP summary th
 
 | Lane | Owns (path prefixes) |
 |---|---|
-| `claim-registry` | `contracts/src/ClaimRegistry.sol`, `contracts/src/libraries`, `contracts/test/claim-registry`, `contracts/test/fork`, `contracts/script` |
+| `claim-registry` | `contracts/src/ClaimRegistry.sol`, `contracts/src/libraries`, `contracts/test/claim-registry`, `contracts/test/fork`, `contracts/script` (reserved: no files in this feature, see section 5) |
 | `evidence-registry` | `contracts/src/EvidenceRegistry.sol`, `contracts/test/evidence-registry` |
 
 Neither lane edits interfaces, `contracts/lib`, `contracts/foundry.toml`, `scripts/`, or anything under `packages/`. Each lane's tests
@@ -75,7 +75,8 @@ Vectors are transcribed into a Solidity test file by the lane (Solidity tests ca
 `minimumMinBond`, the constants. No function iterates storage.
 
 ## 3. EvidenceRegistry (`evidence-registry` lane)
-- `constructor(address claimRegistry)`: stores it immutably (nonzero). No other configuration.
+- `constructor(address claimRegistry)`: stores it immutably (nonzero). It must NOT require code at that address or call it: in the
+  real deployment the EvidenceRegistry is created first, while the predicted ClaimRegistry address is still empty. No other configuration.
 - `commitEvidence(market, commitment)`: market registered (`IClaimRegistry.isRegistered`, else `UnknownMarket`); deadline from
   `getClaim`; `block.timestamp < evidenceDeadline` else `EvidenceWindowClosed`; `commitment != 0` else `ZeroValue`; new id
   `++submissionCount`; store `{market, submitter: msg.sender, committedAt, status: Committed, commitment}`; emit.
@@ -104,7 +105,8 @@ Vectors are transcribed into a Solidity test file by the lane (Solidity tests ca
   `getMinBond == minBond`, `getArbitrator == 0x68154E…`; CTF outcome slot count 3; wrapped token names `PY_…`/`PN_…`;
   `marketName()` equals `renderQuestion`; a second creator publishing the same digest gets a distinct market that shares the
   Reality question, the condition **and the three wrapped outcome-token addresses** (Wrapped1155Factory deploys wrappers by CREATE2
-  over the position id and token data, and the token names are identical); the test asserts this sharing explicitly. Nothing may
+  over the position id and token data, and the token names are identical); the test reuses the exact same params struct in the
+  same block (no `vm.warp`, same min bond) and asserts equality of questionId, conditionId and all three token addresses. Nothing may
   treat an outcome-token address as unique per claim. The fork tests never broadcast and need no key.
 ### evidence-registry (`contracts/test/evidence-registry`, with a test-local mock claim registry)
 - `computeCommitment` reproduces `EVIDENCE_COMMITMENT_VECTOR` (deploy at the vector's registry address with `deployCodeTo`,
@@ -115,13 +117,13 @@ Vectors are transcribed into a Solidity test file by the lane (Solidity tests ca
 - Double reveal, reveal by another address, reveal of a published id, zero salt/digest/commitment, unknown market and unknown id revert.
 - Invariant test (handler-based): ids are 1..count with no gaps, statuses only move Committed→Revealed, published records never change.
 - Gas: commit/reveal gas does not grow with the number of prior submissions (assert within a small tolerance after 500 submissions).
+- Construction against an address with no code succeeds (the real deployment order).
 
-## 5. Deployment script (`claim-registry` lane, `contracts/script/Deploy.s.sol`)
-Takes the deployer explicitly (`vm.startBroadcast(deployer)`), predicts the ClaimRegistry address with
-`vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1)`, reads the expected Seer addresses from the script (copied from
-`GNOSIS_EXTERNAL`), deploys EvidenceRegistry(predicted) then ClaimRegistry, asserts the binding and every expected address, and logs
-a JSON deployment record (addresses, block, chain id, constructor args). It is only run by an operator (`forge script --broadcast`
-with a hardware wallet); a fork test runs the script's logic with an explicit test deployer without broadcasting.
+## 5. Deployment script — moved to feature `assembly`
+`contracts/script/Deploy.s.sol` (explicit deployer, `vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1)` prediction,
+EvidenceRegistry first, binding and expected-address assertions, JSON deployment record) and its fork test deploying the REAL pair
+followed by a `createClaim` → `commitEvidence` → `revealEvidence` round trip are written after both lanes merge, in the `assembly`
+feature, where both contracts can be imported. This feature writes no script.
 
 Note for the evidence-registry vector test: `deployCodeTo` needs the artifact in the sparse `--match-path` compilation, which holds
 when the test imports `EvidenceRegistry.sol`; otherwise deploy normally and `vm.etch` the runtime code at the vector's registry

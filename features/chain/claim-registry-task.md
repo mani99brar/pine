@@ -2,7 +2,7 @@
 
 ## Goal
 
-Implement `contracts/src/ClaimRegistry.sol` (and pure helper libraries under `contracts/src/libraries/`) exactly as specified in `docs/prd/PRD-01-chain.md` section 2 against the frozen `contracts/src/interfaces/IClaimRegistry.sol`: an immutable, ownerless registry that validates claim parameters, composes the market question on-chain, creates the Seer categorical Yes/No market atomically and records the claim. Add the deployment script of section 5 and the tests of section 4.
+Implement `contracts/src/ClaimRegistry.sol` (and pure helper libraries under `contracts/src/libraries/`) exactly as specified in `docs/prd/PRD-01-chain.md` section 2 against the frozen `contracts/src/interfaces/IClaimRegistry.sol`: an immutable, ownerless registry that validates claim parameters, composes the market question on-chain, creates the Seer categorical Yes/No market atomically and records the claim, with the tests of section 4. Do NOT write a deployment script: PRD-01 section 5 moves it (and the real-pair fork round trip) to the later `assembly` feature.
 
 ## Context
 
