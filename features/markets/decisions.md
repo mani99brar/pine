@@ -17,6 +17,9 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - An existing but uninitialised Algebra pool (price 0) is initialised by the plan like a missing pool.
 - `reopenQuestion` nonce = number of questions already in the market's reopen chain.
 - Artifact uploads: 413 before any store or quota consumption; optional `expectedSha256` is only compared (422 on mismatch).
+- Coverage matrix (lesson from the platform and claims reviews): each lane's completion maps every required test of its PRD section
+  and every decision/operator clarification to the test file and test name that would fail if the behaviour were removed, and
+  closes every gap before completing (the independent coverage reviewer blocks on any untested requirement).
 
 ## Assumptions
 

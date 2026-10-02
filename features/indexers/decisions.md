@@ -23,6 +23,9 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
   such test file, released in `afterAll`, a dead or same-process owner taken over). Use one database per test file and the same
   lock; each lane's gate must pass as ONE full run of its argv. Envio's `createTestIndexer` runs are serialized the same way if
   they use much memory.
+- Coverage matrix (lesson from the platform and claims reviews): each lane's completion maps every required test of its PRD section
+  and every decision/operator clarification to the test file and test name that would fail if the behaviour were removed, and
+  closes every gap before completing (the independent coverage reviewer blocks on any untested requirement).
 
 ## Assumptions
 

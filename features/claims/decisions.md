@@ -54,6 +54,9 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
   atomic stale-lock takeover; the missing tests of PRD-03 section 9 (claims-006 additions).
 - "Public routes never read cookies" is proven by the platform; this module proves its public handlers ignore sessions (identical
   responses with and without `x-test-session` and a `Cookie` header).
+- Coverage matrix (lesson from the platform and claims reviews): each lane's completion maps every required test of its PRD section
+  and every decision/operator clarification to the test file and test name that would fail if the behaviour were removed, and
+  closes every gap before completing (the independent coverage reviewer blocks on any untested requirement).
 
 ## Assumptions
 

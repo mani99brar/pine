@@ -20,6 +20,9 @@ Settled by the operator from ADR-0001 on 2026-10-02.
 - The vector script is TypeScript run with `pnpm --filter @pine/api exec node --import tsx ../../scripts/fixtures/export-plan-vectors.mts`.
 - Residual allowance after a mint: at most 10 wei, only toward the position manager (Algebra rounding).
 - CI adds gitleaks secret scanning; the release checklist lists every launch gate of PRD-06 section 3.
+- Coverage matrix (lesson from the platform and claims reviews): each lane's completion maps every required test of its PRD section
+  and every decision/operator clarification to the test file and test name that would fail if the behaviour were removed, and
+  closes every gap before completing (the independent coverage reviewer blocks on any untested requirement).
 
 ## Assumptions
 
