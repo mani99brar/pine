@@ -30,5 +30,5 @@ export {
 } from './agent'
 export { createIpfsHandler, rawCidV1, extractCidPath, IPFS_MAX_BYTES, type IpfsHandlerOptions } from './ipfs'
 export { readServerEnv, resolveSiteUrl, demoAllowed, DEV_AUTH_SECRET, PineConfigError, type ServerEnv } from './env'
-export { ACCOUNT_COOKIE, signValue, unsignValue } from './account-store'
+export { ACCOUNT_COOKIE, signValue, unsignValue, mintApiToken, verifyApiToken, API_TOKEN_TTL_SECONDS, type ApiTokenClaims } from './account-store'
 export { PUBLIC_CACHE, CORS_HEADERS, type CatchAllContext } from './http'

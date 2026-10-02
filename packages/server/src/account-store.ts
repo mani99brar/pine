@@ -48,30 +48,30 @@ function fromB64url(s: string): Uint8Array {
   return out
 }
 
-async function hmacKey(secret: string): Promise<CryptoKey> {
-  return crypto.subtle.importKey('raw', enc.encode(`pine-cookie:${secret}`), { name: 'HMAC', hash: 'SHA-256' }, false, [
+async function hmacKey(secret: string, context = 'pine-cookie'): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', enc.encode(`${context}:${secret}`), { name: 'HMAC', hash: 'SHA-256' }, false, [
     'sign',
     'verify',
   ])
 }
 
 /** Signs a string payload: `<b64url(payload)>.<b64url(hmac)>`. */
-export async function signValue(payload: string, secret: string): Promise<string> {
-  const key = await hmacKey(secret)
+export async function signValue(payload: string, secret: string, context?: string): Promise<string> {
+  const key = await hmacKey(secret, context)
   const data = enc.encode(payload)
   const sig = new Uint8Array(await crypto.subtle.sign('HMAC', key, data))
   return `${b64url(data)}.${b64url(sig)}`
 }
 
 /** Verifies and returns the payload, or null when missing/tampered. */
-export async function unsignValue(signed: string | undefined, secret: string): Promise<string | null> {
+export async function unsignValue(signed: string | undefined, secret: string, context?: string): Promise<string | null> {
   if (!signed) return null
   const i = signed.lastIndexOf('.')
   if (i <= 0) return null
   try {
     const data = fromB64url(signed.slice(0, i))
     const sig = fromB64url(signed.slice(i + 1))
-    const key = await hmacKey(secret)
+    const key = await hmacKey(secret, context)
     const ok = await crypto.subtle.verify('HMAC', key, sig as BufferSource, data as BufferSource)
     return ok ? new TextDecoder().decode(data) : null
   } catch {
@@ -131,7 +131,7 @@ export function freshStored(login: string, defaultChainId: number): StoredAccoun
 export function linkWallet(stored: StoredAccount, wallet: Omit<LinkedWallet, 'primary'> & { primary?: boolean }): StoredAccount {
   const others = stored.wallets.filter((w) => w.address.toLowerCase() !== wallet.address.toLowerCase())
   const existing = stored.wallets.find((w) => w.address.toLowerCase() === wallet.address.toLowerCase())
-  const primary = existing?.primary ?? (wallet.primary ?? others.length === 0)
+  const primary = existing?.primary || (wallet.primary ?? others.length === 0)
   const next: LinkedWallet = { ...wallet, primary }
   const wallets = primary ? [...others.map((w) => ({ ...w, primary: false })), next] : [...others, next]
   return { ...stored, wallets: wallets.slice(-10) }
@@ -149,5 +149,46 @@ export function setPrimary(stored: StoredAccount, address: Address): StoredAccou
   return {
     ...stored,
     wallets: stored.wallets.map((w) => ({ ...w, primary: w.address.toLowerCase() === address.toLowerCase() })),
+  }
+}
+
+// ---------------------------------------------------------------------------
+// REST API tokens (rest mode)
+// ---------------------------------------------------------------------------
+
+export const API_TOKEN_CONTEXT = 'pine-api-token'
+export const API_TOKEN_TTL_SECONDS = 600
+
+export interface ApiTokenClaims {
+  sub: string // GitHub login
+  gid: number // GitHub user id
+  demo: boolean
+  aud: 'pine-api'
+  iat: number
+  exp: number
+}
+
+/**
+ * Short-lived bearer token for the REST API: `pine1.<b64url(claims)>.<b64url(HMAC-SHA256)>`, keyed
+ * from AUTH_SECRET with the context "pine-api-token". Carries identity only (never the GitHub token).
+ * The REST backend verifies it with the shared AUTH_SECRET (see verifyApiToken).
+ */
+export async function mintApiToken(user: { login: string; githubId: number; demo: boolean }, secret: string, now = Date.now()): Promise<{ token: string; expiresAt: string }> {
+  const iat = Math.floor(now / 1000)
+  const claims: ApiTokenClaims = { sub: user.login, gid: user.githubId, demo: user.demo, aud: 'pine-api', iat, exp: iat + API_TOKEN_TTL_SECONDS }
+  const signed = await signValue(JSON.stringify(claims), secret, API_TOKEN_CONTEXT)
+  return { token: `pine1.${signed}`, expiresAt: new Date(claims.exp * 1000).toISOString() }
+}
+
+export async function verifyApiToken(token: string | undefined, secret: string, now = Date.now()): Promise<ApiTokenClaims | null> {
+  if (!token?.startsWith('pine1.')) return null
+  const raw = await unsignValue(token.slice(6), secret, API_TOKEN_CONTEXT)
+  if (!raw) return null
+  try {
+    const claims = JSON.parse(raw) as ApiTokenClaims
+    if (claims.aud !== 'pine-api' || claims.exp * 1000 <= now) return null
+    return claims
+  } catch {
+    return null
   }
 }

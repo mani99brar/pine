@@ -19,7 +19,7 @@ import GitHub from 'next-auth/providers/github'
 import Credentials from 'next-auth/providers/credentials'
 import { getToken } from 'next-auth/jwt'
 import { DEMO_GITHUB_USER } from '@pine/data'
-import { demoAllowed, readServerEnv } from './env'
+import { demoAllowed, readServerEnv, type ServerEnv } from './env'
 import type { PineAuthExtras, PineSessionUser } from './session'
 import './next-auth-augment'
 
@@ -48,8 +48,8 @@ interface GitHubProfileLike {
   html_url?: string
 }
 
-export function createAuth(opts: CreateAuthOptions): PineAuth {
-  const env = readServerEnv()
+/** The Auth.js config used by createAuth (exported for tests and custom setups). */
+export function pineAuthConfig(env: ServerEnv, opts: Pick<CreateAuthOptions, 'signInPage'> = {}): NextAuthConfig {
   const githubEnabled = env.githubOAuthConfigured
   const demoEnabled = demoAllowed(env)
 
@@ -130,29 +130,39 @@ export function createAuth(opts: CreateAuthOptions): PineAuth {
       },
     },
   }
+  return config
+}
 
+/** Reads the GitHub access token from the encrypted session JWT (server only). */
+export async function readAccessToken(req: Request, secret: string): Promise<string | null> {
+  for (const cookieName of [SECURE_SESSION_COOKIE, SESSION_COOKIE]) {
+    try {
+      const token = await getToken({
+        req,
+        secret,
+        cookieName,
+        salt: cookieName,
+        secureCookie: cookieName === SECURE_SESSION_COOKIE,
+      })
+      const at = token?.accessToken
+      if (typeof at === 'string' && at.length > 0) return at
+      if (token) return null
+    } catch {
+      // try next cookie name
+    }
+  }
+  return null
+}
+
+export function createAuth(opts: CreateAuthOptions): PineAuth {
+  const env = readServerEnv()
+  const githubEnabled = env.githubOAuthConfigured
+  const demoEnabled = demoAllowed(env)
+  const config = pineAuthConfig(env, opts)
   const result = NextAuth(config)
 
   const extras: PineAuthExtras = {
-    async getAccessToken(req: Request) {
-      for (const cookieName of [SECURE_SESSION_COOKIE, SESSION_COOKIE]) {
-        try {
-          const token = await getToken({
-            req,
-            secret: env.authSecret,
-            cookieName,
-            salt: cookieName,
-            secureCookie: cookieName === SECURE_SESSION_COOKIE,
-          })
-          const at = token?.accessToken
-          if (typeof at === 'string' && at.length > 0) return at
-          if (token) return null
-        } catch {
-          // try next cookie name
-        }
-      }
-      return null
-    },
+    getAccessToken: (req: Request) => readAccessToken(req, env.authSecret),
   }
 
   const auth = Object.assign(result.auth, { pine: extras })

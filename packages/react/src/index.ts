@@ -9,6 +9,7 @@ export {
   createPineQueryClient,
   createPineWagmiConfig,
   pineViemChains,
+  pineWalletList,
   walletConnectProjectId,
   type PineProvidersProps,
 } from './providers'
@@ -62,7 +63,7 @@ export {
   type StepProgress,
   type PendingCheck,
 } from './tx/machine'
-export { createDemoExecutor, DEMO_REJECTION_MESSAGE, type DemoExecutorOptions } from './tx/demo-executor'
+export { createDemoExecutor, setDemoTxDelays, DEMO_REJECTION_MESSAGE, type DemoExecutorOptions } from './tx/demo-executor'
 export { createLiveExecutor, type SerializedReceipt } from './tx/live-executor'
 
 // composer & drafts

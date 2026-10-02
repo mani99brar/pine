@@ -8,7 +8,7 @@ This guide lists the exact files a Next.js 16 app needs. It also covers the deci
 |---|---|---|
 | `/api/auth/*` | `createAuth().handlers` | live |
 | `/api/github/*` | `createGitHubHandler(auth)` | live (mock source in mock mode, live GitHub with the user's token) |
-| `/api/account/*` | `createAccountHandler(auth)` | live (signed-cookie store in mock/envio, REST in rest mode) |
+| `/api/account/*` | `createAccountHandler(auth)` | live (signed-cookie store in mock/envio, REST in rest mode; `api-token` for REST auth) |
 | `/api/agent/*` | `createAgentHandler({ appName })` | live (needs `@pine/core/agent`) |
 | `/api/ipfs` | `createIpfsHandler({ auth })` | live (deterministic mock CID without `PINE_IPFS_UPLOAD_URL`) |
 | `/llms.txt`, `/llms-full.txt`, `/.well-known/pine.json` | `llmsTxtHandler`, `llmsFullTxtHandler`, `wellKnownHandler` | live |
@@ -37,6 +37,7 @@ Everything works with no env vars (mock mode, demo wallet, demo sign-in). `.env.
 | `AUTH_GITHUB_ID`, `AUTH_GITHUB_SECRET` | Enables GitHub sign-in (scope `read:user`). Set `NEXT_PUBLIC_PINE_GITHUB_OAUTH=1` too, so the client shows the GitHub button. |
 | `PINE_IPFS_UPLOAD_URL`, `PINE_IPFS_UPLOAD_TOKEN` | Server-side pinning. Without them, `/api/ipfs` returns a deterministic CID and pins nothing. |
 | `PINE_GITHUB_SOURCE` | Optional `mock` or `live`, to force the GitHub proxy source |
+| `PINE_API_TOKEN` | Rest mode, optional. A static service token the server sends to the REST API instead of per-user tokens. |
 
 Read the config in client code with `usePine().env` and in server code with `readServerEnv()` from `@pine/server`.
 
@@ -166,6 +167,68 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
 Passing `await auth()` means the first render already knows the user. It also makes the layout dynamic because it reads cookies. If a static shell matters more, pass `session={undefined}`; `SessionProvider` then fetches `/api/auth/session` on the client.
 
+### Turbopack alias for optional x402 peers (recommended)
+
+**Status: recommended for every app until a source fix is confirmed.** Without it, Turbopack fails with `Module not found: @x402/core/client` in any app that imports `@pine/react`.
+
+**Why the alias is needed:**
+
+- `@rainbow-me/rainbowkit`'s root entry imports the `wagmi/connectors` barrel. Pine needs that entry for `RainbowKitProvider` and `useConnectModal`.
+- That barrel re-exports the Base Account connector, which does `import('@base-org/account')`.
+- That pulls in `@coinbase/cdp-sdk`, which lazily imports optional `@x402/*` payment packages that are not installed.
+
+Turbopack resolves dynamic imports at build time, so the chain is reached even though Pine never uses those packages. `@pine/react` no longer configures Base Account or Coinbase Wallet: its wagmi config uses `connectorsForWallets` with injected, MetaMask, Rabby, Rainbow, Safe and WalletConnect, the last only when a project id is set. Those code paths never run. The import graph still reaches the module through RainbowKit itself, which is why each app needs the alias.
+
+A source fix was investigated, and the alias is the chosen fix. Of RainbowKit's entries, only `@rainbow-me/rainbowkit/components` avoids the barrel. The root entry is needed for `useConnectModal`, `lightTheme`/`darkTheme` and `connectorsForWallets`, and `./wallets` and wagmi's `walletConnect` connector all go through `wagmi/connectors`. A barrel-free build would therefore drop WalletConnect and the theme helpers.
+
+Use the exact pattern from `apps/console/next.config.ts`:
+
+```ts
+// next.config.ts
+import type { NextConfig } from 'next'
+
+// Optional x402 payment modules lazily imported by @coinbase/cdp-sdk (via RainbowKit's Base Account
+// connector) are not installed; Pine never calls them. Alias them to an empty module so bundling succeeds.
+const X402_OPTIONAL = [
+  '@x402/core/client',
+  '@x402/core/schemas',
+  '@x402/core/server',
+  '@x402/evm',
+  '@x402/evm/auth-capture/client',
+  '@x402/evm/batch-settlement/client',
+  '@x402/evm/exact/client',
+  '@x402/evm/exact/server',
+  '@x402/evm/exact/v1/client',
+  '@x402/evm/upto/client',
+  '@x402/evm/upto/server',
+  '@x402/express',
+  '@x402/extensions/bazaar',
+  '@x402/extensions/builder-code',
+  '@x402/fetch',
+  '@x402/svm/exact/client',
+  '@x402/svm/exact/server',
+  '@x402/svm/exact/v1/client',
+  '@x402/svm/upto/client',
+  '@x402/svm/upto/server',
+]
+const emptyShim = './src/lib/shims/x402.js'
+
+const nextConfig: NextConfig = {
+  turbopack: { resolveAlias: Object.fromEntries(X402_OPTIONAL.map((m) => [m, emptyShim])) },
+  transpilePackages: ['@pine/core', '@pine/data', '@pine/react', '@pine/server'],
+  // …the rest of your config
+}
+
+export default nextConfig
+```
+
+```js
+// src/lib/shims/x402.js — stand-in for the optional @x402/* modules. Pine never uses x402 payments.
+export {}
+```
+
+The minimal shim is the empty `export {}` above. If Turbopack reports missing named exports, use the console's version, which exports throwing stubs for each name. Copy it from `apps/console/src/lib/shims/x402.js`. If a newer `@coinbase/cdp-sdk` adds `@x402/*` specifiers, add them to the list.
+
 ## 4. What the hooks give you
 
 All signatures are in [package-api.md](package-api.md). Behaviour worth knowing:
@@ -223,6 +286,24 @@ All signatures are in [package-api.md](package-api.md). Behaviour worth knowing:
   - Account data, meaning linked wallets and preferences, comes from `/api/account/me`. In mock/envio mode it is stored in an HMAC-signed httpOnly cookie, `pine.account`, bound to the GitHub login. This needs no database and survives serverless restarts. In rest mode it is forwarded to the REST API.
 - **`useLinkWallet()`** signs a SIWE (EIP-4361) message. The server checks the domain, the nonce (an httpOnly cookie, single use, 10 min), expiry and the signature (EOA first, then ERC-1271/6492). In demo mode, `link()` calls `POST /api/account/wallets/demo` instead. That route is labelled "Demo wallet (simulated signature)" and is disabled outside demo mode.
 - **`useUpdatePreferences()`** is a TanStack mutation that updates optimistically. `useAccountData()` exports the account data (as a download) and deletes it.
+- **REST mode auth.** The REST API's `bearerAuth` is a short-lived token that the app issues. `GET /api/account/api-token` returns `{ token, expiresAt }`. The token is `pine1.<claims>.<hmac>`, valid for 10 minutes, and carries identity only (`sub` = GitHub login, `gid`, `demo`), never the GitHub token. It is HMAC-SHA256 keyed from `AUTH_SECRET`, and the backend verifies it with `verifyApiToken` from `@pine/server`.
+  - In rest mode, `PineProviders` gives the client `DraftStore` a token getter that calls this route.
+  - The server account handler mints tokens itself, or sends `PINE_API_TOKEN` when that is set.
+
+### Storage by mode
+
+| | mock | envio | rest |
+|---|---|---|---|
+| Claims, markets, evidence (reads) | fixtures (in-memory; demo writes persist to `localStorage['pine:mock:*']`) | Envio GraphQL | REST API |
+| Manifest/evidence uploads | mock storage (no network; deterministic CID) | `POST /api/ipfs` | `POST /api/ipfs` |
+| Drafts | `localStorage` | `localStorage` | REST API (token above) |
+| Account (wallets, preferences) | signed cookie `pine.account` | signed cookie | REST API |
+| Tx progress | `localStorage['pine:tx:*']` | same | same |
+
+### Testing and QA helpers
+
+- `setDemoTxDelays({ signatureMs: 1, pendingMs: [1, 2], offchainMs: 1, switchMs: 1, resumeAfterMs: 1 })` makes the simulated wallet near-instant. Use it for Playwright screenshots and tests, and call `setDemoTxDelays(undefined)` to restore the realistic delays.
+- `useDemoWallet().failNext('create_market')` exercises the failed and resumed states.
 
 ### Misc
 

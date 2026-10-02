@@ -25,18 +25,29 @@ export interface DemoExecutorOptions {
 
 export const DEMO_REJECTION_MESSAGE = 'User rejected the request.'
 
+let defaultDelays: DemoExecutorOptions['delays'] | undefined
+
+/**
+ * Overrides the simulated wallet delays for executors created afterwards (tests, screenshot QA).
+ * Pass `undefined` to restore the realistic defaults.
+ */
+export function setDemoTxDelays(delays: DemoExecutorOptions['delays'] | undefined): void {
+  defaultDelays = delays
+}
+
 /**
  * Simulated wallet/chain: awaiting_signature (~0.8s) → pending (1.2–3s) → confirmed, with fake
  * tx hashes. `failNext` on the demo wallet makes the next wallet prompt reject.
  */
 export function createDemoExecutor(opts: DemoExecutorOptions): TxExecutor {
+  const delays = opts.delays ?? defaultDelays
   const random = opts.random ?? Math.random
   const now = opts.now ?? Date.now
-  const signatureMs = opts.delays?.signatureMs ?? 800
-  const [pMin, pMax] = opts.delays?.pendingMs ?? [1200, 3000]
-  const offchainMs = opts.delays?.offchainMs ?? 400
-  const switchMs = opts.delays?.switchMs ?? 600
-  const resumeAfterMs = opts.delays?.resumeAfterMs ?? 5000
+  const signatureMs = delays?.signatureMs ?? 800
+  const [pMin, pMax] = delays?.pendingMs ?? [1200, 3000]
+  const offchainMs = delays?.offchainMs ?? 400
+  const switchMs = delays?.switchMs ?? 600
+  const resumeAfterMs = delays?.resumeAfterMs ?? 5000
 
   return {
     kind: 'demo',

@@ -14,6 +14,7 @@
  *   POST   wallets/:address/primary → { account }
  *   PATCH  preferences              Partial<AccountPreferences> → { account }
  *   GET    export                   → JSON download of everything stored about the account
+ *   GET    api-token                → { token, expiresAt } short-lived REST API bearer (rest mode)
  *   DELETE me                       → removes stored account data (wallet links, preferences)
  *
  * Storage: mock/envio mode keeps the account in an HMAC-signed httpOnly cookie (see account-store.ts);
@@ -41,6 +42,7 @@ import {
 import {
   accountCookie,
   clearAccountCookie,
+  mintApiToken,
   freshStored,
   linkWallet,
   readStoredAccount,
@@ -135,7 +137,11 @@ async function cookieBackend(req: Request, user: PineSessionUser, env: ServerEnv
 }
 
 function restBackend(user: PineSessionUser, env: ServerEnv): Backend {
-  const store = createAccountStore(env)
+  // `PINE_API_TOKEN` (service token) when set; otherwise a short-lived token minted for this user.
+  const service = process.env.PINE_API_TOKEN?.trim()
+  const store = createAccountStore(env, {
+    getToken: async () => service || (await mintApiToken(user, env.authSecret)).token,
+  })
   const gh = { login: user.login, id: user.githubId, name: user.name ?? null, avatarUrl: user.avatarUrl, htmlUrl: user.htmlUrl }
   const ensure = async () => (await store.get(user.login)) ?? store.upsertFromGitHub(gh, user.scopes, user.demo)
   return {
@@ -297,6 +303,10 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
         return withCookies(json({ nonce, expiresAt: new Date(exp).toISOString() }, { cache: PRIVATE_NO_STORE }), [cookie])
       }
       if (!user) return unauthorized()
+      if (route === 'api-token') {
+        // Short-lived identity token for the REST API (drafts/accounts in rest mode). Not a GitHub token.
+        return json(await mintApiToken(user, env.authSecret), { cache: PRIVATE_NO_STORE })
+      }
       const backend = await backendFor(req, user, env)
       if (route === 'me') return respond({ account: await backend.me() }, backend)
       if (route === 'export') {
@@ -357,7 +367,7 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
           address: result.address,
           chainId: result.chainId,
           verifiedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
-          primary: false,
+          primary: await shouldBePrimary(backend, result.address),
         }
         const account = await backend.link(wallet)
         const linked = account.wallets.find((w) => w.address.toLowerCase() === result.address.toLowerCase()) ?? wallet
@@ -382,7 +392,7 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
           chainId,
           verifiedAt: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
           label: DEMO_WALLET_LABEL,
-          primary: false,
+          primary: await shouldBePrimary(backend, DEMO_WALLET_ADDRESS),
         }
         const account = await backend.link(wallet)
         const linked = account.wallets.find((w) => w.address.toLowerCase() === wallet.address.toLowerCase()) ?? wallet
@@ -453,9 +463,16 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
   return { GET, POST, PATCH, DELETE }
 }
 
+/** The first linked wallet becomes primary; re-linking keeps an existing primary flag. */
+async function shouldBePrimary(backend: Backend, address: string): Promise<boolean> {
+  const current = await backend.me()
+  if (current.wallets.length === 0) return true
+  return current.wallets.some((w) => w.address.toLowerCase() === address.toLowerCase() && w.primary)
+}
+
 function notFound(route: string): Response {
   return errorResponse(404, 'not_found', `Unknown account route: /${route}`, {
-    hint: 'GET me|nonce|export · POST siwe/verify|wallets/demo|wallets/:address/primary · PATCH preferences · DELETE wallets/:address|me',
+    hint: 'GET me|nonce|export|api-token · POST siwe/verify|wallets/demo|wallets/:address/primary · PATCH preferences · DELETE wallets/:address|me',
   })
 }
 

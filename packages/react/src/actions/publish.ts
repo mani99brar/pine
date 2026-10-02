@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import { buildPublishSteps, COPY } from '@pine/core'
-import type { Address, ClaimDraft, Hex, PublicationStep, TxStep, TxStepId } from '@pine/core'
+import type { Address, ClaimDraft, ClaimManifest, Hex, PublicationStep, TxStep, TxStepId } from '@pine/core'
 import { seerMarketUrl } from '@pine/core/chains'
 import { usePine } from '../providers/context'
 import { pineKeys } from '../queries/keys'
@@ -52,7 +52,8 @@ function upsertStep(steps: PublicationStep[] | undefined, step: PublicationStep)
  * `draft.publication`, so a partial publication can be resumed from the composer or the dashboard.
  *
  * Demo mode: runs against the simulated wallet; on completion the claim is added to the
- * MockDataProvider (it then appears in explore, dashboards and the agent API of this browser).
+ * MockDataProvider (it then appears in explore, dashboards and activity in this browser; the
+ * server-side agent API has its own in-memory mock and does not see it).
  */
 export function usePublishClaim(draftId: string): PublishClaim {
   const { data, storage, demo, drafts: draftStore } = usePine()
@@ -208,17 +209,23 @@ export function usePublishClaim(draftId: string): PublishClaim {
       const txHashes: Partial<Record<string, Hex>> = {}
       for (const s of pub.steps ?? []) if (s.txHash) txHashes[s.id] = s.txHash
       const number = await allocateDemoNumber(data)
-      // Use the manifest that was pinned (same hash), with the creator that published it.
+      // Use the manifest exactly as pinned (its hash is what the market references).
+      let pinned: ClaimManifest = der.manifest
+      try {
+        pinned = await storage.getManifest(pub.manifestUri)
+      } catch {
+        // fall back to the derived manifest (same hash unless the wallet changed mid-run)
+      }
       const detail = buildDemoClaimDetail({
         draft: fresh,
-        manifest: der.manifest,
+        manifest: pinned,
         manifestHash: pub.manifestHash ?? (der.manifestHash as Hex),
         manifestUri: pub.manifestUri,
         policy: der.policy,
         funding: der.fundingInput,
         plan: der.funding,
         number,
-        creator,
+        creator: pinned.creator ?? creator,
         creatorGithub: login,
         marketAddress: pub.marketAddress,
         txHashes,
@@ -230,7 +237,7 @@ export function usePublishClaim(draftId: string): PublishClaim {
     await qc.invalidateQueries({
       predicate: (q) => q.queryKey[0] === 'pine' && q.queryKey[1] !== 'draft' && q.queryKey[1] !== 'drafts',
     })
-  }, [qc, draftId, data, creator, login, writePublication])
+  }, [qc, draftId, data, storage, creator, login, writePublication])
 
   const manualUrl = useCallback(
     (step: TxStep, results: Partial<Record<TxStepId, unknown>>) => {

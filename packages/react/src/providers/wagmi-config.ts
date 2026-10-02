@@ -1,5 +1,13 @@
-import { getDefaultConfig } from '@rainbow-me/rainbowkit'
-import { createConfig, http, injected, type Config } from 'wagmi'
+import { connectorsForWallets } from '@rainbow-me/rainbowkit'
+import {
+  injectedWallet,
+  metaMaskWallet,
+  rabbyWallet,
+  rainbowWallet,
+  safeWallet,
+  walletConnectWallet,
+} from '@rainbow-me/rainbowkit/wallets'
+import { createConfig, http, type Config } from 'wagmi'
 import type { Chain } from 'viem'
 import { gnosis, mainnet, sepolia } from 'viem/chains'
 import { SUPPORTED_CHAIN_IDS } from '@pine/core/chains'
@@ -37,9 +45,25 @@ export function pineViemChains(defaultChainId: number): [Chain, ...Chain[]] {
 }
 
 /**
- * Builds the wagmi config. With `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` it uses RainbowKit's
- * default wallet list (WalletConnect, Coinbase, MetaMask, Rainbow…). Without it, it falls back to
- * injected wallets only (EIP-6963 discovery), so the app never crashes for a missing project id.
+ * The RainbowKit wallet list. Explicit on purpose: no Base Account and no Coinbase Wallet SDK
+ * connectors (their SDKs pull optional `@x402/*` payment peers and are not needed by Pine).
+ * Without a WalletConnect project id, only wallets that never need WalletConnect are listed
+ * (RainbowKit throws for WalletConnect-backed wallets without a project id); EIP-6963 discovery
+ * still shows every installed browser wallet, MetaMask included.
+ */
+export function pineWalletList(projectId: string | undefined) {
+  return projectId
+    ? [
+        { groupName: 'Installed', wallets: [injectedWallet, metaMaskWallet, rabbyWallet] },
+        { groupName: 'More', wallets: [rainbowWallet, safeWallet, walletConnectWallet] },
+      ]
+    : [{ groupName: 'Installed', wallets: [injectedWallet, rabbyWallet, safeWallet] }]
+}
+
+/**
+ * Builds the wagmi config with `connectorsForWallets` and an explicit wallet list (see
+ * `pineWalletList`). Works without `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` (injected wallets only),
+ * so the app never crashes for a missing project id.
  */
 export function createPineWagmiConfig(opts: { appName: string; defaultChainId: number; siteUrl?: string }): Config {
   const chains = pineViemChains(opts.defaultChainId)
@@ -48,19 +72,15 @@ export function createPineWagmiConfig(opts: { appName: string; defaultChainId: n
     ReturnType<typeof http>
   >
   const projectId = walletConnectProjectId()
-  if (projectId) {
-    return getDefaultConfig({
-      appName: opts.appName,
-      appUrl: opts.siteUrl,
-      projectId,
-      chains,
-      transports,
-      ssr: true,
-    }) as unknown as Config
-  }
+  const connectors = connectorsForWallets(pineWalletList(projectId), {
+    appName: opts.appName,
+    appUrl: opts.siteUrl,
+    // Only read by WalletConnect-backed wallets, which are listed only when a project id exists.
+    projectId: projectId ?? '',
+  })
   return createConfig({
     chains,
-    connectors: [injected({ shimDisconnect: true })],
+    connectors,
     transports,
     ssr: true,
   }) as unknown as Config

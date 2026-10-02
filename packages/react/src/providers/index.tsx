@@ -15,9 +15,10 @@ import {
 } from '@pine/data'
 import { PineContext, isDemoEnv, type PineContextValue } from './context'
 import { createPineWagmiConfig } from './wagmi-config'
+import { createApiTokenGetter } from '../internal/api-token'
 
 export { PineContext, usePine, isDemoEnv, type PineContextValue } from './context'
-export { createPineWagmiConfig, pineViemChains, walletConnectProjectId } from './wagmi-config'
+export { createPineWagmiConfig, pineViemChains, pineWalletList, walletConnectProjectId } from './wagmi-config'
 
 export interface PineProvidersProps {
   children: ReactNode
@@ -55,14 +56,17 @@ export function createPineQueryClient(): QueryClient {
 
 function createContextValue(appName: string, overrides: Partial<PineEnv> | undefined, apiBase: string): PineContextValue {
   const env: PineEnv = { ...readPineEnv(), ...overrides }
+  const base = apiBase.replace(/\/$/, '')
+  // REST mode: drafts are per-user, so the store authenticates with a short-lived app-issued token.
+  const getToken = env.dataSource === 'rest' ? createApiTokenGetter(base) : undefined
   return {
     env,
     data: createDataProvider(env),
     storage: createManifestStorage(env),
-    drafts: createDraftStore(env),
+    drafts: createDraftStore(env, getToken ? { getToken } : {}),
     demo: isDemoEnv(env),
     appName,
-    apiBase: apiBase.replace(/\/$/, ''),
+    apiBase: base,
   }
 }
 
