@@ -2,7 +2,7 @@ import type { CommitSummary, GitHubUser, Page, PullSummary, RepoSummary } from '
 import { DEMO_GITHUB_USER } from '../demo'
 import { readMockLatencyEnabled } from '../env'
 import { clone, mulberry32, sleep } from '../internal/util'
-import { fixtures as defaultFixtures, type PineFixtures } from '../mock/fixtures'
+import { getFixtures, type PineFixtures } from '../mock/fixtures'
 import type { GitHubSource } from '../types'
 
 const ci = (s: string) => s.toLowerCase()
@@ -10,13 +10,17 @@ const ci = (s: string) => s.toLowerCase()
 /** Fixture-backed GitHub source (demo mode). Includes one private repo flagged `private: true`. */
 export class MockGitHubSource implements GitHubSource {
   readonly kind = 'mock' as const
-  private readonly fx: PineFixtures
+  private readonly fixedFixtures?: PineFixtures
   private readonly latency: boolean
   private readonly rand = mulberry32(0x6a09e667)
 
   constructor(opts: { fixtures?: PineFixtures; latency?: boolean } = {}) {
-    this.fx = opts.fixtures ?? defaultFixtures
+    this.fixedFixtures = opts.fixtures
     this.latency = opts.latency ?? readMockLatencyEnabled()
+  }
+
+  private get fx(): PineFixtures {
+    return this.fixedFixtures ?? getFixtures()
   }
 
   private async delay(): Promise<void> {

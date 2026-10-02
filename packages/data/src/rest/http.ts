@@ -39,13 +39,16 @@ export class RestClient {
     path: string,
     init: { query?: Record<string, string | number | boolean | string[] | undefined>; body?: unknown; auth?: boolean; nullOn404?: boolean } = {},
   ): Promise<T | null> {
-    const url = new URL(`${this.baseUrl}${path}`)
+    // Built without `new URL()` so relative bases (e.g. "/api/pine" proxied by the app) work too.
+    const params = new URLSearchParams()
     for (const [k, v] of Object.entries(init.query ?? {})) {
       if (v === undefined || v === '') continue
       if (Array.isArray(v)) {
-        for (const item of v) url.searchParams.append(k, item)
-      } else url.searchParams.set(k, String(v))
+        for (const item of v) params.append(k, item)
+      } else params.set(k, String(v))
     }
+    const qs = params.toString()
+    const url = `${this.baseUrl}${path}${qs ? `?${qs}` : ''}`
     const headers: Record<string, string> = { Accept: 'application/json', ...(this.opts.headers ?? {}) }
     if (init.body !== undefined) headers['Content-Type'] = 'application/json'
     if (init.auth && this.opts.getToken) {
@@ -54,7 +57,7 @@ export class RestClient {
     }
     let res: Response
     try {
-      res = await this.fetcher(url.toString(), {
+      res = await this.fetcher(url, {
         method,
         headers,
         body: init.body !== undefined ? JSON.stringify(init.body) : undefined,

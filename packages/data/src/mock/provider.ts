@@ -39,7 +39,7 @@ import {
   writeStorage,
 } from '../internal/util'
 import type { DataSourceKind, PineDataProvider } from '../types'
-import { fixtures as defaultFixtures, type PineFixtures } from './fixtures'
+import { getFixtures, type PineFixtures } from './fixtures'
 import { emptyPortfolio } from './fixtures/portfolio'
 
 const HOUR = 3_600_000
@@ -115,7 +115,7 @@ function normalizeClaimId(id: string): string {
  */
 export class MockDataProvider implements PineDataProvider {
   readonly kind: DataSourceKind = 'mock'
-  private readonly fx: PineFixtures
+  private readonly fixedFixtures?: PineFixtures
   private readonly persist: boolean
   private readonly latency: [number, number] | null
   private readonly rand = mulberry32(0x9e3779b9)
@@ -125,7 +125,7 @@ export class MockDataProvider implements PineDataProvider {
   private storageListener?: (e: StorageEvent) => void
 
   constructor(opts: MockDataProviderOptions = {}) {
-    this.fx = opts.fixtures ?? defaultFixtures
+    this.fixedFixtures = opts.fixtures
     this.persist = opts.persist ?? true
     this.now = opts.now ?? (() => Date.now())
     const l = opts.latency ?? readMockLatencyEnabled()
@@ -136,6 +136,11 @@ export class MockDataProvider implements PineDataProvider {
   // internals
   // -------------------------------------------------------------------------
 
+  /** Fixtures for the current hour (rebuilt when the hour changes) unless fixed via options. */
+  private get fx(): PineFixtures {
+    return this.fixedFixtures ?? getFixtures(this.now())
+  }
+
   private async delay(): Promise<void> {
     if (!this.latency) return
     const [min, max] = this.latency
@@ -145,15 +150,22 @@ export class MockDataProvider implements PineDataProvider {
   private load(): MockState {
     if (this.state) return this.state
     const useStorage = this.persist && hasLocalStorage()
+    // Persisted demo writes are shape-checked: corrupt or outdated values are ignored, never thrown.
+    const arr = <T,>(v: unknown, ok: (x: T) => boolean): T[] => (Array.isArray(v) ? (v as T[]).filter((x) => !!x && typeof x === 'object' && ok(x)) : [])
+    const rec = <T,>(v: unknown): Record<string, T> => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, T>) : {})
+    const isClaim = (c: ClaimDetail) => typeof c.id === 'string' && typeof c.number === 'number' && Array.isArray(c.evidence) && Array.isArray(c.timeline) && !!c.manifest
+    const isActivity = (a: ActivityItem) => typeof a.id === 'string' && typeof a.claimId === 'string' && typeof a.at === 'string'
+    const evidence = rec<unknown>(useStorage ? readStorage(MOCK_STORAGE_KEYS.evidence) : undefined)
     this.state = {
-      claims: (useStorage && readStorage<ClaimDetail[]>(MOCK_STORAGE_KEYS.claims)) || [],
-      patches: (useStorage && readStorage<Record<string, Partial<ClaimDetail>>>(MOCK_STORAGE_KEYS.patches)) || {},
-      evidence: (useStorage && readStorage<Record<string, Evidence[]>>(MOCK_STORAGE_KEYS.evidence)) || {},
-      activity: (useStorage && readStorage<ActivityItem[]>(MOCK_STORAGE_KEYS.activity)) || [],
+      claims: arr<ClaimDetail>(useStorage ? readStorage(MOCK_STORAGE_KEYS.claims) : undefined, isClaim),
+      patches: rec<Partial<ClaimDetail>>(useStorage ? readStorage(MOCK_STORAGE_KEYS.patches) : undefined),
+      evidence: Object.fromEntries(Object.entries(evidence).map(([k, v]) => [k, arr<Evidence>(v, (e) => typeof e.id === 'string' && typeof e.submittedAt === 'string')])),
+      activity: arr<ActivityItem>(useStorage ? readStorage(MOCK_STORAGE_KEYS.activity) : undefined, isActivity),
     }
     if (useStorage && !this.storageListener && typeof window !== 'undefined') {
       this.storageListener = (e: StorageEvent) => {
-        if (e.key && e.key.startsWith('pine:mock:')) {
+        // key === null means localStorage.clear()
+        if (e.key === null || e.key.startsWith('pine:mock:')) {
           this.state = null
           this.emit()
         }
@@ -181,8 +193,8 @@ export class MockDataProvider implements PineDataProvider {
     }
   }
 
-  /** All claims (fixtures + demo additions) with patches and added evidence merged in. */
-  allClaims(): ClaimDetail[] {
+  /** All claims (fixtures + demo additions) with patches and added evidence merged in. Internal: shares fixture objects. */
+  private allClaims(): ClaimDetail[] {
     const s = this.load()
     const added = new Set(s.claims.map((c) => c.id))
     const merged = [...s.claims, ...this.fx.claims.filter((c) => !added.has(c.id))].map((c) => {
@@ -266,7 +278,7 @@ export class MockDataProvider implements PineDataProvider {
     }
     items = this.sortClaims(items, q.sort ?? 'newest')
     const page = paginate(items, q.cursor, q.limit ?? 20)
-    return { ...page, items: page.items.map(toSummary) }
+    return { ...page, items: page.items.map((c) => clone(toSummary(c))) }
   }
 
   private sortClaims(items: ClaimDetail[], sort: NonNullable<ClaimQuery['sort']>): ClaimDetail[] {
@@ -363,7 +375,8 @@ export class MockDataProvider implements PineDataProvider {
       const types = new Set(q.types)
       items = items.filter((a) => types.has(a.type))
     }
-    return paginate(items, q.cursor, q.limit ?? 25, 200)
+    const page = paginate(items, q.cursor, q.limit ?? 25, 200)
+    return { ...page, items: clone(page.items) }
   }
 
   async getPortfolio(address: Address): Promise<Portfolio> {
@@ -466,9 +479,13 @@ export class MockDataProvider implements PineDataProvider {
     const now = this.now()
     const since = now - 30 * 24 * HOUR
     const resolved = claims.filter((c) => c.status === 'resolved' || c.status === 'settled')
-    const volume30d = this.allActivity()
-      .filter((a) => a.type === 'trade' && Date.parse(a.at) >= since && a.amount)
-      .map((a) => a.amount!.replace('-', ''))
+    // Hourly fixture volumes (calibrated to each market's total) plus trades recorded by demo writes.
+    const volume30d = [
+      ...claims.flatMap((c) => (this.fx.prices[c.id] ?? []).filter((p) => p.t >= since).map((p) => (p.volume ?? 0).toFixed(2))),
+      ...this.load()
+        .activity.filter((a) => a.type === 'trade' && Date.parse(a.at) >= since && a.amount)
+        .map((a) => a.amount!.replace('-', '')),
+    ]
     return {
       openClaims: claims.filter((c) => c.status === 'open').length,
       resolvedClaims: resolved.length,

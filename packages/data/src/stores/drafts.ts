@@ -16,7 +16,8 @@ let memorySeeded = false
 
 /**
  * Drafts in localStorage (`pine:drafts:<id>` plus an index) with an in-memory fallback when
- * storage is unavailable (server, private mode, quota). Optionally seeded once with demo drafts.
+ * storage is unavailable (server, private mode) or a write fails (quota): such drafts survive for the
+ * session only. Optionally seeded once with demo drafts.
  */
 export class LocalDraftStore implements DraftStore {
   private readonly useStorage: boolean
@@ -39,22 +40,31 @@ export class LocalDraftStore implements DraftStore {
 
   private ids(): string[] {
     if (!this.useStorage) return [...memoryDrafts.keys()]
-    return readStorage<string[]>(INDEX_KEY) ?? []
+    const stored = readStorage<unknown>(INDEX_KEY)
+    const ids = Array.isArray(stored) ? stored.filter((x): x is string => typeof x === 'string') : []
+    // drafts that could not be persisted (quota) live in memory for this session
+    return [...new Set([...memoryDrafts.keys(), ...ids])]
   }
 
   private read(id: string): ClaimDraft | null {
-    if (!this.useStorage) return memoryDrafts.get(id) ?? null
-    return readStorage<ClaimDraft>(DRAFT_KEY_PREFIX + id) ?? null
+    const mem = memoryDrafts.get(id)
+    if (mem || !this.useStorage) return mem ?? null
+    const d = readStorage<ClaimDraft>(DRAFT_KEY_PREFIX + id)
+    return d && typeof d === 'object' && typeof d.id === 'string' && typeof d.owner === 'string' ? d : null
   }
 
+  /** Persists to localStorage; when storage is full or blocked, keeps the draft in memory instead. */
   private write(d: ClaimDraft): void {
     if (!this.useStorage) {
       memoryDrafts.set(d.id, clone(d))
       return
     }
-    writeStorage(DRAFT_KEY_PREFIX + d.id, d)
-    const ids = this.ids()
-    if (!ids.includes(d.id)) writeStorage(INDEX_KEY, [d.id, ...ids])
+    const ids = readStorage<unknown>(INDEX_KEY)
+    const index = Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : []
+    const ok =
+      writeStorage(DRAFT_KEY_PREFIX + d.id, d) && (index.includes(d.id) || writeStorage(INDEX_KEY, [d.id, ...index]))
+    if (ok) memoryDrafts.delete(d.id)
+    else memoryDrafts.set(d.id, clone(d))
   }
 
   async list(owner: string): Promise<ClaimDraft[]> {
@@ -78,15 +88,11 @@ export class LocalDraftStore implements DraftStore {
   }
 
   async remove(id: string): Promise<void> {
-    if (!this.useStorage) {
-      memoryDrafts.delete(id)
-      return
-    }
+    memoryDrafts.delete(id)
+    if (!this.useStorage) return
     removeStorage(DRAFT_KEY_PREFIX + id)
-    writeStorage(
-      INDEX_KEY,
-      this.ids().filter((x) => x !== id),
-    )
+    const stored = readStorage<unknown>(INDEX_KEY)
+    if (Array.isArray(stored)) writeStorage(INDEX_KEY, stored.filter((x) => x !== id))
   }
 }
 

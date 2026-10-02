@@ -62,12 +62,11 @@ export interface GitHubSource {
   getCommit(owner: string, repo: string, sha: string): Promise<CommitSummary | null>
 }
 
-/** Parsed result of a pasted GitHub URL / shorthand. */
-export type ParsedGitHubRef =
-  | { kind: 'repo'; owner: string; repo: string }
-  | { kind: 'pull'; owner: string; repo: string; number: number }
-  | { kind: 'commit'; owner: string; repo: string; sha: string }
-  | { kind: 'pull_commit'; owner: string; repo: string; number: number; sha: string }
+/**
+ * Parsed result of a pasted GitHub URL / shorthand. Re-exported from @pine/core, whose definition is
+ * structurally identical plus an optional `short?: boolean` on commit refs (additive).
+ */
+export type { ParsedGitHubRef } from '@pine/core'
 
 /** Durable content storage for manifests and evidence packages. */
 export interface ManifestStorage {

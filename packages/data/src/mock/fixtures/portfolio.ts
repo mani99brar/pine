@@ -72,6 +72,11 @@ export function buildDemoPortfolio(
   const extraActivity: ActivityItem[] = []
   if (thin) {
     liquidity.push({ claimId: thin.id, claimNumber: thin.number, claimTitle: thin.title, tokenId: '48977', pool: thin.market?.pools[0]?.address ?? DEMO_WALLET_ADDRESS, outcome: 'yes', deposited: '2.5', currentValue: '2.31', feesEarned: '0.04', withdrawable: true, inRange: false })
+    // The split also minted 2.5 NO and 2.5 Invalid-result tokens, which stay in the wallet.
+    for (const [index, outcome] of [[1, 'no'], [2, 'invalid']] as const) {
+      const mark = thin.market?.outcomes.find((o) => o.index === index)?.price ?? 0
+      positions.push({ claimId: thin.id, claimNumber: thin.number, claimTitle: thin.title, status: thin.status, outcome, balance: '2.5', markPrice: mark, value: mulDecimal('2.5', mark, 4), redeemable: false })
+    }
     extraActivity.push(
       { id: 'act-0012-demo-split', type: 'split', claimId: thin.id, claimNumber: thin.number, claimTitle: thin.title, actor: DEMO_WALLET_ADDRESS, at: hoursFromNow(-61), txHash: fakeHash('tx:demo-split:12'), chainId: FIXTURE_CHAIN_ID, amount: '-2.5', token: 'sDAI', summary: 'Split 2.5 sDAI into YES, NO and Invalid outcome tokens', status: 'confirmed' },
       { id: 'act-0012-demo-lp', type: 'liquidity_added', claimId: thin.id, claimNumber: thin.number, claimTitle: thin.title, actor: DEMO_WALLET_ADDRESS, at: hoursFromNow(-60), txHash: fakeHash('tx:demo-lp:12'), chainId: FIXTURE_CHAIN_ID, outcome: 'yes', token: 'sDAI', summary: 'Added a concentrated YES position in the 0.05–0.40 range (now out of range at 0.62)', status: 'confirmed' },

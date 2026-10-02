@@ -70,7 +70,8 @@ export function readPineEnv(overrides: Partial<PineEnv> = {}): PineEnv {
 export function readMockLatencyEnabled(): boolean {
   const v = read(() => process.env.NEXT_PUBLIC_PINE_MOCK_LATENCY)
   if (v === undefined) {
-    // Never slow down unit tests.
+    // Simulated latency is for the browser demo only: never slow down SSR, route handlers or tests.
+    if (typeof window === 'undefined') return false
     return read(() => process.env.VITEST) === undefined && read(() => process.env.NODE_ENV) !== 'test'
   }
   return !(v === '0' || v === 'false' || v === 'off')

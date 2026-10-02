@@ -1,0 +1,446 @@
+# Pine — Envio HyperIndex (v3) schema
+#
+# Status: contract for an indexer that is NOT implemented in this repository. The frontend's
+# EnvioDataProvider (packages/data/src/envio) queries exactly these entities and fields through the
+# hosted Hasura endpoint (NEXT_PUBLIC_ENVIO_GRAPHQL_URL). See docs/indexer/README.md.
+#
+# Conventions (following seer-pm/seer-indexer, envio@3.x):
+# - No `@entity` directive: every `type` is an entity. Every entity has `id: ID!`.
+# - Ids are namespaced strings so `<Entity>_by_pk(id:)` takes one value:
+#     chain-scoped objects  "<chainId>:<lowercase hex>"            e.g. "100:0xab12…"
+#     log-scoped objects    "<chainId>:<txHash>:<logIndex>"
+#     cross-chain objects   documented on the entity
+# - Addresses and hashes are lowercase hex (`address_format: lowercase` in config.yaml).
+# - Timestamps are unix seconds (BigInt). BigInt / BigDecimal values arrive as strings over GraphQL.
+# - Collateral and token amounts are BigDecimal in human units (18-decimals tokens divided by 1e18).
+# - Prices are Float in [0, 1] (collateral per outcome token).
+# - Envio Cloud exposes no *_aggregate fields: counters live in PlatformStats / DailyStats.
+#
+# Pine claims are Seer markets created by the official MarketFactory whose market name ends with
+#   " — Terms: ipfs://<cid>[/path] (manifest keccak256 0x<64 hex>)"
+# (see @pine/core buildMarketName). Handlers fetch the manifest from IPFS with the Effect API,
+# verify keccak256(canonicalJson(manifest)) and that the question text matches manifest.question.text,
+# and only then create a Claim. Markets that fail verification are kept with isPine = false.
+
+enum ClaimPhase {
+  "No Reality answer yet. The frontend shows `open` before the evidence deadline, `awaiting_answer` after it."
+  open
+  "One answer posted; challenge window running until question.finalizeTs."
+  answered
+  "Two or more answers (bonds doubling)."
+  disputed
+  "Arbitration requested; question frozen until the ruling is relayed."
+  arbitration
+  "Final: payout reported (ConditionResolution) or arbitrator answered (LogFinalize)."
+  finalized
+}
+
+enum ClaimOutcome {
+  yes
+  no
+  invalid
+}
+
+enum TradeSide {
+  buy
+  sell
+}
+
+enum EvidenceKind {
+  counterexample
+  rebuttal
+  clarification
+  commitment
+  unknown
+}
+
+enum ArbitrationStatus {
+  "ArbitrationRequested on the Ethereum foreign proxy"
+  requested
+  "Kleros dispute created (ArbitrationCreated)"
+  created
+  "Ruling given by KlerosLiquid (may still be appealable; see appealPeriodEnd)"
+  ruled
+  "Request rejected or dispute creation failed; deposit refundable"
+  failed
+}
+
+enum ActivityType {
+  market_created
+  manifest_pinned
+  liquidity_added
+  liquidity_removed
+  split
+  merge
+  trade
+  evidence_submitted
+  answer_posted
+  arbitration_requested
+  ruling
+  finalized
+  redeemed
+  approval
+}
+
+"""
+A Pine claim: one Seer market whose terms reference a verified Pine manifest.
+id: "<chainId>:<market address>"
+"""
+type Claim {
+  id: ID!
+  chainId: Int!
+  "Pine claim id from the manifest, e.g. pine-0042"
+  claimId: String! @index
+  "Sequential claim number (parsed from claimId, or assigned from PlatformStats.claimCount)"
+  number: Int! @index
+  market: Market!
+  question: OracleQuestion!
+  manifestUri: String!
+  manifestHash: String!
+  "keccak256(canonicalJson(manifest)) matched manifestHash and the question text matched"
+  manifestValid: Boolean!
+  "Full manifest JSON when the handler could fetch it (otherwise the frontend hydrates from IPFS)"
+  manifest: Json
+
+  # denormalized manifest fields (filters, lists, search)
+  title: String!
+  violation: String!
+  policyId: String! @index
+  policyVersion: String!
+  policyFamily: String! @index
+  policyTitle: String!
+  repoOwner: String!
+  repoName: String!
+  "lowercase owner/name"
+  repo: String! @index
+  commitSha: String!
+  prNumber: Int
+  prTitle: String
+  evidenceDeadlineTs: BigInt! @index
+  creator: String! @index
+  "Lowercased title + violation + repo + policy + claim id + PR title; for _ilike search"
+  searchText: String!
+  "Liquidity funded by a configured sponsorship wallet"
+  sponsored: Boolean!
+
+  # lifecycle (time-dependent status is derived by the frontend from these facts)
+  phase: ClaimPhase! @index
+  "Current best Reality answer: yes | no | invalid | too_soon"
+  currentAnswer: String
+  "When the current answer finalizes if unchallenged (question.finalize_ts)"
+  finalizeTs: BigInt @index
+  outcome: ClaimOutcome @index
+
+  # market metrics (updated on swaps / mints / burns)
+  yesPrice: Float
+  noPrice: Float
+  invalidPrice: Float
+  yesPrice24hAgo: Float
+  liquidity: BigDecimal!
+  volume: BigDecimal!
+  volume24h: BigDecimal!
+  openInterest: BigDecimal!
+  traders: Int!
+  evidenceCount: Int!
+  createdAt: BigInt! @index
+  lastActivityAt: BigInt! @index
+  createdTx: String!
+
+  candles: [PriceCandle!]! @derivedFrom(field: "claim")
+  trades: [Trade!]! @derivedFrom(field: "claim")
+  evidence: [Evidence!]! @derivedFrom(field: "claim")
+  activity: [ActivityEvent!]! @derivedFrom(field: "claim")
+  positions: [Position!]! @derivedFrom(field: "claim")
+  liquidityPositions: [LiquidityPosition!]! @derivedFrom(field: "claim")
+}
+
+"""
+Any market from the indexed MarketFactory (Pine or not).
+id: "<chainId>:<market address>"
+"""
+type Market {
+  id: ID!
+  chainId: Int!
+  address: String!
+  factory: String!
+  creator: String!
+  marketName: String!
+  "Includes the automatic 'Invalid result' outcome as the last entry"
+  outcomesLabels: [String!]!
+  wrappedTokens: [String!]!
+  collateralToken: String!
+  collateralSymbol: String!
+  conditionId: String!
+  "CTF question id from NewMarket"
+  questionId: String!
+  "Reality.eth question id (questionsIds[0])"
+  realityQuestionId: String! @index
+  templateId: Int!
+  openingTs: BigInt!
+  payoutReported: Boolean!
+  payoutNumerators: [BigInt!]!
+  isPine: Boolean! @index
+  blockTimestamp: BigInt!
+  txHash: String!
+  outcomes: [Outcome!]! @derivedFrom(field: "market")
+  pools: [Pool!]! @derivedFrom(field: "market")
+}
+
+"""
+One outcome token of a market (wrapped ERC-1155 position).
+id: "<chainId>:<token address>"
+"""
+type Outcome {
+  id: ID!
+  market: Market!
+  index: Int!
+  label: String!
+  token: String!
+  price: Float
+  change24h: Float
+}
+
+"""
+Outcome-token / collateral pool (Swapr v3 = Algebra v1 on Gnosis).
+id: "<chainId>:<pool address>"
+"""
+type Pool {
+  id: ID!
+  chainId: Int!
+  address: String!
+  market: Market!
+  claim: Claim
+  outcome: Outcome!
+  outcomeIndex: Int!
+  dex: String!
+  "true when the outcome token is token0 (price = token1 per token0)"
+  outcomeIsToken0: Boolean!
+  feeBps: Int!
+  sqrtPriceX96: BigInt!
+  tick: Int!
+  "Active in-range liquidity (raw L)"
+  liquidity: BigInt!
+  tvlCollateral: BigDecimal!
+  volumeCollateral: BigDecimal!
+  price: Float
+}
+
+"""
+Hourly OHLC of a claim's YES price.
+id: "<claim id>:<periodStart>"  (periodStart = unix seconds floored to the hour)
+"""
+type PriceCandle {
+  id: ID!
+  claim: Claim!
+  periodStart: BigInt! @index
+  yesOpen: Float!
+  yesHigh: Float!
+  yesLow: Float!
+  yesClose: Float!
+  noClose: Float!
+  invalidClose: Float
+  volume: BigDecimal!
+}
+
+"""
+id: "<chainId>:<txHash>:<logIndex>"
+"""
+type Trade {
+  id: ID!
+  claim: Claim!
+  pool: Pool!
+  trader: String! @index
+  outcomeIndex: Int!
+  side: TradeSide!
+  amountCollateral: BigDecimal!
+  amountTokens: BigDecimal!
+  price: Float!
+  timestamp: BigInt! @index
+  txHash: String!
+}
+
+"""
+Concentrated-liquidity NFT position.
+id: "<chainId>:<position manager>:<tokenId>"
+"""
+type LiquidityPosition {
+  id: ID!
+  claim: Claim!
+  pool: Pool!
+  account: Account!
+  tokenId: BigInt!
+  outcomeIndex: Int!
+  tickLower: Int!
+  tickUpper: Int!
+  liquidity: BigInt!
+  depositedCollateral: BigDecimal!
+  withdrawnCollateral: BigDecimal!
+  currentValue: BigDecimal!
+  feesEarned: BigDecimal!
+  inRange: Boolean!
+  closed: Boolean!
+}
+
+"""
+Outcome-token balance of an account.
+id: "<chainId>:<account>:<token>"
+"""
+type Position {
+  id: ID!
+  account: Account!
+  claim: Claim!
+  outcomeIndex: Int!
+  balance: BigDecimal!
+  costBasis: BigDecimal!
+  avgPrice: Float
+  redeemed: BigDecimal!
+}
+
+"""
+ERC-1497 Evidence event on the Ethereum foreign proxy (Gnosis markets) — evidenceGroupID = uint256(realityQuestionId).
+id: "<evidence chainId>:<txHash>:<logIndex>"
+The claim link is set when the claim is known; until then match by questionId.
+"""
+type Evidence {
+  id: ID!
+  claim: Claim
+  "Reality question id (hex of _evidenceGroupID)"
+  questionId: String! @index
+  chainId: Int!
+  arbitrator: String!
+  party: String! @index
+  uri: String!
+  blockNumber: BigInt!
+  timestamp: BigInt! @index
+  txHash: String!
+  "timestamp <= claim.evidenceDeadlineTs (null until the claim is known)"
+  timely: Boolean
+  "Fields hydrated from the evidence JSON via the Effect API (untrusted content)"
+  hydrated: Boolean!
+  kind: EvidenceKind!
+  title: String
+  summary: String
+  contentHash: String
+  reproduction: Json
+  attachments: Json
+  commitment: Json
+}
+
+"""
+Reality.eth v3 question.
+id: "<chainId>:<questionId>"
+"""
+type OracleQuestion {
+  id: ID!
+  chainId: Int!
+  questionId: String! @index
+  templateId: Int!
+  arbitrator: String!
+  openingTs: BigInt!
+  timeout: BigInt!
+  minBond: BigDecimal!
+  "0 until answered; each answer sets now + timeout"
+  finalizeTs: BigInt!
+  isPendingArbitration: Boolean!
+  bestAnswer: String
+  bond: BigDecimal!
+  "true after LogFinalize (arbitrator answer); timeout finalization emits no event"
+  finalizedByArbitrator: Boolean!
+  answers: [OracleAnswer!]! @derivedFrom(field: "question")
+  arbitration: Arbitration
+}
+
+"""
+id: "<chainId>:<txHash>:<logIndex>"
+"""
+type OracleAnswer {
+  id: ID!
+  question: OracleQuestion!
+  "decoded: yes | no | invalid | too_soon"
+  answer: String!
+  answerRaw: String!
+  bond: BigDecimal!
+  user: String!
+  timestamp: BigInt!
+  isCommitment: Boolean!
+  txHash: String!
+}
+
+"""
+Kleros arbitration of a Reality question, requested on Ethereum.
+id: "<market chainId>:<questionId>"
+"""
+type Arbitration {
+  id: ID!
+  question: OracleQuestion!
+  requester: String!
+  requestedAt: BigInt!
+  disputeId: BigInt
+  court: String!
+  "Fee paid on Ethereum, in ETH"
+  cost: BigDecimal!
+  status: ArbitrationStatus!
+  "decoded Reality answer of the current ruling (Kleros ruling − 1; 0 → invalid)"
+  ruling: String
+  rulingAt: BigInt
+  appealPeriodEnd: BigInt
+}
+
+"""
+Typed history used for transaction history and reconciliation.
+id: "<chainId>:<txHash>:<logIndex>"
+"""
+type ActivityEvent {
+  id: ID!
+  type: ActivityType! @index
+  claim: Claim
+  claimNumber: Int!
+  claimTitle: String!
+  actor: String! @index
+  timestamp: BigInt! @index
+  txHash: String!
+  chainId: Int!
+  "Signed collateral flow from the actor's perspective"
+  amount: BigDecimal
+  token: String
+  outcome: String
+  side: TradeSide
+  summary: String!
+}
+
+"""
+id: lowercase address (accounts span chains)
+"""
+type Account {
+  id: ID!
+  positions: [Position!]! @derivedFrom(field: "account")
+  liquidityPositions: [LiquidityPosition!]! @derivedFrom(field: "account")
+  depositedAllTime: BigDecimal!
+  withdrawnAllTime: BigDecimal!
+  feesPaidAllTime: BigDecimal!
+}
+
+"""
+Singleton counters (no aggregates on Envio Cloud). id: "global"
+"""
+type PlatformStats {
+  id: ID!
+  claimCount: Int!
+  resolvedClaims: Int!
+  counterexamplesAccepted: Int!
+  evidenceSubmissions: Int!
+  totalLiquidity: BigDecimal!
+  volumeTotal: BigDecimal!
+  collateralSymbol: String!
+}
+
+"""
+Daily volume bucket. id: "<dayStart>" (unix seconds floored to the UTC day)
+"""
+type DailyStats {
+  id: ID!
+  dayStart: BigInt! @index
+  volume: BigDecimal!
+  trades: Int!
+  claimsCreated: Int!
+}

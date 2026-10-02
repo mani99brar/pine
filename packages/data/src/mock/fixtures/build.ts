@@ -26,9 +26,19 @@ import type {
   TxStepId,
   TxStepStatus,
 } from '@pine/core'
-import { buildManifest, computeConfigHash, computeEnvHash, defaultOracleParams, getPolicy, hashJson } from '@pine/core'
 import {
-  ANCHOR_MS,
+  buildManifest,
+  computeConfigHash,
+  computeEnvHash,
+  defaultOracleParams,
+  getPolicy,
+  hashJson,
+  klerosCaseUrl,
+  realityQuestionUrl,
+  seerMarketUrl,
+} from '@pine/core'
+import {
+  getAnchor,
   fakeAddress,
   fakeCid,
   fakeHash,
@@ -37,10 +47,11 @@ import {
   mulberry32,
   mulDecimal,
   round,
+  sumDecimal,
   toUnits,
 } from '../../internal/util'
 import { actors, contracts, githubByWallet, traderPool } from './actors'
-import { commitsBySha, findPull, findRepo } from './github'
+import { findPull, findRepo, type GitHubFixtures } from './github'
 
 const HOUR = 3_600_000
 export const FIXTURE_CHAIN_ID = 100
@@ -203,15 +214,12 @@ function gauss(rand: () => number): number {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v)
 }
 
-function realityUrl(questionId: Hex): string {
-  return `https://reality.eth.limo/app/#!/network/${FIXTURE_CHAIN_ID}/question/${contracts.reality.toLowerCase()}-${questionId}`
-}
-
 // ---------------------------------------------------------------------------
 // Price path
 // ---------------------------------------------------------------------------
 
 function buildPricePath(seed: ClaimSeed, marketCreatedMs: number, evidenceJumps: { t: number; d: number }[]): PricePoint[] {
+  const ANCHOR_MS = getAnchor()
   const m = seed.market
   if (!m || toUnits(m.liquidity) === 0n && seed.status === 'publishing') return []
   const rand = mulberry32(seed.number * 7919 + 17)
@@ -234,14 +242,19 @@ function buildPricePath(seed: ClaimSeed, marketCreatedMs: number, evidenceJumps:
   const points: PricePoint[] = xs.map((v, i) => {
     const bridged = v + ((target - last) * i) / n
     const yes = Math.min(0.97, Math.max(0.01, sigmoid(bridged)))
-    const invNow = resolvedAt !== undefined && seed.outcome === 'invalid' ? Math.min(0.5, inv * (1 + i / n)) : inv
+    // Claims that end invalid: the Invalid-result price climbs from 2% to 25% as the ambiguity surfaces.
+    const invNow = resolvedAt !== undefined && seed.outcome === 'invalid' ? 0.02 + 0.23 * (i / n) : inv
     return {
       t: start + i * HOUR,
-      yes: round(yes, 4),
-      no: round(Math.max(0.005, 1 - yes - invNow), 4),
-      volume: round(rand() < 0.35 ? rand() * Math.max(1, Number(m.volume) / Math.max(n, 24)) * 3 : 0, 2),
+      yes: round(Math.min(yes, 0.99 - invNow), 4),
+      no: round(Math.max(0.005, 1 - Math.min(yes, 0.99 - invNow) - invNow), 4),
+      volume: rand() < 0.35 ? rand() : 0,
     }
   })
+  // Calibrate hourly volumes so they sum to the market's total volume (charts, 24h and 30d stats agree).
+  const rawSum = points.reduce((a, p) => a + (p.volume ?? 0), 0)
+  const total = Number(m.volume)
+  for (const p of points) p.volume = rawSum > 0 ? round(((p.volume ?? 0) * total) / rawSum, 2) : 0
   if (resolvedAt !== undefined) {
     const finalYes = m.yes
     const finalNo = round(Math.max(0.002, 1 - finalYes - (m.invalid ?? 0.004)), 4)
@@ -257,6 +270,14 @@ function buildPricePath(seed: ClaimSeed, marketCreatedMs: number, evidenceJumps:
     }
   }
   return points
+}
+
+/** Collateral traded in the last 24 hourly points (decimal string), or the fallback when there is no history. */
+export function volume24hFrom(points: PricePoint[], fallback: string): string {
+  const ANCHOR_MS = getAnchor()
+  if (points.length === 0) return fallback
+  const since = ANCHOR_MS - 24 * HOUR
+  return sumDecimal(points.filter((p) => p.t > since).map((p) => (p.volume ?? 0).toFixed(2)), 2)
 }
 
 export function priceAt(points: PricePoint[], t: number): PricePoint | undefined {
@@ -278,12 +299,13 @@ export function priceAt(points: PricePoint[], t: number): PricePoint | undefined
 // Builder
 // ---------------------------------------------------------------------------
 
-export function buildClaim(seed: ClaimSeed): BuiltClaim {
+export function buildClaim(seed: ClaimSeed, gh: GitHubFixtures): BuiltClaim {
+  const ANCHOR_MS = getAnchor()
   const id = claimIdOf(seed.number)
-  const pr = findPull(seed.repo, seed.pr)
-  const repo = findRepo(seed.repo)
+  const pr = findPull(gh, seed.repo, seed.pr)
+  const repo = findRepo(gh, seed.repo)
   if (!pr || !repo) throw new Error(`fixture PR missing: ${seed.repo}#${seed.pr}`)
-  const head = commitsBySha[pr.headSha]
+  const head = gh.commitsBySha[pr.headSha]
   if (!head) throw new Error(`fixture head commit missing: ${pr.headSha}`)
   const policy = getPolicy(seed.policyId)
   if (!policy) throw new Error(`policy missing: ${seed.policyId}`)
@@ -421,7 +443,7 @@ export function buildClaim(seed: ClaimSeed): BuiltClaim {
     market = {
       chainId: FIXTURE_CHAIN_ID,
       address: marketAddress,
-      seerUrl: `https://app.seer.pm/markets/${FIXTURE_CHAIN_ID}/${marketAddress}`,
+      seerUrl: seerMarketUrl(FIXTURE_CHAIN_ID, marketAddress),
       conditionId: fakeHash(`condition:${seed.number}`),
       questionId,
       collateral: { address: contracts.sDAI, symbol: 'sDAI', decimals: 18, name: 'Savings xDAI' },
@@ -437,7 +459,7 @@ export function buildClaim(seed: ClaimSeed): BuiltClaim {
           ]
         : [],
       liquidity: m.liquidity,
-      volume24h: m.volume24h,
+      volume24h: volume24hFrom(prices, m.volume24h),
       volumeTotal: m.volume,
       traders: m.traders,
       openInterest: mulDecimal(m.volume, 0.38, 2),
@@ -468,14 +490,14 @@ export function buildClaim(seed: ClaimSeed): BuiltClaim {
       status: arb?.status ?? 'not_requested',
       ruling: arb?.ruling,
       appealDeadline: arb?.appealDeadlineH !== undefined ? hoursFromNow(arb.appealDeadlineH) : arb?.appealDeadline,
-      klerosUrl: arb?.disputeId ? `https://resolve.kleros.io/cases/${arb.disputeId}?requiredChainId=1` : undefined,
+      klerosUrl: arb?.disputeId ? klerosCaseUrl(arb.disputeId, EVIDENCE_CHAIN_ID) : undefined,
     })
     const isFinalized = seed.finalizedH !== undefined
     const finalAnswer: RealityAnswer | undefined = isFinalized ? seed.outcome : undefined
     oracle = compact({
       chainId: FIXTURE_CHAIN_ID,
       realityQuestionId: questionId,
-      realityUrl: realityUrl(questionId),
+      realityUrl: realityQuestionUrl(FIXTURE_CHAIN_ID, questionId),
       templateId: 2,
       openingTime,
       timeoutSeconds,
@@ -508,7 +530,7 @@ export function buildClaim(seed: ClaimSeed): BuiltClaim {
   if (market && marketConfirmed) {
     push({ kind: 'market_created', at: market.createdAt, title: 'Seer market created — terms frozen', detail: `Market ${market.address} and Reality.eth question ${questionId}.`, actor: seed.creator, txHash: market.createdTx })
     if (toUnits(seed.market?.liquidity ?? '0') > 0n || seed.withdrawnH !== undefined) {
-      push({ kind: 'liquidity_added', at: at(seed.createdH + 0.2), title: `Liquidity added: ${seed.funding.liquidity} sDAI`, detail: 'Collateral split into outcome tokens and deposited into the YES and NO pools. Withdrawable; not a bounty.', actor: seed.sponsored ? actors.sponsor : seed.creator, txHash: fakeHash(`tx:liquidity:${seed.number}`) })
+      push({ kind: 'liquidity_added', at: at(seed.createdH + 0.2), title: `Liquidity added: ${seed.funding.liquidity} sDAI`, detail: 'Collateral split into outcome tokens and deposited into the YES and NO pools. It subsidizes informed trading and stays withdrawable; it is not a payment to investigators.', actor: seed.sponsored ? actors.sponsor : seed.creator, txHash: fakeHash(`tx:liquidity:${seed.number}`) })
     }
   }
   evidence.forEach((e) => {
@@ -536,7 +558,7 @@ export function buildClaim(seed: ClaimSeed): BuiltClaim {
     })
   })
   if (oracle?.arbitration.requested) {
-    push({ kind: 'arbitration_requested', at: oracle.arbitration.requestedAt ?? at(0), title: 'Arbitration requested (Kleros)', detail: `Kleros dispute #${oracle.arbitration.disputeId} (${oracle.arbitration.court}). The requester paid ${oracle.arbitration.cost} ETH on Ethereum; the Reality.eth question is frozen until the ruling is relayed back.`, actor: oracle.arbitration.requester, txHash: fakeHash(`tx:arbitration:${seed.number}`) })
+    push({ kind: 'arbitration_requested', at: oracle.arbitration.requestedAt ?? at(0), title: 'Arbitration requested (Kleros)', detail: `Kleros dispute #${oracle.arbitration.disputeId}, ${oracle.arbitration.court}. The requester paid ${oracle.arbitration.cost} ETH on Ethereum; the Reality.eth question is frozen until the ruling is relayed back.`, actor: oracle.arbitration.requester, txHash: fakeHash(`tx:arbitration:${seed.number}`) })
     if (seed.arbitration?.rulingH !== undefined) {
       push({ kind: 'ruling', at: at(seed.arbitration.rulingH), title: `Jurors voted: ${answerLabel(oracle.arbitration.ruling ?? 'invalid')}${oracle.arbitration.status === 'appeal_period' ? ' (appealable)' : ''}`, detail: oracle.arbitration.status === 'appeal_period' ? `Appeal period ends ${oracle.arbitration.appealDeadline}. The ruling becomes final if not appealed; it is then relayed to Gnosis and answers the Reality.eth question.` : undefined, actor: contracts.klerosLiquid })
     }
@@ -631,6 +653,7 @@ function outcomeLabel(o: Outcome): string {
 // ---------------------------------------------------------------------------
 
 function buildActivity(seed: ClaimSeed, claim: ClaimDetail, prices: PricePoint[]): ActivityItem[] {
+  const ANCHOR_MS = getAnchor()
   const items: ActivityItem[] = []
   const base = { claimId: claim.id, claimNumber: claim.number, claimTitle: claim.title, chainId: FIXTURE_CHAIN_ID }
   const add = (a: Omit<ActivityItem, 'id' | 'claimId' | 'claimNumber' | 'claimTitle' | 'chainId'> & { chainId?: number }) =>
@@ -708,7 +731,7 @@ function buildActivity(seed: ClaimSeed, claim: ClaimDetail, prices: PricePoint[]
   }
   const arb = claim.oracle?.arbitration
   if (arb?.requested && arb.requester) {
-    add({ type: 'arbitration_requested', actor: arb.requester, at: arb.requestedAt ?? hoursFromNow(0), txHash: fakeHash(`tx:arbitration:${seed.number}`), chainId: EVIDENCE_CHAIN_ID, amount: `-${arb.cost}`, token: 'ETH', summary: `Requested Kleros arbitration on Ethereum (dispute #${arb.disputeId}, ${arb.court}), paid ${arb.cost} ETH`, status: 'confirmed' })
+    add({ type: 'arbitration_requested', actor: arb.requester, at: arb.requestedAt ?? hoursFromNow(0), txHash: fakeHash(`tx:arbitration:${seed.number}`), chainId: EVIDENCE_CHAIN_ID, amount: `-${arb.cost}`, token: 'ETH', summary: `Requested Kleros arbitration on Ethereum — dispute #${arb.disputeId}, ${arb.court} — and paid ${arb.cost} ETH`, status: 'confirmed' })
     if (seed.arbitration?.rulingH !== undefined) {
       add({ type: 'ruling', actor: contracts.klerosLiquid, at: hoursFromNow(seed.arbitration.rulingH), txHash: fakeHash(`tx:ruling:${seed.number}`), chainId: EVIDENCE_CHAIN_ID, outcome: arb.ruling === 'too_soon' ? undefined : arb.ruling, summary: `Kleros jurors voted ${answerLabel(arb.ruling ?? 'invalid')}${arb.status === 'appeal_period' ? ' — appeal period open' : ''}`, status: 'confirmed' })
     }

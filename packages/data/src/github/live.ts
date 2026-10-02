@@ -215,7 +215,8 @@ export class LiveGitHubSource implements GitHubSource {
     } catch (err) {
       throw new PineDataError('Could not reach the GitHub API', 'network', err)
     }
-    if (res.status === 404) return null
+    // 404 missing; 409 empty repository (no commits); 422 unknown SHA/ref → "nothing there"
+    if (res.status === 404 || res.status === 409 || res.status === 422) return null
     if (!res.ok) throw await gitHubError(res)
     try {
       return { data: (await res.json()) as T, res }
@@ -236,7 +237,9 @@ export class LiveGitHubSource implements GitHubSource {
     const perPage = Math.min(100, Math.max(1, opts.limit ?? 30))
     const r = await this.request<GhRepo[]>(`/user/repos?visibility=public&sort=updated&per_page=${perPage}&page=${page}`)
     if (!r) return { items: [] }
-    const hasNext = /rel="next"/.test(r.res.headers.get('link') ?? '') || r.data.length === perPage
+    // Trust GitHub's Link header; fall back to a full page only when a proxy stripped it.
+    const link = r.res.headers.get('link')
+    const hasNext = link !== null ? /rel="next"/.test(link) : r.data.length === perPage
     return { items: r.data.map(mapGhRepo), nextCursor: hasNext ? String(page + 1) : undefined }
   }
 

@@ -11,7 +11,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "echo 'no lint for data'"
+    "lint": "echo 'no lint for data'",
+    "openapi": "PINE_WRITE_OPENAPI=1 vitest run test/openapi.test.ts"
   },
   "dependencies": {
     "@pine/core": "workspace:*",

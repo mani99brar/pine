@@ -1,6 +1,6 @@
 import { canonicalJson, hashJson, type ClaimManifest, type Hex } from '@pine/core'
 import { readPineEnv } from '../env'
-import { fakeCid, hasLocalStorage, readStorage, writeStorage } from '../internal/util'
+import { fakeCid, hasLocalStorage, readStorage, removeStorage, writeStorage } from '../internal/util'
 import { PineDataError, type ManifestStorage, type PineEnv } from '../types'
 
 /**
@@ -166,7 +166,21 @@ function readServerToken(): string | undefined {
 // ---------------------------------------------------------------------------
 
 const MOCK_IPFS_PREFIX = 'pine:mock:ipfs:'
+const MOCK_IPFS_INDEX = 'pine:mock:ipfs-index'
+/** Demo uploads kept in localStorage; older ones are evicted so drafts never lose space to them. */
+const MOCK_IPFS_MAX = 40
 const memory = new Map<string, unknown>()
+
+function persistMockUpload(cid: string, value: unknown): void {
+  const stored = readStorage<unknown>(MOCK_IPFS_INDEX)
+  const index = (Array.isArray(stored) ? stored.filter((x): x is string => typeof x === 'string') : []).filter((c) => c !== cid)
+  index.push(cid)
+  while (index.length > MOCK_IPFS_MAX) {
+    const old = index.shift()
+    if (old) removeStorage(`${MOCK_IPFS_PREFIX}${old}`)
+  }
+  if (writeStorage(`${MOCK_IPFS_PREFIX}${cid}`, value)) writeStorage(MOCK_IPFS_INDEX, index)
+}
 let seeded: Promise<void> | undefined
 
 /** Deterministic fake CIDs (derived from the keccak hash); content kept in memory/localStorage. */
@@ -183,7 +197,7 @@ export class MockManifestStorage implements ManifestStorage {
     const cid = fakeCid(hash)
     const stored = JSON.parse(canonicalJson(value)) as unknown
     memory.set(cid, stored)
-    if (hasLocalStorage()) writeStorage(`${MOCK_IPFS_PREFIX}${cid}`, stored)
+    if (hasLocalStorage()) persistMockUpload(cid, stored)
     const uri = `ipfs://${cid}`
     return { uri, cid, hash, gatewayUrl: this.gatewayUrl(uri) }
   }

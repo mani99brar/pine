@@ -531,14 +531,14 @@ const REPO_SEEDS: RepoSeed[] = [
         title: 'token bucket: clamp refill at burst capacity',
         state: 'open',
         by: 'mara-okafor',
-        createdH: -150,
+        createdH: -300,
         updatedH: -60,
         labels: ['bug', 'needs-verification'],
         headRef: 'fix/bucket-clamp',
         body: 'Refill could exceed `Burst` when a long idle period overflowed the elapsed-time multiplication. Refill is now computed in saturating arithmetic and clamped.',
         commits: [
-          { msg: 'bucket: saturating refill arithmetic', by: 'mara-okafor', h: -150, files: [['bucket/bucket.go', 'modified', 19, 7]] },
-          { msg: 'bucket: property tests for refill <= burst', by: 'mara-okafor', h: -140, files: [['bucket/bucket_prop_test.go', 'added', 88, 0]] },
+          { msg: 'bucket: saturating refill arithmetic', by: 'mara-okafor', h: -300, files: [['bucket/bucket.go', 'modified', 19, 7]] },
+          { msg: 'bucket: property tests for refill <= burst', by: 'mara-okafor', h: -290, files: [['bucket/bucket_prop_test.go', 'added', 88, 0]] },
         ],
       },
       {
@@ -700,86 +700,99 @@ function toCommit(fullName: string, sha: string, parents: string[], seed: Commit
   }
 }
 
-export const repos: RepoSummary[] = []
-/** Pull requests keyed by `owner/repo`, newest first. */
-export const pulls: Record<string, PullSummary[]> = {}
-/** Default-branch history keyed by `owner/repo`, newest first. */
-export const commits: Record<string, CommitSummary[]> = {}
-/** Commits of each pull request keyed by `owner/repo#number`, oldest first (GitHub order). */
-export const pullCommits: Record<string, CommitSummary[]> = {}
-/** Every fixture commit by full SHA. */
-export const commitsBySha: Record<string, CommitSummary & { repo: string }> = {}
+export interface GitHubFixtures {
+  repos: RepoSummary[]
+  /** Pull requests keyed by `owner/repo`, newest first. */
+  pulls: Record<string, PullSummary[]>
+  /** Default-branch history keyed by `owner/repo`, newest first. */
+  commits: Record<string, CommitSummary[]>
+  /** Commits of each pull request keyed by `owner/repo#number`, oldest first (GitHub order). */
+  pullCommits: Record<string, CommitSummary[]>
+  /** Every fixture commit by full SHA. */
+  commitsBySha: Record<string, CommitSummary & { repo: string }>
+}
 
-for (const seed of REPO_SEEDS) {
-  const fullName = `${seed.owner}/${seed.name}`
-  const branch = seed.defaultBranch ?? 'main'
-  const history: CommitSummary[] = []
-  let parent: string | undefined
-  seed.history.forEach((c, i) => {
-    const sha = fakeSha(`${fullName}:${branch}:${i}`)
-    const commit = toCommit(fullName, sha, parent ? [parent] : [], c)
-    history.push(commit)
-    commitsBySha[sha] = { ...commit, repo: fullName }
-    parent = sha
-  })
-  commits[fullName] = [...history].reverse()
+/** Builds repos/PRs/commits with dates relative to the current fixture anchor (see withAnchor). */
+export function buildGitHubFixtures(): GitHubFixtures {
+  const repos: RepoSummary[] = []
+  const pulls: Record<string, PullSummary[]> = {}
+  const commits: Record<string, CommitSummary[]> = {}
+  const pullCommits: Record<string, CommitSummary[]> = {}
+  const commitsBySha: Record<string, CommitSummary & { repo: string }> = {}
 
-  const prs: PullSummary[] = []
-  for (const p of seed.pulls) {
-    const base = history[p.baseIndex ?? history.length - 1]
-    if (!base) throw new Error(`fixture base missing for ${fullName}#${p.number}`)
-    let prev = base.sha
-    const list: CommitSummary[] = p.commits.map((c, i) => {
-      const sha = fakeSha(`${fullName}#${p.number}:${i}`)
-      const commit = toCommit(fullName, sha, [prev], c)
+  for (const seed of REPO_SEEDS) {
+    const fullName = `${seed.owner}/${seed.name}`
+    const branch = seed.defaultBranch ?? 'main'
+    const history: CommitSummary[] = []
+    let parent: string | undefined
+    seed.history.forEach((c, i) => {
+      const sha = fakeSha(`${fullName}:${branch}:${i}`)
+      const commit = toCommit(fullName, sha, parent ? [parent] : [], c)
+      history.push(commit)
       commitsBySha[sha] = { ...commit, repo: fullName }
-      prev = sha
-      return commit
+      parent = sha
     })
-    pullCommits[`${fullName}#${p.number}`] = list
-    const head = list[list.length - 1] ?? base
-    const files = new Set(list.flatMap((c) => (c.files ?? []).map((f) => f.filename)))
-    prs.push({
-      number: p.number,
-      title: p.title,
-      state: p.state,
-      draft: p.draft ?? false,
-      author: u(p.by),
-      htmlUrl: `https://github.com/${fullName}/pull/${p.number}`,
-      headSha: head.sha,
-      headRef: p.headRef,
-      baseSha: base.sha,
-      baseRef: branch,
-      createdAt: hoursFromNow(p.createdH),
-      updatedAt: hoursFromNow(p.updatedH),
-      commits: list.length,
-      additions: list.reduce((a, c) => a + (c.stats?.additions ?? 0), 0),
-      deletions: list.reduce((a, c) => a + (c.stats?.deletions ?? 0), 0),
-      changedFiles: files.size,
-      labels: p.labels,
-      body: p.body,
+    commits[fullName] = [...history].reverse()
+
+    const prs: PullSummary[] = []
+    for (const p of seed.pulls) {
+      const base = history[p.baseIndex ?? history.length - 1]
+      if (!base) throw new Error(`fixture base missing for ${fullName}#${p.number}`)
+      let prev = base.sha
+      const list: CommitSummary[] = p.commits.map((c, i) => {
+        const sha = fakeSha(`${fullName}#${p.number}:${i}`)
+        const commit = toCommit(fullName, sha, [prev], c)
+        commitsBySha[sha] = { ...commit, repo: fullName }
+        prev = sha
+        return commit
+      })
+      pullCommits[`${fullName}#${p.number}`] = list
+      const head = list[list.length - 1] ?? base
+      const files = new Set(list.flatMap((c) => (c.files ?? []).map((f) => f.filename)))
+      prs.push({
+        number: p.number,
+        title: p.title,
+        state: p.state,
+        draft: p.draft ?? false,
+        author: u(p.by),
+        htmlUrl: `https://github.com/${fullName}/pull/${p.number}`,
+        headSha: head.sha,
+        headRef: p.headRef,
+        baseSha: base.sha,
+        baseRef: branch,
+        createdAt: hoursFromNow(p.createdH),
+        updatedAt: hoursFromNow(p.updatedH),
+        commits: list.length,
+        additions: list.reduce((a, c) => a + (c.stats?.additions ?? 0), 0),
+        deletions: list.reduce((a, c) => a + (c.stats?.deletions ?? 0), 0),
+        changedFiles: files.size,
+        labels: p.labels,
+        body: p.body,
+      })
+    }
+    prs.sort((a, b) => b.number - a.number)
+    pulls[fullName] = prs
+
+    repos.push({
+      id: seed.id,
+      owner: seed.owner,
+      name: seed.name,
+      fullName,
+      description: seed.description,
+      private: seed.private ?? false,
+      defaultBranch: branch,
+      language: seed.language,
+      stars: seed.stars,
+      forks: seed.forks,
+      openPullRequests: prs.filter((p) => p.state === 'open').length,
+      license: seed.license,
+      htmlUrl: `https://github.com/${fullName}`,
+      updatedAt: hoursFromNow(seed.updatedH),
+      topics: seed.topics,
     })
   }
-  prs.sort((a, b) => b.number - a.number)
-  pulls[fullName] = prs
 
-  repos.push({
-    id: seed.id,
-    owner: seed.owner,
-    name: seed.name,
-    fullName,
-    description: seed.description,
-    private: seed.private ?? false,
-    defaultBranch: branch,
-    language: seed.language,
-    stars: seed.stars,
-    forks: seed.forks,
-    openPullRequests: prs.filter((p) => p.state === 'open').length,
-    license: seed.license,
-    htmlUrl: `https://github.com/${fullName}`,
-    updatedAt: hoursFromNow(seed.updatedH),
-    topics: seed.topics,
-  })
+  return { repos, pulls, commits, pullCommits, commitsBySha }
 }
 
 /** Repositories the demo user can see in "your repositories" (includes one private repo, flagged). */
@@ -791,12 +804,12 @@ export const viewerRepoNames = [
   'mara-okafor/ops-runbooks',
 ]
 
-export function findRepo(fullName: string): RepoSummary | undefined {
+export function findRepo(gh: GitHubFixtures, fullName: string): RepoSummary | undefined {
   const key = fullName.toLowerCase()
-  return repos.find((r) => r.fullName.toLowerCase() === key)
+  return gh.repos.find((r) => r.fullName.toLowerCase() === key)
 }
 
-export function findPull(fullName: string, number: number): PullSummary | undefined {
-  const key = Object.keys(pulls).find((k) => k.toLowerCase() === fullName.toLowerCase())
-  return key ? pulls[key]?.find((p) => p.number === number) : undefined
+export function findPull(gh: GitHubFixtures, fullName: string, number: number): PullSummary | undefined {
+  const key = Object.keys(gh.pulls).find((k) => k.toLowerCase() === fullName.toLowerCase())
+  return key ? gh.pulls[key]?.find((p) => p.number === number) : undefined
 }

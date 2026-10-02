@@ -76,12 +76,35 @@ export function fakeCid(hash: Hex): string {
 
 const HOUR = 3_600_000
 
-/** Fixture anchor: Date.now() rounded down to the hour at module load. */
-export const ANCHOR_MS = Math.floor(Date.now() / HOUR) * HOUR
+/** `ms` rounded down to the hour. */
+export function hourFloor(ms: number): number {
+  return Math.floor(ms / HOUR) * HOUR
+}
+
+/**
+ * Fixture anchor: "now" rounded down to the hour. Fixtures are (re)built per anchor hour (see
+ * `getFixtures`), so server and browser agree within the same hour and the demo never goes stale.
+ * `withAnchor` sets it while a fixture build runs; `hoursFromNow` reads it.
+ */
+let anchorMs = hourFloor(Date.now())
+
+export function getAnchor(): number {
+  return anchorMs
+}
+
+export function withAnchor<T>(anchor: number, fn: () => T): T {
+  const prev = anchorMs
+  anchorMs = anchor
+  try {
+    return fn()
+  } finally {
+    anchorMs = prev
+  }
+}
 
 /** ISO timestamp `h` hours from the anchor (negative = past). Fractions allowed. */
 export function hoursFromNow(h: number): string {
-  return new Date(ANCHOR_MS + Math.round(h * HOUR)).toISOString().replace('.000Z', 'Z')
+  return new Date(anchorMs + Math.round(h * HOUR)).toISOString().replace('.000Z', 'Z')
 }
 
 export function daysFromNow(d: number): string {
@@ -175,12 +198,14 @@ export function readStorage<T>(key: string): T | undefined {
   }
 }
 
-export function writeStorage(key: string, value: unknown): void {
-  if (!hasLocalStorage()) return
+/** Returns false when the value could not be stored (no storage, quota exceeded, privacy mode). */
+export function writeStorage(key: string, value: unknown): boolean {
+  if (!hasLocalStorage()) return false
   try {
     window.localStorage.setItem(key, JSON.stringify(value))
+    return true
   } catch {
-    // quota or privacy mode — state stays in memory
+    return false
   }
 }
 
