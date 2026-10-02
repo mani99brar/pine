@@ -11,6 +11,8 @@ Implement the Envio option per `docs/prd/PRD-05-indexers.md` section 3: the Envi
 
 ## Constraints
 
+- Test memory: follow the cross-process test lock in `features/indexers/decisions.md` (the reference implementation is `git show 8b00834:packages/api/src/platform/gateways/testing/suite-lock.ts`, or `git show 6e46a26:packages/api/src/modules/claims/test/lock.ts`); your gate must pass as one full run.
+
 - Only touch `packages/indexer-envio` and `packages/read-model-envio` (scripts may be adjusted; dependencies may not). envio is pinned at 3.12.1.
 - Codegen output `.envio/` is gitignored; `envio-env.d.ts` is committed and must be byte-identical to what `envio codegen` produces (the verifier fails a check that leaves the worktree dirty). Run the checks from a clean tree before completing.
 - Handlers are deterministic, make no network calls and ignore untracked ids by entity lookup; the read model never fetches anything but the configured GraphQL URL.

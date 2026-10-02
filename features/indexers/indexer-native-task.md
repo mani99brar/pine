@@ -12,6 +12,8 @@ Implement `@pine/indexer-native` per `docs/prd/PRD-05-indexers.md` section 2: th
 
 ## Constraints
 
+- Test memory: follow the cross-process test lock in `features/indexers/decisions.md` (the reference implementation is `git show 8b00834:packages/api/src/platform/gateways/testing/suite-lock.ts`, or `git show 6e46a26:packages/api/src/modules/claims/test/lock.ts`); your gate must pass as one full run.
+
 - Only touch `packages/indexer-native` (its `package.json` scripts may be adjusted, dependencies may not). Never import from `@pine/api`.
 - Finalized blocks only; no rollback path; any integrity conflict halts and is reported through `status().halted`.
 - Apply and cursor advance in one transaction; event rows keyed by (chain id, block hash, log index) so re-applying a range is a no-op.

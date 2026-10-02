@@ -13,6 +13,12 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
 - The secondary-provider re-query covers Pine registry logs and logs of tracked Reality/CTF/Kleros ids; any difference halts.
 - Decoded values outside the frozen `ChainEvent` domain halt (the ClaimRegistry enforces `repositoryId <= 2^53 - 1`).
 - Driver portability: never read `rowCount`/`affectedRows`; explicit int8/count casts in raw SQL.
+- Test memory: a PGlite instance takes several hundred MB on this host and vitest runs test files in parallel fork processes; the
+  platform and claims gates were OOM-killed until their PGlite-heavy test files were serialized with a cross-process lock (an
+  atomic `fs.mkdir` lock directory under `os.tmpdir()` with a lane-specific name, the owner pid inside, imported first by every
+  such test file, released in `afterAll`, a dead or same-process owner taken over). Use one database per test file and the same
+  lock; each lane's gate must pass as ONE full run of its argv. Envio's `createTestIndexer` runs are serialized the same way if
+  they use much memory.
 
 ## Assumptions
 
