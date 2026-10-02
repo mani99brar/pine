@@ -20,6 +20,21 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
 - The module is `createClaimsModule({ catalogDir })` with `claimsModule` as the default instance; tests use a temporary catalog copy.
 - Only claims whose document is retrievable and matches every on-chain field are `verified` and listed; others stay visible by exact id with their integrity status.
 - Agent endpoints are public, cookie-free and label user-supplied content `contentTrust: "untrusted"`.
+- Integrity job = discovery (walk `created_desc` from the head to the first indexed claim, then insert every collected claim as
+  `pending` in one transaction, `ON CONFLICT DO NOTHING`; an error inserts nothing) + verification (pending/due rows oldest first,
+  ≤ 50 per run, one try/catch and one compare-and-set transaction per claim). Transient errors keep a claim `pending` with backoff;
+  inputs the frozen renderer refuses are `mismatch` on `question`.
+- Document constants (Seer factory, collateral, realitio, arbitrator, timeout) come only from `buildDeploymentManifest(config.contracts)`
+  for both preview and integrity; module registration throws if `config.seer` disagrees with the manifest.
+- `POST /publications` order: validation → compliance → NOT_READY → preview (NOT_FOUND) → 409 checks → row (reuse, else consume quota
+  then `INSERT ... ON CONFLICT DO NOTHING RETURNING`, re-read on conflict) → chain re-check → content → plan. Two racing first
+  requests may consume two quota units (accepted; no 500, no duplicate). After the plan offer expires a retry returns the
+  publication with `planExpired: true` and no plan; a new preview (new nonce, new digest) is the way to publish again.
+- Deleting a draft without publications deletes its previews in the same transaction; with a publication it is 409.
+- Schema endpoint test: separate Fastify with Ajv `removeAdditional: false, coerceTypes: false, useDefaults: false`; structural
+  tampering only; refinements are tested against the frozen parse functions; served schemas carry a `$comment` about server-side rules.
+- "Public routes never read cookies" is proven by the platform; this module proves its public handlers ignore sessions (identical
+  responses with and without `x-test-session` and a `Cookie` header).
 
 ## Assumptions
 

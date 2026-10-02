@@ -28,7 +28,11 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - Production refinements: https origins; `apiOrigin === publicOrigin`; `userContentOrigin` has a different registrable domain
   (compare the last two DNS labels at least; reject subdomains of publicOrigin); `chainId === 100`; `allowDraftPolicies === false`;
   `enabledPolicyFamilies` excludes `SC-001`; the two RPC URLs differ; token-encryption keys are 32 bytes (base64) with unique ids;
-  compliance country header configured; sanctions mode not `off`.
+  compliance country header configured; sanctions mode `static`.
+- Sanctions screening (v1): `PINE_SANCTIONS_MODE` is `off` or `static` (default `off` outside production; production refuses
+  anything but `static`). `static` requires `PINE_SANCTIONS_DENYLIST_PATH`: a UTF-8 JSON file holding an array of `0x` + 40
+  lowercase-hex addresses (≤ 100000 entries, duplicates allowed); it is read once at startup and any unreadable or invalid file is
+  a startup error naming the variable. Changing the list requires a restart (documented in the README).
 - Every secret string is registered with `createRedactor` at startup.
 
 ### 2.2 HTTP application (`buildApp`)
@@ -77,14 +81,25 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - GitHub linking routes (session required): `POST /api/v1/auth/github/start` → `{authorizationUrl}`;
   `GET /api/v1/auth/github/callback?code&state` → `githubAuth.complete`, rotate the session, redirect (303) to
   `publicOrigin + /settings?github=linked` (or `?github=error`); `DELETE /api/v1/auth/github`. The callback is a top-level GET
-  protected by the single-use state bound to the session.
-- `POST /api/v1/webhooks/github` (no session, CSRF-exempt, raw body ≤ 64 KiB) → `githubAuth.handleWebhook`.
+  protected by the single-use state bound to the session. Every callback failure (state missing/expired/reused/bound to another
+  session, token exchange or identity failure, scope rejection, identity conflict) links nothing, records an audit entry
+  `github.link.failed` with a reason code, and redirects 303 to `?github=error` (accepted deviation from SEC-GH-03's "403": a
+  top-level navigation must land on the web app; the security property — nothing is linked — is what the test asserts).
+- `POST /api/v1/webhooks/github` (no session, CSRF-exempt, raw body ≤ 64 KiB) → `githubAuth.handleWebhook`; core audits
+  `github.webhook.accepted` (details: `X-GitHub-Event`, `X-GitHub-Delivery`) when it resolves and `github.webhook.rejected` when it
+  throws (204 / 401 respectively). The frozen seam returns `void`, so a webhook-driven revocation is not attributed to a Pine user
+  in the audit log; the gateways' metric and redacted log line carry it (accepted).
 
 ### 2.4 Platform services in AppContext
 - `quotas` (Postgres fixed windows per user and quota name; limits from config; atomic consume; `QUOTA_EXCEEDED` with Retry-After).
 - `audit` (INSERT-only table; `redactDeep` on details; 8 KiB cap; IP stored, 30-day truncation through the retention function).
   Core records audit entries at its own call sites for every gateway-backed security event: GitHub link start, link success and
   failure (including scope rejection and identity conflicts), unlink, webhook results, and token revocations reported by gateways.
+  The revocation channel is the frozen error code: the gateway throws `GitHubGatewayError("GITHUB_NOT_LINKED")` after it has
+  deleted an unusable token (GitHub 401, decrypt/AAD failure, refresh rejected). Core builds `ctx.github` as an auditing decorator
+  around `gateways.github`: every method is forwarded unchanged, and when one rejects with `GITHUB_NOT_LINKED` the decorator records
+  `github.link.revoked` (actor = the `userId` argument, details: method name) before rethrowing, so modules that catch the error
+  themselves cannot hide it. Test it with a fake gateway.
 - `moderation`: table of `(subject, id) -> {action hide|block, reason, actor, at}`; admin routes
   `GET/POST/DELETE /api/v1/admin/moderation` (requireAdmin, audit every change). Moderation never edits documents or chain data.
 - `compliance.assertAllowed(request, session, action)`: blocked wallet list (static denylist file or env), geofence from the
@@ -105,6 +120,8 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   zero rows are updated). TTL = max(60 s, 2 × the job's interval).
 - Release on finish: `UPDATE ... SET expires_at = started_at + $interval WHERE name = $1 AND holder = $2`, so no process (including
   this one) starts the job again before one interval has passed since this run started; `expires_at` is never NULL.
+- The TTL floor (default 60 s) and the renewal period (default ttl/3) are constructor options of the runner so tests run in real
+  time with sub-second values (e.g. ttl 300 ms, interval 200 ms); tests never write `job_leases` directly.
 - Required tests on PGlite with two holder ids: B cannot acquire while A holds; A releases; B cannot acquire before the interval;
   B acquires after it; an expired (crashed) holder is taken over; a holder that lost its lease aborts.
 
@@ -124,8 +141,12 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
 - Roles and grants are owned by platform migrations so tests and production behave the same: `0002_` (or later) creates the role
   `pine_api` idempotently (`DO $$ ... IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pine_api') THEN CREATE ROLE pine_api
   NOLOGIN ...`; in production the DBA pre-creates it with LOGIN and the migration is a no-op for creation), grants USAGE on the schema
-  and DML on existing tables, `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pine_api`
-  (so later groups' tables are covered), and `REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM pine_api` (INSERT and SELECT only).
+  and DML on the platform tables by name (never `ON ALL TABLES`), only `SELECT` on `schema_migrations` (so `verifyMigrations` works
+  but the ledger cannot be altered), `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO
+  pine_api` (so later groups' tables are covered), and `REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM pine_api` (INSERT and
+  SELECT only). Test under `SET ROLE pine_api`: `verifyMigrations` succeeds and `UPDATE schema_migrations` fails. Gateways (and every
+  later group's) migrations never mention `pine_api`: the default privileges cover them, and the role does not exist in a lane that
+  lacks platform `0002_`.
 - Audit IP retention: a `SECURITY DEFINER` function (`SET search_path = public, pg_temp`, `REVOKE EXECUTE ... FROM PUBLIC`,
   `GRANT EXECUTE ... TO pine_api`) that only nulls `ip` on rows older than 30 days; the cleanup job calls it. Tests use
   `SET ROLE pine_api` on PGlite to prove UPDATE/DELETE on `audit_log` fail with a permission error and the function still works
@@ -164,12 +185,14 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   and deletes the user's tokens for `github_app_authorization` revocations.
 - Token lifecycle duties (SEC-GH-07/10): a gateways job re-encrypts stored tokens under the `current` key and reports how many
   remain under retired keys; `unlink` first revokes the token at GitHub (`DELETE /applications/{client_id}/token` with client
-  credentials) and then deletes it; any GitHub 401 for a user token deletes the stored token and marks the link revoked. These
-  events are surfaced to core as distinguishable `ApiError`s or return values and as metrics plus redacted logs (core audits them).
+  credentials) and then deletes it; any GitHub 401 for a user token, a token that fails to decrypt (wrong AAD, unknown key id,
+  tampered ciphertext) and a rejected refresh all delete the stored token, mark the link revoked (so `identityOf` returns null) and
+  throw `GitHubGatewayError("GITHUB_NOT_LINKED")` — never `UPSTREAM`. They also increment `pine_github_link_revoked_total{reason}`
+  and log a redacted line; core audits them through its decorator (section 2.4).
 - `GitHubGateway`: `fetch` only to `https://api.github.com` (injectable for tests), `Accept: application/vnd.github+json`,
   `X-GitHub-Api-Version`, 10 s timeout, `redirect: "error"`, zod-validated responses, size cap 2 MiB. Public repositories only:
   refuse `private !== false` or `visibility !== "public"` with `REPO_NOT_PUBLIC`. Map 404→NOT_FOUND, 403/429 with rate-limit headers →
-  RATE_LIMITED, others → UPSTREAM (messages redacted). `listPublicRepos` first refreshes the login with `GET /user` using the user's
+  RATE_LIMITED, 401 → GITHUB_NOT_LINKED (after the revocation above), others → UPSTREAM (messages redacted). `listPublicRepos` first refreshes the login with `GET /user` using the user's
   token (logins are renamed and re-registered, SEC-GH-05; the stored login is never a lookup key), then uses
   `GET /users/{login}/repos?type=owner&sort=pushed`; `getRepoById` uses `GET /repositories/{id}`; `listPullCommits` pages up to 250;
   `verifyCommitMembership`: `pull_head` iff `GET /repos/{o}/{r}/pulls/{n}` head sha equals the commit; `pull_commit` iff listed in
@@ -206,11 +229,14 @@ viem public clients for both RPC URLs (http transport, 10 s timeout, limited ret
   rate limit keys; audit redaction and `SET ROLE pine_api` (INSERT works, UPDATE/DELETE fail); moderation routes; compliance (451,
   TERMS_REQUIRED); jobs never overlap and the lease tests of section 2.5;
   error responses never contain secrets (inject a secret-bearing error); `/readyz` stale/halted handling; log lines contain no query
-  strings or cookies.
+  strings or cookies; the auditing GitHub decorator; webhook accepted/rejected audits; callback failures redirect to `?github=error`
+  with nothing linked (SEC-GH-03); sanctions config (production refuses `off`, invalid denylist file refused).
+- SIWE tests sign with viem test accounts only inside `*.test.ts` files or `src/platform/core/testing/` (the forbidden-pattern gate
+  exempts exactly those); production code never imports from a `testing/` directory.
 - gateways: OAuth state single-use/expiry/session binding; PKCE parameters; token AAD binding (ciphertext swapped between users
   fails); key rotation decrypt; refresh single-flight; webhook HMAC (bad signature rejected); `X-OAuth-Scopes` non-empty rejected;
   private/internal repos refused; membership methods incl. a fork-network commit that exists but is not a member; rate-limit
-  mapping; GitHub response validation failures; content put/get/idempotency/size cap/blocked; retrieve digest mismatch and redirect
+  mapping; 401 and decrypt failure → token deleted, link revoked, `GITHUB_NOT_LINKED`; GitHub response validation failures; content put/get/idempotency/size cap/blocked; retrieve digest mismatch and redirect
   refusal and size cap; pin outbox CID mismatch; content server headers, 451, 404, no Set-Cookie; chain finalized-hash mismatch.
 
 ## 5. Checks (controller-run)

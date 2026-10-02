@@ -16,9 +16,22 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
   renewal; release sets `expires_at = started_at + interval`; database time only), provable on PGlite with two holder ids. This
   replaces the advisory-lock wording in the frozen JobDefinition comment while keeping its guarantee.
 - Audit ownership: core audits every gateway-backed security event at its call sites (GitHub link start/success/failure incl. scope
-  rejection, unlink, webhook results, revocations reported by gateways); gateways never write `audit_log` directly but surface those
-  events as distinguishable errors/results, metrics and redacted logs (accepted deviation from the "gateway audits" reading of
-  SEC-GH-04/06/10).
+  rejection, unlink, webhook accepted/rejected, revocations); gateways never write `audit_log` directly (accepted deviation from the
+  "gateway audits" reading of SEC-GH-04/06/10). The revocation channel is the frozen code `GITHUB_NOT_LINKED`: gateways map GitHub
+  401, token decrypt/AAD failure and a rejected refresh to it after deleting the token and marking the link revoked (never
+  `UPSTREAM`), plus the metric `pine_github_link_revoked_total{reason}`; core wraps `gateways.github` in an auditing decorator as
+  `ctx.github` that records `github.link.revoked` (actor = the userId argument) before rethrowing. Webhook-driven revocations are
+  not attributed to a Pine user in the audit log because `handleWebhook` returns `void` (accepted; metric and log carry them).
+- SEC-GH-03 deviation (accepted): an OAuth callback with a missing, expired, reused or foreign-session state links nothing, is
+  audited as `github.link.failed` and redirects 303 to `/settings?github=error` instead of answering 403.
+- Sanctions (v1): `PINE_SANCTIONS_MODE` = `off` | `static`; production requires `static` with `PINE_SANCTIONS_DENYLIST_PATH` (JSON
+  array of lowercase `0x` addresses, read at startup, invalid file = startup error). A hosted provider is a launch gate.
+- Lease timing: the runner takes the TTL floor (default 60 s) and the renewal period (default ttl/3) as constructor options so the
+  lease tests run in real time with sub-second values; tests never update `job_leases` directly.
+- Grants: platform `0002_` grants DML on platform tables by name, only `SELECT` on `schema_migrations`, and default privileges for
+  later tables; gateways and later migration groups never mention `pine_api`.
+- SIWE test signing helpers live only in `*.test.ts` or `src/platform/core/testing/` (exempt from the forbidden-pattern gate);
+  production code never imports from a `testing/` directory.
 - PGlite serialises queries, so race-freedom of quota/nonce/rate-limit/refresh statements is guaranteed by their single-statement or
   `FOR UPDATE` shape, not by tests (accepted).
 - Clock: `ctx.clock.now()` as a bound parameter everywhere except job leases and IP retention (database `now()`).

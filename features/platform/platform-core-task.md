@@ -10,6 +10,7 @@ Implement the API platform core described in `docs/prd/PRD-02-platform.md` secti
 - Security requirements: `docs/security/requirements.md` sections 2 (SEC-AUTH), 9 (SEC-OPS) and 10 (SEC-LEGAL); web rules in `CLAUDE.md`.
 - `src/main.ts` must import `createGateways` from `./platform/gateways/index.js` and `createReadModel` from `./readmodel.js` (both stubs owned by other lanes) and typecheck against them.
 - PRD-02 sections 2.5 and 2.5a settle the jobs-runner lock seam, atomic statements, cleanup, audit IP retention, session rotation and CSRF details; `features/platform/decisions.md` lists the accepted deviations from the security requirements.
+- PRD-02 section 2.4 defines the audit channel for gateway revocations (`ctx.github` is your auditing decorator around `gateways.github`, keyed on `GITHUB_NOT_LINKED`), section 2.3 the webhook and callback-failure audits, section 2.1 the sanctions configuration, section 2.5 the lease timing options, and section 2.5a the exact grants (SELECT only on `schema_migrations`).
 - Build in this order with separate test files per area so a failure points at one area: config → buildApp/CSRF/errors → SIWE/sessions → quotas/rate limits/audit/moderation/compliance → jobs/cleanup → main/migrate → README.
 
 ## Constraints

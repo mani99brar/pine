@@ -10,7 +10,8 @@ Replace the stub `packages/api/src/modules/claims/index.ts` with the claims `Rou
 - API contracts and harness: `packages/api/src/contracts/*.ts` (RouteModule, RouteSecurityConfig, AppContext gateways, ApiError codes, `createTestContext`, `buildTestApp`, `insertTestUser`, `FakeGitHubGateway`, `MemoryContentStore`, `FakeCompliance`, `FakeQuotas`, `MemoryReadModel`, scripted chain).
 - Policy texts and catalog: `policies/catalog/catalog.json` and the files it lists. Requirements: `docs/security/requirements.md` sections 3 (SEC-TX), 4 (SEC-CLAIM), 6 (SEC-AGENT), 8 (SEC-IDX-08).
 - `features/claims/decisions.md` settles reconciliation, expiry, window bounds, SC-001 gating, the listing index, the module factory and the helper functions to use; `MemoryReadModel` has `markIndexed(...)` (call it relative to the FakeClock) and `setHalted(true)` for NOT_READY tests.
-- Build in this order with separate test files per area so a failure points at one area: catalog → drafts → preview → publication → reconciliation → integrity and index → public listings → agent endpoints and schemas.
+- PRD-03 section 7a fixes the two-phase integrity job (discovery inserts atomically, verification per claim) and section 6 the exact order and race handling of `POST /publications`.
+- Build in this order with separate test files per area so a failure points at one area: catalog → drafts → preview → publication → reconciliation → integrity and index → public listings → agent endpoints and schemas. Commit after each area passes.
 
 ## Constraints
 
@@ -26,4 +27,4 @@ Replace the stub `packages/api/src/modules/claims/index.ts` with the claims `Rou
 
 ## Stop
 
-Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure. Ask a `question` when PRD-03 is ambiguous about something that changes what the immutable document or plan contains.
+Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure with the same root cause (failures in different test areas while you build area by area are normal progress, not a stop condition; run the narrower `vitest run src/modules/claims/<area>` while iterating). Ask a `question` when PRD-03 is ambiguous about something that changes what the immutable document or plan contains.

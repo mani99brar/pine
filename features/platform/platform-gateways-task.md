@@ -10,6 +10,8 @@ Replace the stub `packages/api/src/platform/gateways/index.ts` with `createGatew
 - Security requirements: `docs/security/requirements.md` sections 1 (SEC-GH) and 5 (SEC-EVID); GitHub behaviour notes in section 0 (fork-network commits, App token scope).
 - External HTTP (GitHub, IPFS gateways, Kubo, pinning service, RPC) must be injectable (a `fetch`-like dependency or viem transport) so tests use recorded fixtures and never touch the network.
 - The content server has no in-app per-IP rate limit (decided: edge proxy); `listPublicRepos` refreshes the login via `GET /user` first.
+- GitHub 401, token decrypt/AAD failure and a rejected refresh: delete the token, mark the link revoked (`identityOf` → null), increment `pine_github_link_revoked_total{reason}` and throw `GitHubGatewayError("GITHUB_NOT_LINKED")` (never `UPSTREAM`); core audits it (PRD-02 sections 2.4 and 3.1).
+- Your migrations never mention the role `pine_api`: it is created by platform `0002_`, which is not in your worktree, and its default privileges cover your tables.
 - Build in this order with separate test files per area: crypto/token store → GitHub auth flow → GitHub gateway and membership → content store/retrieve/pin outbox → content server → chain gateway → createGateways.
 
 ## Constraints
