@@ -30,14 +30,14 @@ export function Breadcrumbs({ items }: { items: Crumb[] }) {
     <nav aria-label="Breadcrumb" className="mb-4 print:hidden">
       <ol className="flex flex-wrap items-center gap-1 text-sm text-graphite">
         {items.map((c, i) => (
-          <li key={`${c.label}-${i}`} className="flex items-center gap-1">
+          <li key={`${c.label}-${i}`} className="flex min-w-0 items-center gap-1">
             {i > 0 ? <ChevronRight aria-hidden className="size-3.5" /> : null}
             {c.href ? (
               <Link href={c.href} className="link text-graphite!">
                 {c.label}
               </Link>
             ) : (
-              <span aria-current="page" className="font-bold text-ink">
+              <span aria-current="page" className="block max-w-[15rem] truncate font-bold text-ink sm:max-w-[40rem]">
                 {c.label}
               </span>
             )}

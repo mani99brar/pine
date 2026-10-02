@@ -8,7 +8,9 @@ import { formatPrice } from '@pine/core'
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
 function tickLabel(t: number, spanMs: number) {
   const d = new Date(t)
-  if (spanMs <= 36 * 3600_000) return `${String(d.getUTCHours()).padStart(2, '0')}:00`
+  const hh = `${String(d.getUTCHours()).padStart(2, '0')}:00`
+  if (spanMs <= 36 * 3600_000) return hh
+  if (spanMs <= 5 * 24 * 3600_000) return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()} ${hh}`
   return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
 }
 function fullLabel(t: number) {
@@ -44,7 +46,7 @@ export function PriceChart({ points, deadline }: { points: PricePoint[]; deadlin
               tick={{ fill: '#4b5263', fontSize: 12 }}
               tickLine={false}
               axisLine={{ stroke: '#cdd2dc' }}
-              minTickGap={40}
+              minTickGap={56}
             />
             <YAxis
               domain={[0, 1]}

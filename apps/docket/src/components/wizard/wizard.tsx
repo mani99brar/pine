@@ -5,7 +5,6 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { formatDate } from '@pine/core'
 import { useClaimComposer } from '@pine/react'
 import { ArrowLeft, ArrowRight, Lock } from 'lucide-react'
-import { cn } from '@/lib/cn'
 import { WIZARD_STEPS, isWizardStep, stepForIssue, stepIndex, fieldIdForPath, type WizardStep } from '@/lib/wizard'
 import { Button } from '@/components/ui/button'
 import { Breadcrumbs, Skeleton } from '@/components/ui/layout'
@@ -150,7 +149,7 @@ export function FilingWizard({ draftId }: { draftId: string }) {
           </div>
         </aside>
 
-        <section aria-labelledby="step-heading" className="min-w-0 border border-rule bg-sheet">
+        <section aria-labelledby="step-heading" className="-mx-4 min-w-0 border-y border-rule bg-sheet sm:mx-0 sm:border-x">
           <header className="border-b border-rule px-4 pt-6 pb-5 sm:px-8">
             <p className="text-sm font-bold text-graphite">
               Step {idx + 1} of {WIZARD_STEPS.length}
@@ -214,7 +213,9 @@ export function FilingWizard({ draftId }: { draftId: string }) {
             <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-rule px-4 py-5 sm:px-8">
               {prev ? (
                 <Button variant="secondary" icon={<ArrowLeft aria-hidden />} onClick={() => goTo(prev.id)}>
-                  Back<span className="sr-only sm:not-sr-only">: {prev.title}</span>
+                  <span>
+                    Back<span className="sr-only sm:not-sr-only"> to {prev.title.toLowerCase()}</span>
+                  </span>
                 </Button>
               ) : (
                 <span />
@@ -224,7 +225,9 @@ export function FilingWizard({ draftId }: { draftId: string }) {
                   iconAfter={<ArrowRight aria-hidden />}
                   onClick={onContinue}
                 >
-                  Continue<span className="sr-only sm:not-sr-only">: {next.title}</span>
+                  <span>
+                    Continue<span className="sr-only sm:not-sr-only"> to {next.title.toLowerCase()}</span>
+                  </span>
                 </Button>
               ) : null}
             </footer>

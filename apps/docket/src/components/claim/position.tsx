@@ -108,9 +108,13 @@ export function PositionSection({ claim }: { claim: ClaimDetail }) {
                 ))}
               </ul>
             ) : null}
-            {decided ? <RedeemPanel claim={claim} /> : null}
           </div>
         )}
+        {wallet.isConnected && decided && !portfolio.isLoading ? (
+          <div className="mt-4">
+            <RedeemPanel claim={claim} />
+          </div>
+        ) : null}
         {claim.outcome === 'invalid' ? (
           <p className="mt-3 text-sm text-graphite">
             {COPY.invalidIsNotRefund}
@@ -126,6 +130,17 @@ function RedeemPanel({ claim }: { claim: ClaimDetail }) {
   const has = Number(redeemable) > 0
   if (!has && runner.state !== 'done') {
     return <Notice tone="neutral">Nothing left to redeem from this wallet.</Notice>
+  }
+  if (runner.state === 'done') {
+    return (
+      <Notice tone="info" title="Redeemed" role="status">
+        Your winning tokens were exchanged for collateral. The entry is in your{' '}
+        <a href="/activity" className="link">
+          activity ledger
+        </a>
+        .
+      </Notice>
+    )
   }
   return (
     <div className="border border-rule bg-sheet p-5">

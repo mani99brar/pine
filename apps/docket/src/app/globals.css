@@ -20,7 +20,7 @@
   /* Derived tones */
   --color-graphite: #4b5263;     /* secondary text, AAA on sheet */
   --color-rule: #cdd2dc;         /* hairlines */
-  --color-rule-strong: #8f97a8;  /* control borders, 3:1+ on sheet */
+  --color-rule-strong: #7c8495;  /* control borders, 3.7:1 on sheet */
   --color-violet-deep: #2f2380;  /* pressed / hover on violet */
   --color-violet-wash: #efedfb;  /* current-stage wash */
   --color-violet-line: #c9c3ef;
@@ -65,6 +65,7 @@
   --radius-md: 6px;
 
   --breakpoint-xs: 25rem;
+  --breakpoint-nav: 86.25rem;
 
   --animate-settle: settle 700ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
   --animate-stamp: stamp 520ms cubic-bezier(0.2, 0.8, 0.25, 1.1) both;
@@ -228,6 +229,20 @@
     margin-left: 1px;
   }
 
+  /* Native controls, restyled */
+  .select-chevron {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a1d2b' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+    background-size: 12px;
+    background-position: right 0.85rem center;
+    background-repeat: no-repeat;
+  }
+  .check-input:checked {
+    background-color: var(--color-ink);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3L13 4.5' stroke='white' stroke-width='2.4' fill='none'/%3E%3C/svg%3E");
+    background-position: center;
+    background-repeat: no-repeat;
+  }
+
   .no-scrollbar { scrollbar-width: none; }
   .no-scrollbar::-webkit-scrollbar { display: none; }
 }
@@ -259,5 +274,13 @@
   details summary { list-style: none; }
   h1, h2, h3 { break-after: avoid; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  /* A printed claim is a filing document: number its sections. */
+  article { counter-reset: docsec; }
+  .doc-section > div:first-child h2::before {
+    counter-increment: docsec;
+    content: counter(docsec) ". ";
+  }
+  .doc-section { border-top-width: 1px !important; padding-top: 10pt !important; }
+  .space-y-12 > * + * { margin-top: 16pt !important; }
 }
 .print-only { display: none; }

@@ -70,7 +70,7 @@ export function ReviewStep() {
         <h3 id="rv-q" className="mb-1 text-xl">
           The question, exactly as it will be published
         </h3>
-        <p className="mb-5 text-[15px] text-graphite">Hover or focus a numbered term to see what it commits you to.</p>
+        <p className="mb-5 text-[15px] text-graphite">Select a marked term or a numbered note to see what it commits you to.</p>
         <AnnotatedQuestion text={question.text} annotations={annotations} idPrefix="review-q" />
         <p className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-graphite">
           <span className="inline-flex items-center gap-1">

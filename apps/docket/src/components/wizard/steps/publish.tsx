@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { formatAmount, formatClaimNumber } from '@pine/core'
 import { CHAINS } from '@pine/core/chains'
 import { COPY } from '@pine/core/copy'
-import { useDemoWallet, usePublishClaim, useWallet } from '@pine/react'
+import { useEffect, useRef } from 'react'
+import { useClaim, useDemoWallet, usePublishClaim, useWallet } from '@pine/react'
 import { Lock, Wallet } from 'lucide-react'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Notice } from '@/components/ui/notice'
@@ -14,9 +15,10 @@ import { useAcknowledgements } from '@/lib/ack'
 import { planSignature, riskItems } from '../risk'
 import { useWizard } from '../context'
 
-function docketNumber(claimId?: string): string | undefined {
-  const m = claimId?.match(/(\d+)$/)
-  return m ? formatClaimNumber(Number(m[1])) : claimId
+function FiledNumber({ claimId }: { claimId?: string }) {
+  const q = useClaim(claimId)
+  if (q.data) return <>{formatClaimNumber(q.data.number)}</>
+  return <>Filed</>
 }
 
 export function PublishStep() {
@@ -33,18 +35,25 @@ export function PublishStep() {
   const sym = plan?.collateral.symbol ?? chain?.collateral.symbol ?? ''
   const started = publish.steps.some((s) => s.status !== 'idle')
   const reviewDone = issues.length === 0 && acked
+  const doneRef = useRef<HTMLDivElement>(null)
+  const isDone = publish.state === 'done'
+  useEffect(() => {
+    if (isDone) doneRef.current?.scrollIntoView({ block: 'center' })
+  }, [isDone])
 
   if (publish.state === 'done') {
-    const num = docketNumber(publish.claimId)
     return (
-      <div className="py-6 text-center">
+      <div ref={doneRef} className="py-6 text-center">
         <div className="mx-auto inline-block -rotate-2 border-4 border-violet px-8 py-5 motion-safe:animate-stamp">
           <p className="text-sm font-bold text-violet">Entered on the docket</p>
-          <p className="mt-1 text-4xl font-[800] tracking-tight text-violet tabular">{num}</p>
+          <p className="mt-1 text-4xl font-[800] tracking-tight text-violet tabular">
+            <FiledNumber claimId={publish.claimId} />
+          </p>
         </div>
         <h3 className="mt-8 text-2xl">Your claim is filed</h3>
         <p className="mx-auto mt-2 max-w-[44ch] text-lg text-graphite">
           The evidence window is open. Investigators can now find it on the docket, in the agent API and in the feed.
+          {demo.enabled ? ' In demo mode it exists only in this browser.' : ''}
         </p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           {publish.claimId ? <ButtonLink href={`/claims/${publish.claimId}`}>Open the case file</ButtonLink> : null}

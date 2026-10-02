@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Dialog, DropdownMenu } from 'radix-ui'
 import { ChevronDown, FilePlus2, Menu, X } from 'lucide-react'
 import { useAccount } from '@pine/react'
@@ -11,11 +11,17 @@ import { isActive, PRIMARY_NAV, SECONDARY_NAV } from '@/lib/nav'
 import { Wordmark } from './brand'
 import { WalletButton } from './wallet-button'
 import { ButtonLink } from '@/components/ui/button'
+import { useMounted } from '@/lib/use-mounted'
 
 export function Header() {
   const pathname = usePathname() ?? '/'
   const [open, setOpen] = useState(false)
-  useEffect(() => setOpen(false), [pathname])
+  const [lastPath, setLastPath] = useState(pathname)
+  if (lastPath !== pathname) {
+    // Close the menu when navigation completes.
+    setLastPath(pathname)
+    setOpen(false)
+  }
 
   return (
     <header className="border-b-4 border-violet bg-sheet print:hidden">
@@ -24,7 +30,7 @@ export function Header() {
           <Wordmark />
         </Link>
 
-        <nav aria-label="Main" className="ml-6 hidden h-full xl:block">
+        <nav aria-label="Main" className="ml-6 hidden h-full nav:block">
           <ul className="flex h-full items-stretch gap-1">
             {PRIMARY_NAV.map((item) => {
               const active = isActive(pathname, item.match)
@@ -54,14 +60,19 @@ export function Header() {
           <div className="hidden md:block">
             <AccountMenu />
           </div>
-          <ButtonLink href="/file" size="sm" icon={<FilePlus2 aria-hidden />} className="hidden sm:inline-flex">
+          <ButtonLink
+            href="/file"
+            size="sm"
+            icon={<FilePlus2 aria-hidden />}
+            className={cn('hidden sm:inline-flex', pathname.startsWith('/file') && 'sm:hidden')}
+          >
             File a verification
           </ButtonLink>
           <Dialog.Root open={open} onOpenChange={setOpen}>
             <Dialog.Trigger asChild>
               <button
                 type="button"
-                className="inline-flex h-10 items-center gap-2 rounded-sm border border-rule-strong px-3 font-bold xl:hidden"
+                className="inline-flex h-10 items-center gap-2 rounded-sm border border-rule-strong px-3 font-bold nav:hidden"
                 aria-label="Open menu"
               >
                 <Menu aria-hidden className="size-5" />
@@ -130,7 +141,8 @@ export function Header() {
 
 function AccountMenu() {
   const { status, account, signOut } = useAccount()
-  if (status === 'loading') return <span className="skeleton block h-9 w-24" aria-label="Loading account" />
+  const mounted = useMounted()
+  if (!mounted || status === 'loading') return <span className="skeleton block h-9 w-24" aria-label="Loading account" />
   if (status !== 'signed_in' || !account) {
     return (
       <Link

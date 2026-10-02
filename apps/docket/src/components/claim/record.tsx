@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import type { ActivityItem, ClaimDetail } from '@pine/core'
 import { explorerTxUrl, formatAmount, formatDate, shortHash } from '@pine/core'
 import { useActivity } from '@pine/react'
@@ -11,6 +12,8 @@ import { Skeleton } from '@/components/ui/layout'
 export function RecordSection({ claim }: { claim: ClaimDetail }) {
   const events = [...claim.timeline].sort((a, b) => a.at.localeCompare(b.at))
   const activity = useActivity({ claimId: claim.id, limit: 50 })
+  const [all, setAll] = useState(false)
+  const rows = activity.data?.items ?? []
   return (
     <div className="space-y-8">
       <div>
@@ -50,8 +53,15 @@ export function RecordSection({ claim }: { claim: ClaimDetail }) {
             <Skeleton className="h-5 w-5/6" />
             <Skeleton className="h-5 w-4/6" />
           </div>
-        ) : activity.data && activity.data.items.length > 0 ? (
-          <ActivityTable items={activity.data.items} showClaim={false} />
+        ) : rows.length > 0 ? (
+          <>
+            <ActivityTable items={all ? rows : rows.slice(0, 8)} showClaim={false} />
+            {rows.length > 8 ? (
+              <button type="button" className="link mt-3 text-[15px] font-bold print:hidden" onClick={() => setAll(!all)}>
+                {all ? 'Show the latest 8 only' : `Show all ${rows.length} transactions`}
+              </button>
+            ) : null}
+          </>
         ) : (
           <p className="mt-3 text-graphite">No transactions recorded for this claim yet.</p>
         )}

@@ -1,12 +1,13 @@
 import Link from 'next/link'
 import type { ClaimManifest } from '@pine/core'
 import { formatDate, shortHash } from '@pine/core'
-import { EVIDENCE_MECHANISMS } from '@pine/core'
+import { EVIDENCE_MECHANISMS, getPolicy } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { HashValue } from '@/components/ui/copy'
 import { DefinitionList } from '@/components/ui/layout'
 import { ExternalLink } from '@/components/ui/external-link'
 import { formatTimeout } from '@/lib/format'
+import { Collapsible } from '@/components/ui/collapsible'
 
 function Bullets({ items, empty = 'None stated' }: { items: string[] | undefined; empty?: string }) {
   if (!items || items.length === 0) return <span className="text-graphite">{empty}</span>
@@ -38,17 +39,20 @@ export function TermsOnRecord({
   const env = c.environment
   const mech = c.evidence ? EVIDENCE_MECHANISMS[c.evidence.mechanism] : undefined
   const params = Object.entries(c.parameters ?? {})
+  const policySpec = getPolicy(manifest.policy.id, manifest.policy.version)
+  const paramLabel = (key: string) => policySpec?.parameters.find((p) => p.key === key)?.label ?? key
+  const optionLabel = (key: string, v: string) => policySpec?.parameters.find((p) => p.key === key)?.options?.find((o) => o.value === v)?.label ?? v
 
   return (
-    <div className="space-y-8">
-      <div>
+    <div className="space-y-2">
+      <div className="pb-6">
         <h3 className="text-xl">The requirement</h3>
         <p className="mt-1 text-[15px] text-graphite">The one behavior that must hold. Exhibits try to show it does not.</p>
         <p className="record untrusted mt-3 border-l-4 border-ink pl-5">{c.requirement}</p>
         {c.claimClass ? <p className="mt-2 text-sm text-graphite">Claim class: {c.claimClass}</p> : null}
       </div>
 
-      <div>
+      <div className="border-t border-rule pt-4 pb-6">
         <h3 className="mb-2 text-xl">Code under examination</h3>
         <DefinitionList
           items={[
@@ -102,8 +106,10 @@ export function TermsOnRecord({
         />
       </div>
 
-      <div>
-        <h3 className="mb-2 text-xl">Scope and assumptions</h3>
+      <Collapsible
+        title="Scope and assumptions"
+        summary={`${c.scope?.inScope?.length ?? 0} in scope, ${c.scope?.outOfScope?.length ?? 0} out of scope, ${c.assumptions?.length ?? 0} assumptions, ${params.length} policy parameters`}
+      >
         <DefinitionList
           items={[
             { term: 'In scope', value: <Bullets items={c.scope?.inScope} /> },
@@ -113,20 +119,19 @@ export function TermsOnRecord({
             { term: 'Assumptions', value: <Bullets items={c.assumptions} /> },
             { term: 'Claim exclusions', value: <Bullets items={c.exclusions} />, note: 'In addition to the policy’s own exclusions.' },
             ...params.map(([k, v]) => ({
-              term: k,
-              value: (
-                <span className="untrusted">
-                  {Array.isArray(v) ? v.join(', ') : typeof v === 'boolean' ? (v ? 'Yes' : 'No') : v}
-                </span>
+              term: paramLabel(k),
+              value: Array.isArray(v) ? (
+                <Bullets items={v.map((x) => optionLabel(k, x))} />
+              ) : (
+                <span className="untrusted">{typeof v === 'boolean' ? (v ? 'Yes' : 'No') : optionLabel(k, v)}</span>
               ),
             })),
           ]}
         />
-      </div>
+      </Collapsible>
 
       {env ? (
-        <div>
-          <h3 className="mb-2 text-xl">Reproduction environment</h3>
+        <Collapsible title="Reproduction environment" summary={`${env.runtime || 'Runtime not stated'}. Run: ${env.reproductionCommand || 'no command'}`}>
           <DefinitionList
             items={[
               { term: 'Runtime', value: env.runtime },
@@ -197,11 +202,14 @@ export function TermsOnRecord({
               },
             ]}
           />
-        </div>
+        </Collapsible>
       ) : null}
 
-      <div>
-        <h3 className="mb-2 text-xl">Rules, evidence and oracle</h3>
+      <Collapsible
+        defaultOpen
+        title="Rules, evidence and oracle"
+        summary={c.evidence ? `Deadline ${formatDate(c.evidence.deadline, 'long')}, ${manifest.policy.id}@${manifest.policy.version}` : undefined}
+      >
         <DefinitionList
           items={[
             {
@@ -276,7 +284,7 @@ export function TermsOnRecord({
               : []),
           ]}
         />
-      </div>
+      </Collapsible>
     </div>
   )
 }

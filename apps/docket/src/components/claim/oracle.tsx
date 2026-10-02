@@ -1,3 +1,5 @@
+'use client'
+
 import type { ClaimDetail } from '@pine/core'
 import { explorerTxUrl, formatAmount, formatDate, REALITY_ANSWER_LABEL, shortHash } from '@pine/core'
 import { COPY } from '@pine/core/copy'
@@ -5,7 +7,7 @@ import { cn } from '@/lib/cn'
 import { DefinitionList } from '@/components/ui/layout'
 import { ExternalLink } from '@/components/ui/external-link'
 import { Notice } from '@/components/ui/notice'
-import { When } from '@/components/ui/when'
+import { When, useClientNow } from '@/components/ui/when'
 import { ARBITRATION_CURRENCY, ARBITRATION_DURATION_NOTE, formatTimeout, INVALID_TOKEN_NOTE } from '@/lib/format'
 
 const ARB_STATUS: Record<string, string> = {
@@ -16,6 +18,7 @@ const ARB_STATUS: Record<string, string> = {
 }
 
 export function OracleSection({ claim }: { claim: ClaimDetail }) {
+  const now = useClientNow()
   const o = claim.oracle
   const params = claim.manifest.claim.oracle
   const bondToken = o?.bondToken ?? params?.bondToken ?? 'xDAI'
@@ -34,7 +37,7 @@ export function OracleSection({ claim }: { claim: ClaimDetail }) {
     )
   }
 
-  const opened = new Date(o.openingTime).getTime() <= Date.now()
+  const opened = now ? new Date(o.openingTime).getTime() <= now.getTime() : o.history.length > 0
   const arb = o.arbitration
   return (
     <div className="space-y-6">

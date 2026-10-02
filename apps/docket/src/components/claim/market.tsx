@@ -7,7 +7,7 @@ import { COPY } from '@pine/core/copy'
 import { useDepth, usePriceHistory } from '@pine/react'
 import { cn } from '@/lib/cn'
 import { ExternalLink } from '@/components/ui/external-link'
-import { Input } from '@/components/ui/field'
+import { Input, Select } from '@/components/ui/field'
 import { Skeleton } from '@/components/ui/layout'
 import { MarginNote } from '@/components/ui/field'
 import { PriceChart } from './price-chart'
@@ -30,6 +30,14 @@ export function MarketSection({ claim }: { claim: ClaimDetail }) {
       </p>
     )
   }
+  if (claim.status === 'publishing' || claim.status === 'failed') {
+    return (
+      <p className="measure text-graphite">
+        The market contract exists, but funding did not finish, so its pools hold little or no liquidity. Any price shown elsewhere would not
+        mean anything yet. Once filing finishes, prices, depth and price impact appear here.
+      </p>
+    )
+  }
   const yes = m.outcomes.find((o) => o.label.toLowerCase().startsWith('yes')) ?? m.outcomes[0]
   const change = yes?.change24h
   const sym = m.collateral.symbol
@@ -47,7 +55,7 @@ export function MarketSection({ claim }: { claim: ClaimDetail }) {
               </span>
             ) : null}
           </p>
-          <div className="mt-6">
+          <div className="mt-6 print:hidden">
             <div role="group" aria-label="Chart range" className="mb-3 inline-flex border border-rule-strong bg-sheet print:hidden">
               {RANGES.map((r) => (
                 <button
@@ -85,7 +93,7 @@ export function MarketSection({ claim }: { claim: ClaimDetail }) {
         </aside>
       </div>
 
-      <div className="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(0,1fr)_17rem] xl:grid-cols-[minmax(0,1fr)_19rem]">
+      <div className="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(0,1fr)_17rem] xl:grid-cols-[minmax(0,1fr)_19rem] print:hidden">
         <ImpactCalculator claimId={claim.id} symbol={sym} />
         <aside>
           <MarginNote title="Why depth matters">
@@ -169,25 +177,17 @@ function ImpactCalculator({ claimId, symbol }: { claimId: string; symbol: string
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         <label className="block">
           <span className="text-sm font-bold">Outcome</span>
-          <select
-            className="mt-1 block h-11 w-full rounded-xs border-2 border-ink bg-sheet px-3"
-            value={outcome}
-            onChange={(e) => setOutcome(e.target.value as 'yes' | 'no')}
-          >
+          <Select className="mt-1" value={outcome} onChange={(e) => setOutcome(e.target.value as 'yes' | 'no')}>
             <option value="yes">Yes tokens</option>
             <option value="no">No tokens</option>
-          </select>
+          </Select>
         </label>
         <label className="block">
           <span className="text-sm font-bold">Direction</span>
-          <select
-            className="mt-1 block h-11 w-full rounded-xs border-2 border-ink bg-sheet px-3"
-            value={side}
-            onChange={(e) => setSide(e.target.value as 'buy' | 'sell')}
-          >
+          <Select className="mt-1" value={side} onChange={(e) => setSide(e.target.value as 'buy' | 'sell')}>
             <option value="buy">Buy</option>
             <option value="sell">Sell</option>
-          </select>
+          </Select>
         </label>
         <label className="block" htmlFor={`${id}-amt`}>
           <span className="text-sm font-bold">Amount in {symbol}</span>

@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState, useSyncExternalStore } from 'react'
+import { useSyncExternalStore } from 'react'
+import { useMounted } from '@/lib/use-mounted'
 import { Popover } from 'radix-ui'
 import { FlaskConical, X } from 'lucide-react'
 import { toast } from 'sonner'
@@ -51,7 +52,7 @@ export function DemoBanner() {
         <span className="inline-flex items-center gap-1.5 rounded-xs bg-flag px-2 py-0.5 text-sm font-[800] text-ink">
           <FlaskConical aria-hidden className="size-4" /> Demo
         </span>
-        <p className="min-w-0 flex-1 text-sm leading-5 text-ink">
+        <p className="min-w-[13rem] flex-1 text-sm leading-5 text-ink">
           <span className="hidden sm:inline">{COPY.demoMode} </span>
           <span className="sm:hidden">Sample data and a simulated wallet. No real funds move.</span>
         </p>
@@ -75,8 +76,7 @@ export function DemoBanner() {
 export function ReviewerControls({ label = 'Reviewer controls' }: { label?: string }) {
   const demoWallet = useDemoWallet()
   const { data } = usePine()
-  const [mounted, setMounted] = useState(false)
-  useEffect(() => setMounted(true), [])
+  const mounted = useMounted()
   if (!mounted || !demoWallet.enabled) return null
   const resettable = data as unknown as { reset?: () => void }
   return (

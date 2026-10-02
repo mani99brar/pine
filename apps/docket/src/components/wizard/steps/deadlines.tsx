@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react'
 import type { EvidenceMechanismId, OracleParams } from '@pine/core'
-import { EVIDENCE_MECHANISMS, formatAmount, formatDate, formatDuration, isEvidenceMechanismEnabled } from '@pine/core'
+import { EVIDENCE_MECHANISMS, formatAmount, formatDate, isEvidenceMechanismEnabled } from '@pine/core'
 import { CHAINS } from '@pine/core/chains'
 import { COPY } from '@pine/core/copy'
 import { cn } from '@/lib/cn'
@@ -22,6 +22,13 @@ function splitUtc(iso: string | undefined): { date: string; time: string } {
 function joinUtc(date: string, time: string): string | undefined {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return undefined
   return `${date}T${time}:00Z`
+}
+
+function humanDuration(ms: number): string {
+  const hours = Math.round(ms / 3600_000)
+  if (hours < 48) return `${hours} hours`
+  const days = Math.round(hours / 24)
+  return `${days} days`
 }
 
 function presetFrom(now: Date, hours: number): string {
@@ -149,7 +156,7 @@ export function DeadlinesStep() {
               </span>
             ) : null}
             {windowMs !== undefined && windowMs > 0 ? (
-              <span className="block text-graphite">Investigators get about {formatDuration(windowMs)} from now.</span>
+              <span className="block text-graphite">Investigators get about {humanDuration(windowMs)} from now.</span>
             ) : null}
           </p>
         ) : null}

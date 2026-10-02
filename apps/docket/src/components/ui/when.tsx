@@ -1,18 +1,46 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useSyncExternalStore } from 'react'
 import { formatDate, formatRelative } from '@pine/core'
 import { cn } from '@/lib/cn'
 
-/** A ticking clock that only starts after mount, so server and client HTML agree. */
-export function useClientNow(intervalMs = 30_000): Date | null {
-  const [now, setNow] = useState<Date | null>(null)
-  useEffect(() => {
-    setNow(new Date())
-    const t = setInterval(() => setNow(new Date()), intervalMs)
-    return () => clearInterval(t)
-  }, [intervalMs])
-  return now
+// One shared clock for the whole page, ticking every 30 seconds while anything listens.
+let current: Date | null = null
+const listeners = new Set<() => void>()
+let timer: ReturnType<typeof setInterval> | null = null
+
+function subscribe(cb: () => void) {
+  listeners.add(cb)
+  if (!timer) {
+    current = new Date()
+    timer = setInterval(() => {
+      current = new Date()
+      listeners.forEach((l) => l())
+    }, 30_000)
+  }
+  return () => {
+    listeners.delete(cb)
+    if (listeners.size === 0 && timer) {
+      clearInterval(timer)
+      timer = null
+    }
+  }
+}
+function getSnapshot(): Date {
+  if (!current) current = new Date()
+  return current
+}
+function getServerSnapshot(): Date | null {
+  return null
+}
+
+/**
+ * The current time, or null during server rendering and hydration so server and client HTML agree.
+ * Updates every 30 seconds. (The argument is kept for call-site readability.)
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function useClientNow(_intervalMs = 30_000): Date | null {
+  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 /**

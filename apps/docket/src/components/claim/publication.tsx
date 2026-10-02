@@ -4,7 +4,8 @@ import { useMemo } from 'react'
 import type { ClaimDetail, TxStep, TxStepId } from '@pine/core'
 import { formatDate, shortHash } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { useTxRunner, useWallet } from '@pine/react'
+import { pineKeys, usePine, useTxRunner, useWallet } from '@pine/react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Check, Lock } from 'lucide-react'
 import { Notice } from '@/components/ui/notice'
 import { Button } from '@/components/ui/button'
@@ -82,8 +83,29 @@ export function PublicationRecovery({ claim }: { claim: ClaimDetail }) {
         .map((s) => ({ id: s.id, ...STEP_COPY[s.id] })),
     [steps],
   )
+  const { data } = usePine()
+  const qc = useQueryClient()
   const runner = useTxRunner(`docket:finish:${claim.id}`, remaining, {
     spendingLimit: claim.funding?.spendingLimit,
+    onDone: async (snap) => {
+      // Demo mode: record the finished filing so the claim moves to its evidence window everywhere in this browser.
+      const writer = data as unknown as { updateClaim?: (id: string, patch: Partial<ClaimDetail>) => void }
+      if (typeof writer.updateClaim === 'function') {
+        const now = new Date().toISOString()
+        writer.updateClaim(claim.id, {
+          status: 'open',
+          publication: {
+            resumable: false,
+            steps: steps.map((s) => {
+              const done = snap.steps.find((x) => x.id === s.id)
+              return done ? { id: s.id, status: done.status === 'skipped' ? 'skipped' : 'confirmed', txHash: done.txHash, at: now } : s
+            }),
+          },
+        })
+      }
+      await qc.invalidateQueries({ queryKey: pineKeys.claim(claim.id) })
+      await qc.invalidateQueries({ queryKey: ['pine', 'claims'] })
+    },
   })
   const marketCreated = steps.some((s) => s.id === 'create_market' && s.status === 'confirmed') || !!claim.market
   const isCreator = !!wallet.address && wallet.address.toLowerCase() === claim.creator.toLowerCase()
@@ -163,7 +185,13 @@ function CompletedSteps({ steps }: { steps: NonNullable<ClaimDetail['publication
             <strong>{STEP_COPY[s.id]?.label ?? s.id}</strong>
           </span>
           <span className={s.status === 'failed' ? 'font-bold text-red' : 'text-graphite'}>
-            {s.status === 'confirmed' ? 'Confirmed' : s.status === 'failed' ? `Failed${s.error ? `: ${s.error}` : ''}` : s.status}
+            {s.status === 'confirmed'
+              ? 'Confirmed'
+              : s.status === 'failed'
+                ? `Failed${s.error ? `: ${s.error.replace(/\.+$/, '')}` : ''}`
+                : s.status === 'skipped'
+                  ? 'Skipped'
+                  : 'Not started'}
             {s.at ? `, ${formatDate(s.at, 'long')}` : ''}
           </span>
         </li>

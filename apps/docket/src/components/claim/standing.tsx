@@ -26,7 +26,7 @@ export function standingSentence(c: ClaimDetail): string {
       return `Filing started but did not finish: ${done} of ${steps.length} steps are confirmed.${created ? ' The market exists, so the terms are already frozen.' : ''}`
     }
     case 'failed':
-      return c.publication?.note ?? 'Filing failed and cannot be resumed.'
+      return 'This filing failed and cannot be resumed. What reached the chain, and why it stopped, is set out under “Filing failed” below.'
     case 'open':
       return timely === 0
         ? 'The evidence window is open. No exhibits have been filed yet.'
@@ -90,6 +90,12 @@ function PrimaryAction({ claim }: { claim: ClaimDetail }) {
           Follow the arbitration
         </ButtonLink>
       ) : null
+    case 'failed':
+      return (
+        <ButtonLink href="/file" variant="secondary" icon={<FilePlus2 aria-hidden />}>
+          Start a new filing
+        </ButtonLink>
+      )
     case 'resolved':
       return (
         <ButtonLink href="#position" variant="secondary" icon={<ArrowDown aria-hidden />}>
@@ -101,9 +107,43 @@ function PrimaryAction({ claim }: { claim: ClaimDetail }) {
   }
 }
 
+/** Name the next event rather than repeating the current stage, which the band above already states. */
+function forwardLooking(claim: ClaimDetail, raw: ReturnType<typeof nextStep>): ReturnType<typeof nextStep> {
+  switch (claim.status) {
+    case 'open':
+      return {
+        ...raw,
+        title: 'The evidence deadline passes',
+        detail: `Until then, anyone may file a reproducible counterexample. Afterward the oracle opens for answers. ${COPY.deadlineIsNotTradingCutoff}`,
+      }
+    case 'awaiting_answer':
+      return { ...raw, title: 'Someone answers the question on Reality.eth' }
+    case 'answer_proposed':
+      return { ...raw, title: 'The answer becomes final, unless challenged' }
+    case 'disputed':
+      return { ...raw, title: 'The latest answer becomes final, unless challenged or escalated' }
+    case 'arbitration':
+      return { ...raw, title: raw.title === 'Appeal period' ? 'The ruling stands, unless appealed' : raw.title === 'Ruling given' ? 'The ruling is reported to Reality.eth' : 'Kleros jurors rule' }
+    case 'publishing':
+      return { ...raw, title: 'The filer finishes filing' }
+    case 'failed':
+      return {
+        ...raw,
+        title: 'Start a new filing',
+        detail: 'A claim that never reached its market cannot be revived. A new filing, with a new deadline, gets a new market.',
+      }
+    case 'resolved':
+      return { ...raw, title: 'Holders redeem' }
+    default:
+      return raw
+  }
+}
+
 export function WhereThisStands({ claim }: { claim: ClaimDetail }) {
   const now = useClientNow(30_000)
-  const step = nextStep(claim, now ?? new Date())
+  const raw = nextStep(claim, now ?? new Date())
+  // When the next step is simply "keep going", name the event that ends the current stage instead.
+  const step = forwardLooking(claim, raw)
   return (
     <section aria-labelledby="standing-title" id="standing" className="print-avoid-break">
       <h2 id="standing-title" className="sr-only">

@@ -56,9 +56,9 @@ export default async function LandingPage() {
     <main id="main" tabIndex={-1} className="outline-none">
       {/* Hero */}
       <section className="border-b border-rule bg-sheet">
-        <div className="mx-auto grid max-w-[86rem] gap-12 px-4 pt-12 pb-14 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:px-10 lg:pt-16 lg:pb-20">
-          <div className="min-w-0 self-center">
-            <h1 className="max-w-[17ch] text-[2.6rem] leading-[2.95rem] font-[800] tracking-[-0.03em] sm:text-4xl">
+        <div className="mx-auto grid max-w-[86rem] items-start gap-12 px-4 pt-12 pb-14 sm:px-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)] lg:px-10 lg:pt-16 lg:pb-20">
+          <div className="min-w-0 lg:pt-4">
+            <h1 className="max-w-[17ch] text-[2.6rem] leading-[3rem] font-[800] tracking-[-0.03em] sm:text-4xl sm:leading-[3.7rem]">
               Put one claim about one commit on the record.
             </h1>
             <p className="mt-6 max-w-[34rem] text-lg leading-8 text-ink">
@@ -82,7 +82,7 @@ export default async function LandingPage() {
 
           <div className="min-w-0">
             {flagship ? (
-              <figure className="border border-rule bg-sheet shadow-[8px_8px_0_var(--color-bond)]">
+              <figure className="border border-rule bg-sheet lg:shadow-[10px_10px_0_var(--color-bond)]">
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-rule px-5 py-3">
                   <span className="flex items-center gap-3">
                     <span className="font-[800] text-violet tabular">{formatClaimNumber(flagship.number)}</span>
@@ -100,6 +100,8 @@ export default async function LandingPage() {
                     idPrefix="hero-q"
                     notesTitle="What binds"
                     text={flagship.manifest.question.text}
+                    compact
+                    collapseAfter={2}
                     annotations={questionAnnotations(flagship.manifest).filter((_, i) => i === 1 || i === 2 || i === 4 || i === 6)}
                   />
                   <p className="mt-5 text-[15px]">

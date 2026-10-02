@@ -54,32 +54,24 @@ export function CostBreakdown({ plan, className, dense = false }: { plan: Fundin
               {!dense ? <p className="text-sm text-graphite">{KIND_META[g.kind].plain}</p> : null}
             </div>
           </div>
-          <table className="mt-2 w-full text-left text-[15px]">
-            <caption className="sr-only">{KIND_META[g.kind].title}</caption>
-            <thead className="sr-only">
-              <tr>
-                <th scope="col">Item</th>
-                <th scope="col">Who pays</th>
-                <th scope="col">Amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-rule border-y border-rule">
-              {g.lines.map((l) => (
-                <tr key={l.key} className="align-top">
-                  <td className="py-2 pr-3">
-                    <span className="font-bold">{l.label}</span>
-                    {!dense ? <span className="block text-sm text-graphite">{l.note}</span> : null}
-                  </td>
-                  <td className="hidden py-2 pr-3 text-sm whitespace-nowrap text-graphite sm:table-cell">{PAYER[l.payer]}</td>
-                  <td className="py-2 text-right whitespace-nowrap tabular">
+          <ul className="mt-2 divide-y divide-rule border-y border-rule text-[15px]">
+            {g.lines.map((l) => (
+              <li key={l.key} className="py-2.5">
+                <div className="flex items-baseline justify-between gap-4">
+                  <span className="font-bold">{l.label}</span>
+                  <span className="shrink-0 text-right whitespace-nowrap tabular">
                     {l.estimate ? <span className="text-graphite">about </span> : null}
                     <strong>{formatAmount(l.amount, { symbol: l.currency, maxDecimals: 6 })}</strong>
-                    {!l.countsTowardLimit ? <span className="block text-xs text-graphite">outside your limit</span> : null}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </span>
+                </div>
+                {!dense ? <p className="mt-0.5 text-sm text-graphite">{l.note}</p> : null}
+                <p className="mt-0.5 text-xs text-graphite">
+                  Paid by {PAYER[l.payer].toLowerCase()}
+                  {!l.countsTowardLimit ? '. Not counted in your spending limit.' : '. Counted in your spending limit.'}
+                </p>
+              </li>
+            ))}
+          </ul>
         </section>
       ))}
     </div>
@@ -94,7 +86,7 @@ export function FundingTotals({ plan, className }: { plan: FundingPlan; classNam
     { k: 'Exposed to loss', v: plan.totals.exposedToLoss, tone: 'text-red', note: 'Your liquidity deposit.' },
     { k: 'Not recoverable', v: plan.totals.nonRecoverable, note: 'Gas and fees, gone in any outcome.' },
     { k: 'Withdrawable, at whatever it is worth then', v: plan.totals.withdrawable },
-    { k: 'Extra if you answer or escalate a dispute', v: plan.totals.reservedIfDisputed, note: 'Not counted in your limit unless you choose to fund it.' },
+    { k: 'Extra if you answer or escalate a dispute', v: plan.totals.reservedIfDisputed, about: true, note: 'Bonds and the ETH arbitration fee, converted at an estimate. Not counted in your limit unless you choose to fund it.' },
   ]
   return (
     <dl className={cn('divide-y divide-rule border-y-2 border-ink', className)}>
@@ -104,7 +96,10 @@ export function FundingTotals({ plan, className }: { plan: FundingPlan; classNam
             <span className={cn(r.strong && 'font-bold')}>{r.k}</span>
             {r.note ? <span className="block text-sm text-graphite">{r.note}</span> : null}
           </dt>
-          <dd className={cn('text-lg font-bold tabular', r.tone)}>{formatAmount(r.v, { symbol: sym, maxDecimals: 4 })}</dd>
+          <dd className={cn('text-lg font-bold whitespace-nowrap tabular', r.tone)}>
+            {'about' in r && r.about ? <span className="text-base font-normal text-graphite">about </span> : null}
+            {formatAmount(r.v, { symbol: sym, maxDecimals: 4 })}
+          </dd>
         </div>
       ))}
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 py-2.5">

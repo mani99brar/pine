@@ -1,6 +1,8 @@
 'use client'
 
 import { Check, ExternalLink as ExternalIcon, Hand, Loader2, Lock, PenLine, RotateCcw, X, SkipForward } from 'lucide-react'
+import { useState } from 'react'
+import type { Hex } from '@pine/core'
 import type { TxRunner, TxRunnerStep } from '@pine/react'
 import { explorerTxUrl, formatAmount, shortHash } from '@pine/core'
 import { cn } from '@/lib/cn'
@@ -61,6 +63,31 @@ function StepMarker({ step, n, awaiting }: { step: TxRunnerStep; n: number; awai
   }
 }
 
+function ManualConfirm({ onConfirm }: { onConfirm: (hash?: Hex) => void }) {
+  const [hash, setHash] = useState('')
+  const valid = hash === '' || /^0x[0-9a-fA-F]{64}$/.test(hash.trim())
+  return (
+    <div className="flex flex-wrap items-end gap-2">
+      <label className="block">
+        <span className="text-sm font-bold">
+          Transaction hash <span className="font-normal text-graphite">(optional)</span>
+        </span>
+        <input
+          value={hash}
+          onChange={(e) => setHash(e.target.value)}
+          placeholder="0x…"
+          aria-invalid={!valid}
+          className="mt-1 block h-10 w-64 max-w-full rounded-xs border-2 border-ink bg-sheet px-2 font-mono text-[13px] aria-[invalid=true]:border-red"
+        />
+      </label>
+      <Button size="sm" disabled={!valid} onClick={() => onConfirm(hash.trim() ? (hash.trim() as Hex) : undefined)}>
+        Mark done and continue
+      </Button>
+      {!valid ? <p className="w-full text-sm text-red">A transaction hash is 0x followed by 64 hexadecimal characters.</p> : null}
+    </div>
+  )
+}
+
 /**
  * Ordered transaction steps with live status. Steps are numbered because they run in sequence.
  */
@@ -111,7 +138,7 @@ export function TxSteps({
                     </span>
                   ) : null}
                 </p>
-                <p className="mt-0.5 text-[15px] leading-6 text-graphite">{s.description}</p>
+                <p className="mt-0.5 text-[15px] leading-6 text-graphite [overflow-wrap:anywhere]">{s.description}</p>
                 <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
                   <span className={cn('font-bold', s.status === 'failed' ? 'text-red' : s.status === 'confirmed' ? 'text-ink' : 'text-graphite')}>
                     {runner.awaitingManual === s.id ? STATUS_TEXT.manual : (STATUS_TEXT[s.status] ?? s.status)}
@@ -133,10 +160,10 @@ export function TxSteps({
                 {s.manual && runner.awaitingManual === s.id ? (
                   <div className="mt-3 border border-violet-line bg-sheet p-3">
                     <p className="text-[15px]">
-                      This step happens on the DEX, outside Pine, the same way Seer&rsquo;s own interface does it. Open the DEX, add the
-                      liquidity there, then come back and mark it done.
+                      Liquidity is added on the exchange (the DEX), not by Pine, the same way Seer&rsquo;s own interface does it. Open the DEX in a
+                      new tab, supply the outcome tokens and collateral there, then come back and mark this step done.
                     </p>
-                    <div className="mt-3 flex flex-wrap items-center gap-3">
+                    <div className="mt-3 flex flex-wrap items-end gap-3">
                       {s.actionUrl ? (
                         <a
                           href={s.actionUrl}
@@ -144,12 +171,11 @@ export function TxSteps({
                           rel="noopener noreferrer nofollow"
                           className="inline-flex h-10 items-center gap-2 rounded-sm border border-rule-strong bg-sheet px-3 text-sm font-bold no-underline shadow-[0_2px_0_var(--color-rule)] hover:bg-bond"
                         >
-                          <ExternalIcon aria-hidden className="size-4" /> Open the DEX in a new tab
+                          <ExternalIcon aria-hidden className="size-4" /> Open the DEX
+                          <span className="sr-only"> (opens in a new tab)</span>
                         </a>
                       ) : null}
-                      <Button size="sm" onClick={() => void runner.confirmManual(s.id)}>
-                        I have added it, continue
-                      </Button>
+                      <ManualConfirm onConfirm={(hash) => void runner.confirmManual(s.id, hash)} />
                       {s.optional ? (
                         <Button size="sm" variant="quiet" onClick={() => runner.skip(s.id)}>
                           Skip this optional step

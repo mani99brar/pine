@@ -4,6 +4,7 @@ import { Providers } from './providers'
 import { Header } from '@/components/shell/header'
 import { Footer } from '@/components/shell/footer'
 import { DemoBanner } from '@/components/shell/demo-banner'
+import { QaMode } from '@/components/shell/qa-mode'
 import { SITE_URL } from '@/lib/site'
 import { auth } from '@/auth'
 import './globals.css'
@@ -12,12 +13,16 @@ const atkinson = Atkinson_Hyperlegible_Next({
   subsets: ['latin', 'latin-ext'],
   variable: '--font-atkinson',
   display: 'swap',
+  adjustFontFallback: false,
+  fallback: ['ui-sans-serif', 'system-ui', 'Segoe UI', 'Helvetica', 'Arial', 'sans-serif'],
 })
 
 const atkinsonMono = Atkinson_Hyperlegible_Mono({
   subsets: ['latin'],
   variable: '--font-atkinson-mono',
   display: 'swap',
+  adjustFontFallback: false,
+  fallback: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
 })
 
 const record = Source_Serif_4({
@@ -72,6 +77,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           Skip to main content
         </a>
         <Providers session={session}>
+          <QaMode />
           <DemoBanner />
           <Header />
           <div className="flex flex-1 flex-col">{children}</div>

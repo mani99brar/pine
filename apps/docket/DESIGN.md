@@ -171,3 +171,14 @@ kleros/gateway-balancer-bot @ 9f3c2e1 (PR #118) · BOT-001@0.1.0 · Filed 1 Oct 
 - **Big-stat hero → an annotated docket entry.** The hero shows a real filed question with numbered annotations, a preview of the "read it as an investigator would" moment. It does not show a headline number.
 - **Mono labels everywhere → mono only for compare-by-character values.**
 - **Focus ring.** Instead of a default blue glow, the focus ring is a Flag-yellow ring with an ink outer ring, a civic-design convention that stays visible on every background.
+
+## Decisions made during screenshot QA
+
+- **Slashed zero kept.** Atkinson Hyperlegible Next's slashed zero cannot be turned off through OpenType features in the Google Fonts build. I kept it on purpose: docket numbers, SHAs and amounts are exactly where a 0/O mix-up costs something.
+- **The hero top-aligns.** The landing hero is top-aligned, and its annotated entry shows two binding-term notes, side by side, behind a "See all binding terms" expander. That way the first viewport holds the headline, the CTA and the record without one column floating in empty space.
+- **The question stays visible.** On the claim page and in review, the annotated question is sticky at xl widths. It stays in view while the reader works down the seven notes.
+- **Long sections fold.** Terms on record fold their long subsections (scope, environment) into disclosures with a one-line summary. Printing opens every disclosure.
+- **"What happens next" names the next event.** It says "The evidence deadline passes" or "The answer becomes final, unless challenged". It never repeats the stage name the band already shows.
+- **Mobile sheets run full width.** Below 640px the claim, wizard and exhibit sheets go full-bleed, so record text keeps about 36 characters a line on a 360px phone.
+- **The header switches to a menu below 1380px**, so a signed-in header (wallet, account and the primary action) never collides with the navigation.
+- **Hydration-safe client state.** Views that depend on browser-only state (session mirror, simulated wallet, local drafts) render a skeleton on the server. Relative times use one shared clock that starts after hydration.

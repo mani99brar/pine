@@ -4,31 +4,38 @@ import type { ReactNode } from 'react'
 import { cn } from '@/lib/cn'
 import { stageView, TONE_CLASSES, type StageTone } from '@/lib/stage'
 
-function iconFor(status: ClaimStatus, outcome?: Outcome) {
-  if (status === 'resolved' && outcome === 'yes') return TriangleAlert
-  if (status === 'resolved' && outcome === 'no') return Minus
-  if (status === 'resolved' && outcome === 'invalid') return Ban
+const ICONS = { TriangleAlert, Minus, Ban, CircleDot, Hourglass, Scale, Gavel, FileWarning, X, Archive, FilePen } as const
+type IconName = keyof typeof ICONS
+
+function iconName(status: ClaimStatus, outcome?: Outcome): IconName {
+  if (status === 'resolved' && outcome === 'yes') return 'TriangleAlert'
+  if (status === 'resolved' && outcome === 'no') return 'Minus'
+  if (status === 'resolved' && outcome === 'invalid') return 'Ban'
   switch (status) {
-    case 'open':
-      return CircleDot
     case 'awaiting_answer':
     case 'answer_proposed':
-      return Hourglass
+      return 'Hourglass'
     case 'disputed':
-      return Scale
+      return 'Scale'
     case 'arbitration':
-      return Gavel
+      return 'Gavel'
     case 'publishing':
-      return FileWarning
+      return 'FileWarning'
     case 'failed':
-      return X
+      return 'X'
     case 'settled':
-      return Archive
+      return 'Archive'
     case 'draft':
-      return FilePen
+      return 'FilePen'
     default:
-      return CircleDot
+      return 'CircleDot'
   }
+}
+
+/** The icon for a stage, chosen from a fixed set. */
+export function StageIcon({ name, className }: { name: IconName; className?: string }) {
+  const Icon = ICONS[name]
+  return <Icon aria-hidden className={className} strokeWidth={2.5} />
 }
 
 /** Compact stage tag for lists. Sentence case, colored left edge. */
@@ -45,7 +52,6 @@ export function StageTag({
 }) {
   const v = stageView(status, outcome)
   const t = TONE_CLASSES[v.tone]
-  const Icon = iconFor(status, outcome)
   return (
     <span
       className={cn(
@@ -56,7 +62,7 @@ export function StageTag({
         className,
       )}
     >
-      <Icon aria-hidden className="size-3.5 shrink-0" strokeWidth={2.5} />
+      <StageIcon name={iconName(status, outcome)} className="size-3.5 shrink-0" />
       <span className="truncate">{short ? v.short : v.label}</span>
     </span>
   )
@@ -78,7 +84,7 @@ export function StageBand({
 }) {
   const v = stageView(status, outcome)
   return (
-    <ToneBand tone={v.tone} className={className} size={size} label={v.label} icon={iconFor(status, outcome)}>
+    <ToneBand tone={v.tone} className={className} size={size} label={v.label} iconName={iconName(status, outcome)}>
       {children}
     </ToneBand>
   )
@@ -87,14 +93,14 @@ export function StageBand({
 export function ToneBand({
   tone,
   label,
-  icon: Icon,
+  iconName: icon,
   children,
   className,
   size = 'md',
 }: {
   tone: StageTone
   label: ReactNode
-  icon?: React.ComponentType<{ className?: string; 'aria-hidden'?: boolean; strokeWidth?: number }>
+  iconName?: IconName
   children?: ReactNode
   className?: string
   size?: 'md' | 'lg'
@@ -105,7 +111,7 @@ export function ToneBand({
       <span aria-hidden className={cn('w-2 shrink-0', t.bar)} />
       <div className={cn('min-w-0 flex-1', size === 'lg' ? 'px-5 py-4' : 'px-4 py-3')}>
         <p className={cn('flex items-center gap-2 font-bold', t.text, size === 'lg' ? 'text-lg' : 'text-base')}>
-          {Icon ? <Icon aria-hidden className={size === 'lg' ? 'size-5' : 'size-4'} strokeWidth={2.5} /> : null}
+          {icon ? <StageIcon name={icon} className={size === 'lg' ? 'size-5 shrink-0' : 'size-4 shrink-0'} /> : null}
           {label}
         </p>
         {children ? <div className="mt-1 text-ink">{children}</div> : null}

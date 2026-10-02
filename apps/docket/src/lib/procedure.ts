@@ -15,6 +15,8 @@ export interface ProcedureStage {
   who: string
   anchor: string
   optional?: boolean
+  /** The procedure stopped before this stage (failed filing) */
+  unreached?: boolean
 }
 
 /** The eight stages of the procedure, in order, with generic explanations (used on landing and glossary too). */
@@ -135,16 +137,16 @@ export function procedureFor(claim: ClaimDetail): ProcedureStage[] {
         atLabel = firstAnswer ? 'Answered' : 'Opens'
         break
       case 'challenge':
-        at = o?.finalizesAt
-        atLabel = state === 'done' ? 'Ended' : at ? 'Ends' : undefined
+        at = state === 'done' && arb?.requestedAt ? arb.requestedAt : o?.finalizesAt
+        atLabel = at ? (state === 'done' ? (arb?.requested ? 'Escalated' : 'Ended') : 'Ends') : undefined
         break
       case 'arbitration':
         at = arb?.requestedAt
         atLabel = at ? 'Requested' : undefined
         break
       case 'final':
-        at = finalAt
-        atLabel = finalAt ? 'Final' : undefined
+        at = finalAt ?? (state !== 'done' ? o?.finalizesAt : undefined)
+        atLabel = at ? (state === 'done' ? 'Final' : 'Expected') : undefined
         break
       case 'settlement':
         at = eventAt(claim, 'redeemed')
@@ -152,6 +154,7 @@ export function procedureFor(claim: ClaimDetail): ProcedureStage[] {
         break
     }
 
+    if (s === 'failed' && p.id !== 'filed') return { ...p, n: i + 1, state: 'upcoming' as const, unreached: true }
     return { ...p, n: i + 1, state, at, atLabel }
   })
 }

@@ -3,7 +3,7 @@
 import { Check, Minus, X } from 'lucide-react'
 import { useEffect, useRef } from 'react'
 import type { ClaimStatus } from '@pine/core'
-import { formatDate } from '@pine/core'
+import { formatCompactUtc } from '@/lib/format'
 import { cn } from '@/lib/cn'
 import type { ProcedureStage, StageState } from '@/lib/procedure'
 
@@ -91,10 +91,12 @@ export function ProcedureRail({ stages, className }: { stages: ProcedureStage[];
                   </span>
                   <span className="block text-sm text-graphite">
                     <span className="sr-only">{STATE_SR[st.state]}. </span>
-                    {st.state === 'skipped'
+                    {st.unreached
+                      ? 'Not reached'
+                      : st.state === 'skipped'
                       ? 'Not needed'
                       : st.at
-                        ? `${st.atLabel ?? ''} ${formatDate(st.at, st.id === 'filed' || st.id === 'settlement' ? 'short' : 'long')}`.trim()
+                        ? `${st.atLabel ?? ''} ${formatCompactUtc(st.at, !(st.id === 'filed' || st.id === 'settlement'))}`.trim()
                         : st.state === 'upcoming'
                           ? 'Not yet scheduled'
                           : null}
@@ -120,7 +122,7 @@ export function ProcedureStrip({ stages, className }: { stages: ProcedureStage[]
   }, [stages])
   return (
     <nav aria-label="Procedure" className={className}>
-      <ol ref={ref} className="no-scrollbar -mx-4 flex snap-x overflow-x-auto px-4 pb-1">
+      <ol ref={ref} className="no-scrollbar relative -mx-4 flex snap-x overflow-x-auto px-4 pb-1">
         {stages.map((st, i) => (
           <li key={st.id} className="flex shrink-0 snap-start items-start">
             <a
@@ -153,7 +155,7 @@ export function ProcedureStrip({ stages, className }: { stages: ProcedureStage[]
               </span>
               <span className="text-xs text-graphite">
                 <span className="sr-only">{STATE_SR[st.state]}. </span>
-                {st.state === 'skipped' ? 'Not needed' : st.at ? formatDate(st.at, 'short') : ''}
+                {st.unreached ? 'Not reached' : st.state === 'skipped' ? 'Not needed' : st.at ? formatCompactUtc(st.at, false) : ''}
               </span>
             </a>
           </li>

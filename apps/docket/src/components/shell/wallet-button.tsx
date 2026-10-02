@@ -7,11 +7,14 @@ import { explorerAddressUrl, formatAmount, shortHash } from '@pine/core'
 import { CHAINS } from '@pine/core/chains'
 import { useClipboard } from '@/components/ui/copy'
 import { cn } from '@/lib/cn'
+import { useMounted } from '@/lib/use-mounted'
 
 export function WalletButton({ className }: { className?: string }) {
   const w = useWallet()
   const { copy, copied } = useClipboard()
+  const mounted = useMounted()
 
+  if (!mounted) return <span className={cn('skeleton block h-9 w-36', className)} aria-hidden />
   if (!w.isConnected || !w.address) {
     return (
       <button

@@ -34,6 +34,7 @@ const X402_OPTIONAL = [
 const emptyShim = './src/lib/shims/x402.js'
 
 const nextConfig: NextConfig = {
+  agentRules: false,
   turbopack: { resolveAlias: Object.fromEntries(X402_OPTIONAL.map((m) => [m, emptyShim])) },
   transpilePackages: ['@pine/core', '@pine/data', '@pine/react', '@pine/server'],
   reactStrictMode: true,

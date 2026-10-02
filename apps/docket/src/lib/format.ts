@@ -23,3 +23,15 @@ export function plural(n: number, one: string, many = `${one}s`) {
 /** Seer always adds a third "Invalid result" outcome token. On invalid, only that token redeems. */
 export const INVALID_TOKEN_NOTE =
   'Every Seer market has a third outcome token, “Invalid result”. If the question resolves invalid, only that token redeems; Yes and No tokens pay nothing.'
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** Compact UTC: "Oct 7, 19:00 UTC" (year added when it differs from the current UTC year). */
+export function formatCompactUtc(iso: string, withTime = true): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return '—'
+  const year = d.getUTCFullYear() !== new Date().getUTCFullYear() ? `, ${d.getUTCFullYear()}` : ''
+  const date = `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}${year}`
+  if (!withTime) return date
+  return `${date}, ${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`
+}

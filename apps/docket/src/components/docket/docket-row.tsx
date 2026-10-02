@@ -5,6 +5,7 @@ import { cn } from '@/lib/cn'
 import { StageTag } from '@/components/ui/stage'
 import { ProcedureMini } from '@/components/claim/procedure'
 import { Relative } from '@/components/ui/when'
+import { formatCompactUtc } from '@/lib/format'
 
 /** A claim as a docket entry: number, filed date, title, parties, stage, deadline, implied chance. */
 export function DocketRow({ claim: c, compact = false }: { claim: ClaimSummary; compact?: boolean }) {
@@ -15,8 +16,8 @@ export function DocketRow({ claim: c, compact = false }: { claim: ClaimSummary; 
     <article
       className={cn(
         'group relative grid gap-x-6 gap-y-2 border-b border-rule bg-sheet px-4 py-4 transition-colors hover:bg-[#fafbfd] sm:px-5',
-        'md:grid-cols-[8.5rem_minmax(0,1fr)_11.5rem]',
-        !compact && 'xl:grid-cols-[8.5rem_minmax(0,1fr)_11.5rem_7.5rem]',
+        'md:grid-cols-[8.5rem_minmax(0,1fr)_12rem]',
+        !compact && 'xl:grid-cols-[8.5rem_minmax(0,1fr)_21rem]',
       )}
       aria-labelledby={`row-${c.id}`}
     >
@@ -51,9 +52,10 @@ export function DocketRow({ claim: c, compact = false }: { claim: ClaimSummary; 
         </div>
       </div>
 
+      <div className={cn('grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-1', !compact && 'xl:grid-cols-[11.5rem_minmax(0,1fr)]')}>
       <div className="text-sm">
         <p className="text-graphite">{open ? 'Evidence deadline' : 'Evidence deadline passed'}</p>
-        <p className="font-bold tabular">{formatDate(c.evidenceDeadline, 'long')}</p>
+        <p className="font-bold tabular">{formatCompactUtc(c.evidenceDeadline)}</p>
         {open ? (
           <p className={cn('font-bold', isClosingSoon(c.evidenceDeadline) ? 'text-ochre' : 'text-graphite')}>
             <Relative at={c.evidenceDeadline} />
@@ -74,6 +76,7 @@ export function DocketRow({ claim: c, compact = false }: { claim: ClaimSummary; 
           )}
         </div>
       ) : null}
+      </div>
     </article>
   )
 }

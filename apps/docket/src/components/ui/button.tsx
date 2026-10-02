@@ -6,7 +6,7 @@ type Variant = 'primary' | 'secondary' | 'quiet' | 'danger' | 'ink'
 type Size = 'sm' | 'md' | 'lg'
 
 const base =
-  'inline-flex items-center justify-center gap-2 font-bold whitespace-nowrap select-none transition-[background-color,box-shadow,color] duration-100 disabled:cursor-not-allowed disabled:opacity-55 [&_svg]:shrink-0'
+  'inline-flex max-w-full items-center justify-center gap-2 text-center leading-tight font-bold select-none transition-[background-color,box-shadow,color] duration-100 disabled:cursor-not-allowed disabled:opacity-55 [&_svg]:shrink-0'
 
 const variants: Record<Variant, string> = {
   // Civic button: solid fill with a 2px darker "press" edge underneath.
@@ -21,9 +21,9 @@ const variants: Record<Variant, string> = {
 }
 
 const sizes: Record<Size, string> = {
-  sm: 'h-9 px-3 text-sm [&_svg]:size-4',
-  md: 'h-11 px-4 text-base [&_svg]:size-[18px]',
-  lg: 'h-13 px-6 text-lg [&_svg]:size-5',
+  sm: 'min-h-9 py-1.5 px-3 text-sm [&_svg]:size-4',
+  md: 'min-h-11 py-2 px-4 text-base [&_svg]:size-[18px]',
+  lg: 'min-h-13 py-2.5 px-6 text-lg [&_svg]:size-5',
 }
 
 export interface ButtonProps extends ComponentProps<'button'> {

@@ -42,8 +42,7 @@ export const Select = forwardRef<HTMLSelectElement, ComponentProps<'select'>>(fu
       ref={ref}
       className={cn(
         control,
-        'h-11 appearance-none bg-[length:12px] bg-[right_0.85rem_center] bg-no-repeat pr-9',
-        "bg-[url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%231a1d2b' stroke-width='2' fill='none'/%3E%3C/svg%3E\")]",
+        'select-chevron h-11 appearance-none pr-9',
         className,
       )}
       {...props}
@@ -65,7 +64,7 @@ export function Checkbox({
       <input
         id={props.id ?? id}
         type="checkbox"
-        className="mt-0.5 size-6 shrink-0 cursor-pointer appearance-none rounded-xs border-2 border-ink bg-sheet bg-center bg-no-repeat checked:bg-ink checked:bg-[url(&quot;data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3 8.5l3.2 3L13 4.5' stroke='white' stroke-width='2.4' fill='none'/%3E%3C/svg%3E&quot;)] disabled:cursor-not-allowed disabled:opacity-50"
+        className="check-input mt-0.5 size-6 shrink-0 cursor-pointer appearance-none rounded-xs border-2 border-ink bg-sheet disabled:cursor-not-allowed disabled:opacity-50"
         {...props}
       />
       <label htmlFor={props.id ?? id} className="min-w-0 cursor-pointer">
@@ -133,7 +132,7 @@ export function Choices<T extends string>({
                 onChange={() => onChange(o.value)}
                 className="peer mt-1 size-5 shrink-0 cursor-pointer appearance-none rounded-full border-2 border-ink bg-sheet checked:border-[6px] checked:border-violet focus-visible:shadow-none! focus-visible:outline-none!"
               />
-              <span className="min-w-0 flex-1">
+              <span className="min-w-0 flex-1 [overflow-wrap:anywhere]">
                 <span className="block font-bold">{o.label}</span>
                 {o.description ? <span className="mt-1 block text-sm text-graphite">{o.description}</span> : null}
                 {o.aside ? <span className="mt-2 block">{o.aside}</span> : null}
@@ -157,7 +156,7 @@ export function Field({
   hint,
   error,
   guidance,
-  guidanceTitle = 'What does this mean?',
+  guidanceTitle,
   optional,
   children,
   className,
@@ -188,7 +187,7 @@ export function Field({
           <details className="group mt-1.5 lg:hidden">
             <summary className="inline-flex items-center gap-1.5 text-sm font-bold text-violet underline underline-offset-4">
               <Info aria-hidden className="size-4" />
-              {guidanceTitle}
+              {guidanceTitle ?? 'What does this mean?'}
             </summary>
             <div className="mt-2 border-l-4 border-violet-line bg-sheet py-1 pl-3 text-sm leading-6 text-ink">{guidance}</div>
           </details>
@@ -202,7 +201,7 @@ export function Field({
         <div className="mt-2">{children}</div>
       </div>
       {guidance ? (
-        <aside aria-label={guidanceTitle} className="hidden lg:block">
+        <aside aria-label={guidanceTitle ?? 'Guidance'} className="hidden pt-0.5 lg:block">
           <MarginNote title={guidanceTitle}>{guidance}</MarginNote>
         </aside>
       ) : (

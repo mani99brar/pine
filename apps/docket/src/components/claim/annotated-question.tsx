@@ -37,6 +37,26 @@ function segment(text: string, annotations: Annotation[]): { segments: Segment[]
   return { segments, found: new Set(hits.map((h) => h.n)) }
 }
 
+const HEX = /(0x[0-9a-fA-F]{8,}|\b[0-9a-f]{40}\b)/g
+
+/** Long hex values (hashes, SHAs, addresses) are set in mono so they read character by character. */
+function WithHex({ text }: { text: string }) {
+  const parts = text.split(HEX)
+  return (
+    <>
+      {parts.map((p, i) =>
+        i % 2 === 1 ? (
+          <code key={i} className="font-mono text-[0.8em] tracking-tight break-all">
+            {p}
+          </code>
+        ) : (
+          <span key={i}>{p}</span>
+        ),
+      )}
+    </>
+  )
+}
+
 /**
  * The question as an investigator reads it: exact text, binding terms marked, numbered notes beside it.
  * Hovering or focusing a note highlights its term, and the reverse.
@@ -48,6 +68,8 @@ export function AnnotatedQuestion({
   className,
   notesTitle = 'What each binding term means',
   layout = 'side',
+  collapseAfter,
+  compact = false,
 }: {
   text: string
   annotations: Annotation[]
@@ -55,13 +77,25 @@ export function AnnotatedQuestion({
   className?: string
   notesTitle?: string
   layout?: 'side' | 'stacked'
+  /** Show only the first N notes until the reader asks for all of them */
+  collapseAfter?: number
+  /** Slightly smaller record type, for previews */
+  compact?: boolean
 }) {
   const [active, setActive] = useState<number | null>(null)
+  const [showAll, setShowAll] = useState(false)
+  const visible = collapseAfter && !showAll ? annotations.slice(0, collapseAfter) : annotations
   const { segments, found } = useMemo(() => segment(text, annotations), [text, annotations])
 
   return (
     <div className={cn('grid gap-x-10 gap-y-6', layout === 'side' && 'xl:grid-cols-[minmax(0,1fr)_21rem]', className)}>
-      <blockquote className="record border-l-4 border-ink pl-5 text-ink sm:pl-6" cite="#manifest">
+      <blockquote
+        className={cn(
+          'record self-start border-l-4 border-ink pl-5 text-ink sm:pl-6',
+          compact && 'text-[1.0625rem] leading-[1.8rem]',
+          layout === 'side' && 'xl:sticky xl:top-6',
+        )}
+      >
         <p className="untrusted">
           {segments.map((s, i) =>
             s.n ? (
@@ -76,19 +110,21 @@ export function AnnotatedQuestion({
                 onBlur={() => setActive(null)}
                 aria-describedby={`${idPrefix}-note-${s.n}`}
               >
-                {s.text}
+                <WithHex text={s.text} />
                 <sup className="term-mark">{s.n}</sup>
               </a>
             ) : (
-              <span key={i}>{s.text}</span>
+              <span key={i}>
+                <WithHex text={s.text} />
+              </span>
             ),
           )}
         </p>
       </blockquote>
       <div>
         <h3 className="text-sm font-bold text-graphite">{notesTitle}</h3>
-        <ol className="mt-2 space-y-1">
-          {annotations.map((a, i) => {
+        <ol className={cn('mt-2', layout === 'stacked' ? 'grid gap-x-4 gap-y-1 sm:grid-cols-2' : 'space-y-1')}>
+          {visible.map((a, i) => {
             const n = i + 1
             return (
               <li
@@ -116,6 +152,16 @@ export function AnnotatedQuestion({
             )
           })}
         </ol>
+        {collapseAfter && annotations.length > collapseAfter ? (
+          <button
+            type="button"
+            onClick={() => setShowAll(!showAll)}
+            aria-expanded={showAll}
+            className="mt-2 text-sm font-bold text-violet underline underline-offset-4"
+          >
+            {showAll ? 'Show fewer' : `See all ${annotations.length} binding terms`}
+          </button>
+        ) : null}
       </div>
     </div>
   )

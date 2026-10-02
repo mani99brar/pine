@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Suspense } from 'react'
 import { Page, Skeleton } from '@/components/ui/layout'
 import { FilingWizard } from '@/components/wizard/wizard'
+import { ClientOnly } from '@/components/ui/client-only'
 
 export const metadata: Metadata = {
   title: 'File a verification',
@@ -21,7 +22,9 @@ export default async function FilingPage({ params }: { params: Promise<{ draftId
           </div>
         }
       >
-        <FilingWizard draftId={decodeURIComponent(draftId)} />
+        <ClientOnly fallback={<Skeleton className="h-96 w-full" />}>
+          <FilingWizard draftId={decodeURIComponent(draftId)} />
+        </ClientOnly>
       </Suspense>
     </Page>
   )

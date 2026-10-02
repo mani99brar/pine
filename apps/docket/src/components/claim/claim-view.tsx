@@ -14,6 +14,7 @@ import { Page, Skeleton, EmptyState } from '@/components/ui/layout'
 import { ButtonLink } from '@/components/ui/button'
 import { HashValue } from '@/components/ui/copy'
 import { Notice } from '@/components/ui/notice'
+import { ClientOnly } from '@/components/ui/client-only'
 import { ClaimHeader } from './claim-header'
 import { ProcedureRail, ProcedureStrip } from './procedure'
 import { WhereThisStands } from './standing'
@@ -43,7 +44,7 @@ function DocSection({
   className?: string
 }) {
   return (
-    <section id={id} aria-labelledby={`${id}-title`} className={cn('scroll-mt-6 border-t-2 border-ink pt-6', className)}>
+    <section id={id} aria-labelledby={`${id}-title`} className={cn('doc-section scroll-mt-6 border-t-2 border-ink pt-6', className)}>
       <div className="mb-5 flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
         <div className="min-w-0 max-w-[46rem]">
           <h2 id={`${id}-title`} className="text-2xl">
@@ -129,8 +130,26 @@ function ClaimDocument({ claim }: { claim: ClaimDetail }) {
           </div>
         </aside>
 
-        <article className="min-w-0 space-y-12 border border-rule bg-sheet px-4 py-6 sm:px-8 sm:py-8 xl:px-12 xl:py-10" data-print="flat">
+        <article className="-mx-4 min-w-0 space-y-12 border-y border-rule bg-sheet px-4 py-6 sm:mx-0 sm:border-x sm:px-8 sm:py-8 xl:px-12 xl:py-10" data-print="flat">
           <WhereThisStands claim={claim} />
+
+          <section className="print-only print-avoid-break" aria-hidden>
+            <h2 className="text-lg font-bold">Procedure</h2>
+            <table className="mt-2 w-full text-left text-[10pt]">
+              <tbody>
+                {stages.map((st) => (
+                  <tr key={st.id} className="border-b border-rule">
+                    <td className="py-1 pr-3 tabular">{st.n}.</td>
+                    <td className="py-1 pr-3 font-bold">{st.title}</td>
+                    <td className="py-1 pr-3">
+                      {st.unreached ? 'Not reached' : st.state === 'done' ? 'Done' : st.state === 'current' ? 'Current stage' : st.state === 'skipped' ? 'Not needed' : st.state === 'failed' ? 'Failed' : 'Not yet'}
+                    </td>
+                    <td className="py-1">{st.at ? `${st.atLabel ?? ''} ${formatDate(st.at, 'long')}` : ''}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
 
           {claim.status === 'publishing' || claim.status === 'failed' ? (
             <DocSection
@@ -138,14 +157,16 @@ function ClaimDocument({ claim }: { claim: ClaimDetail }) {
               title={claim.status === 'failed' ? 'Filing failed' : 'Finish filing'}
               description="Filing happens in ordered steps. Confirmed steps are not repeated."
             >
-              <PublicationRecovery claim={claim} />
+              <ClientOnly fallback={<Skeleton className="h-40 w-full" />}>
+                <PublicationRecovery claim={claim} />
+              </ClientOnly>
             </DocSection>
           ) : null}
 
           <DocSection
             id="question"
             title="The question on record"
-            description="Exactly what the oracle will answer. It is hashed and cannot change. Hover or focus a marked term to see what binds."
+            description="Exactly what the oracle will answer. It is hashed and cannot change. Select a marked term or a numbered note to see what binds."
           >
             <AnnotatedQuestion text={claim.manifest.question.text} annotations={annotations} idPrefix="claim-q" />
             <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-graphite">
@@ -197,7 +218,9 @@ function ClaimDocument({ claim }: { claim: ClaimDetail }) {
               >
                 {claim.status === 'open'
                   ? 'Anyone may investigate the pinned commit and file a reproducible counterexample before the deadline.'
-                  : 'Nobody filed an exhibit before the deadline.'}
+                  : claim.status === 'publishing' || claim.status === 'failed'
+                    ? 'The evidence window opens once filing finishes.'
+                    : 'Nobody filed an exhibit before the deadline.'}
               </EmptyState>
             ) : (
               <div className="space-y-5">
@@ -223,8 +246,10 @@ function ClaimDocument({ claim }: { claim: ClaimDetail }) {
             <MarketSection claim={claim} />
           </DocSection>
 
-          <DocSection id="position" title="Funding and your position">
-            <PositionSection claim={claim} />
+          <DocSection id="position" title="Funding and your position" className="print:hidden">
+            <ClientOnly fallback={<Skeleton className="h-32 w-full" />}>
+              <PositionSection claim={claim} />
+            </ClientOnly>
           </DocSection>
 
           <DocSection id="agent" title="Agent brief" className="print:hidden">
@@ -238,6 +263,9 @@ function ClaimDocument({ claim }: { claim: ClaimDetail }) {
           <Notice tone="neutral" className="print-avoid-break">
             {COPY.noMergeAuthority} {COPY.noAttackAuthorization}
           </Notice>
+          <p className="print-only text-[9pt]">
+            Printed from Pine Docket. Manifest hash {claim.manifestHash}. The binding terms are the hashed manifest, not this printout. All times are UTC.
+          </p>
           <p className="text-sm text-graphite">
             Looking for related work? <Link href={`/docket?repo=${claim.source.owner}/${claim.source.repo}`} className="link">Other claims on {claim.source.owner}/{claim.source.repo}</Link>
           </p>

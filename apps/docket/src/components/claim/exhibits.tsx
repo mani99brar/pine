@@ -115,7 +115,7 @@ export function Exhibit({ evidence: e, index, gatewayUrl }: { evidence: Evidence
         ) : null}
 
         {e.summary ? (
-          <div className="mt-4 max-h-[28rem] overflow-y-auto pr-1 measure">
+          <div className="mt-4 max-h-[26rem] overflow-y-auto border-y border-rule py-3 pr-2 measure" tabIndex={0} aria-label={`Exhibit ${letter} explanation`}>
             <SafeMarkdown>{clamp(e.summary, 6000)}</SafeMarkdown>
           </div>
         ) : null}
@@ -134,7 +134,7 @@ export function Exhibit({ evidence: e, index, gatewayUrl }: { evidence: Evidence
               </div>
               {(['environment', 'expected', 'actual'] as const).map((k) => (
                 <div key={k} className="grid gap-1 py-2.5 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4">
-                  <dt className="font-bold text-graphite capitalize">{k === 'expected' ? 'Expected behavior' : k === 'actual' ? 'Actual behavior' : 'Environment'}</dt>
+                  <dt className="font-bold text-graphite">{k === 'expected' ? 'Expected behavior' : k === 'actual' ? 'Actual behavior' : 'Environment'}</dt>
                   <dd className="untrusted min-w-0 whitespace-pre-wrap">{clamp(e.reproduction?.[k], 2000)}</dd>
                 </div>
               ))}
