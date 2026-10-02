@@ -1,6 +1,6 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { ComposerStage } from '@pine/core'
 import type { ClaimComposer } from '@pine/react'
 import { AlertCircle, ArrowLeft, ArrowRight } from 'lucide-react'
@@ -13,7 +13,7 @@ export const STAGES: { id: ComposerStage; label: string; title: string }[] = [
   { id: 'claim', label: 'Claim', title: 'Write the claim' },
   { id: 'deadlines', label: 'Deadlines', title: 'Set the deadlines' },
   { id: 'funding', label: 'Funding', title: 'Fund the market' },
-  { id: 'review', label: 'Review', title: 'Read it as an investigator would' },
+  { id: 'review', label: 'Review', title: 'Check it before it freezes' },
   { id: 'publish', label: 'Publish', title: 'Publish' },
 ]
 
@@ -30,18 +30,25 @@ export function issueFor(c: ClaimComposer, pathPrefix: string): string | undefin
 }
 
 export function StageIssues({ c, stage, className }: { c: ClaimComposer; stage: ComposerStage; className?: string }) {
+  const [all, setAll] = useState(false)
   const list = issuesFor(c, stage)
   if (!list.length) return null
+  const shown = all ? list : list.slice(0, 5)
   return (
     <div className={cn('rounded-[3px] border-l-[3px] border-lumen bg-lumen-wash px-3.5 py-2.5', className)} role="status">
       <p className="flex items-center gap-1.5 text-[0.84rem] font-[650]">
         <AlertCircle size={14} aria-hidden /> {list.length === 1 ? 'One thing to fix before publishing' : `${list.length} things to fix before publishing`}
       </p>
       <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[0.84rem] text-ink-2">
-        {list.map((i) => (
+        {shown.map((i) => (
           <li key={i.path + i.message}>{i.message}</li>
         ))}
       </ul>
+      {list.length > 5 && (
+        <button type="button" onClick={() => setAll((v) => !v)} className="mt-1.5 text-[0.82rem] font-[650] underline underline-offset-2">
+          {all ? 'Show fewer' : `Show ${list.length - 5} more`}
+        </button>
+      )}
     </div>
   )
 }

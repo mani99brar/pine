@@ -41,18 +41,22 @@ export interface ClaimTileProps {
   /** Stagger delay for the orchestrated board load (ms) */
   settleDelay?: number
   className?: string
+  /** Render as a static preview (composer) instead of a link */
+  preview?: boolean
+  numberLabel?: string
 }
 
 /** A claim on the board. The whole tile is one link; glyphs carry their own text alternatives. */
-export function ClaimTile({ claim, depth, depthLoading, settleDelay, className }: ClaimTileProps) {
+export function ClaimTile({ claim, depth, depthLoading, settleDelay, className, preview, numberLabel }: ClaimTileProps) {
   const resolved = claim.status === 'resolved' || claim.status === 'settled'
   const outcome = resolved ? claim.outcome : undefined
   const hasMarket = claim.yesPrice !== undefined && claim.status !== 'publishing' && claim.status !== 'failed'
   const evidenceOpen = claim.status === 'open'
   const gated = claim.policy.family === 'SC'
 
+  const Root = preview ? PreviewRoot : Link
   return (
-    <Link
+    <Root
       href={`/claims/${claim.id}`}
       className={cn(
         'group relative flex min-w-0 flex-col rounded-[var(--radius-tile)] border border-line bg-sheet px-4 pb-4 pt-3.5 transition-[border-color,box-shadow] duration-150 hover:border-ink hover:shadow-[0_0_0_1px_var(--ink)]',
@@ -60,8 +64,8 @@ export function ClaimTile({ claim, depth, depthLoading, settleDelay, className }
       )}
       style={settleDelay !== undefined ? { animation: `rise-in 420ms cubic-bezier(.2,.8,.2,1) ${Math.max(0, settleDelay - 120)}ms backwards` } : undefined}
     >
-      <div className="flex items-center gap-2">
-        <span className="t-figure text-[0.85rem] text-ink-2">{formatClaimNumber(claim.number)}</span>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+        <span className="t-figure whitespace-nowrap text-[0.85rem] text-ink-2">{numberLabel ?? formatClaimNumber(claim.number)}</span>
         <PolicyMark family={claim.policy.family} code={claim.policy.id} gated={gated} size={14} className="text-[0.8rem]" />
         <span className="ml-auto flex items-center gap-1.5">
           {claim.sponsored && (
@@ -118,7 +122,15 @@ export function ClaimTile({ claim, depth, depthLoading, settleDelay, className }
           )}
         </div>
       </div>
-    </Link>
+    </Root>
+  )
+}
+
+function PreviewRoot({ className, style, children }: { href: string; className?: string; style?: React.CSSProperties; children: React.ReactNode }) {
+  return (
+    <div className={className} style={style}>
+      {children}
+    </div>
   )
 }
 

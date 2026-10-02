@@ -14,6 +14,9 @@ import { OutcomeLabel, OutcomeSwatch, StatusPill } from '@/components/glyphs/Sta
 import { MoveFigure } from '@/components/board/ClaimTile'
 import { ExternalLink, HashChip } from '@/components/ui/interactive'
 import { useDepth } from '@pine/react'
+import { AgentBriefActions } from './InvestigatePanel'
+import { ButtonLink } from '@/components/ui/Button'
+import { Plus } from 'lucide-react'
 import { cn } from '@/lib/cn'
 
 /** Renders the question with its pinned values as code chips, without changing the text. */
@@ -71,9 +74,17 @@ export function ClaimHeader({ claim }: { claim: ClaimDetail }) {
             </span>
           )}
           <span className="text-[0.84rem] text-ink-3">on {chain.name}</span>
+          <span className="ml-auto hidden items-center gap-2 md:flex">
+            <AgentBriefActions claim={claim} compact />
+            {claim.status === 'open' && (
+              <ButtonLink href={`/claims/${claim.id}/evidence`} size="sm" icon={<Plus size={14} aria-hidden />}>
+                Submit evidence
+              </ButtonLink>
+            )}
+          </span>
         </div>
 
-        <h1 className="t-h1 mt-3 max-w-[30ch] [overflow-wrap:anywhere]">{claim.title}</h1>
+        <h1 className="t-h1 mt-3 max-w-[38ch] [overflow-wrap:anywhere]">{claim.title}</h1>
 
         <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.88rem] text-ink-2">
           <ExternalLink href={`https://github.com/${src.owner}/${src.repo}`}>

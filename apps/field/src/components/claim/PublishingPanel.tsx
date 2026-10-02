@@ -10,7 +10,6 @@ import { DEFAULT_INITIAL_YES_PRICE, DEFAULT_PRICE_RANGE, useTxRunner, usePine, u
 import { CircleSlash, RotateCw, Wrench } from 'lucide-react'
 import { TxSteps } from '@/components/tx/TxSteps'
 import { Button, ButtonLink } from '@/components/ui/Button'
-import { Note } from '@/components/ui/primitives'
 import { DemoFailToggle } from '@/components/tx/DemoFailToggle'
 import { cn } from '@/lib/cn'
 
@@ -76,10 +75,12 @@ export function PublishingPanel({ claim }: { claim: ClaimDetail }) {
           <CircleSlash size={20} aria-hidden /> Publication failed
         </h2>
         <p className="mt-2 max-w-[70ch] text-ink-2">
-          {pub?.note ?? 'Creation stopped and cannot be resumed.'} Nothing beyond the confirmed steps below exists on-chain, and no market can be traded or answered.
+          {pub?.note ?? 'Creation stopped and cannot be resumed. Nothing beyond the confirmed steps below exists on-chain, and no market can be traded or answered.'}
         </p>
-        <StaticSteps claim={claim} />
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="mt-5">
+          <StaticSteps claim={claim} />
+        </div>
+        <div className="mt-6 flex flex-wrap gap-3">
           <ButtonLink href={`/compose?from=${claim.id}`}>Start a new claim from these terms</ButtonLink>
           <ButtonLink href="/drafts" variant="secondary">
             Drafts and publications
@@ -161,7 +162,7 @@ function StaticSteps({ claim, only }: { claim: ClaimDetail; only?: 'confirmed' }
           <span aria-hidden className={cn('h-2.5 w-2.5 shrink-0 translate-y-[1px] rounded-full', s.status === 'confirmed' ? 'bg-ink' : s.status === 'failed' ? 'border-2 border-flare-ink' : 'border-2 border-line-strong')} />
           <span className="font-[600]">{STEP_LABEL[s.id] ?? s.id}</span>
           <span className={s.status === 'failed' ? 'font-[650] text-flare-ink' : 'text-ink-3'}>
-            {s.status}
+            {s.status === 'idle' ? 'not started' : s.status === 'awaiting_signature' ? 'waiting for signature' : s.status}
             {s.at ? `, ${formatDate(s.at, 'long')}` : ''}
           </span>
           {s.error && <span className="untrusted w-full pl-5 text-[0.8rem] text-ink-2 [white-space:normal]">{s.error}</span>}

@@ -6,7 +6,6 @@ import { formatAmount, formatPrice, priceImpact } from '@pine/core'
 import { useDepth } from '@pine/react'
 import { Segmented, Slider, ExternalLink } from '@/components/ui/interactive'
 import { TensionBar } from '@/components/glyphs/TensionBar'
-import { priceAfterTrade } from '@/lib/depth'
 import { cn } from '@/lib/cn'
 
 /** Log-scale mapping for the size slider: 0..100 → 1..max */
@@ -33,11 +32,12 @@ export function ImpactSimulator({ claim }: { claim: ClaimDetail }) {
   const amount = sizeFromSlider(slider, max)
 
   const res = depth ? priceImpact(depth, side, amount) : undefined
-  const after = priceAfterTrade(depth, side, amount)
+  const after = res && res.tokens > 0 ? res.worstPrice : depth?.mid
   // Show the move on the YES rope regardless of which token is traded.
   const yesNow = depth ? (outcome === 'yes' ? depth.mid : 1 - depth.mid) : claim.yesPrice
   const yesAfter = after === undefined ? undefined : outcome === 'yes' ? after : 1 - after
-  const impactPts = res ? Math.abs(res.impact) * 100 : 0
+  const slipPts = res && depth ? Math.abs(res.avgPrice - depth.mid) * 100 : 0
+  const relPct = res ? res.impact * 100 : 0
 
   return (
     <section aria-labelledby="impact-title" className="rounded-[var(--radius-tile)] border border-line bg-sheet p-5">
@@ -109,19 +109,20 @@ export function ImpactSimulator({ claim }: { claim: ClaimDetail }) {
                 <dd className="t-figure mt-0.5 text-[1.3rem]">{formatPrice(res.avgPrice)}</dd>
               </div>
               <div>
-                <dt className="text-[0.78rem] text-ink-3">Price impact</dt>
-                <dd className={cn('t-figure mt-0.5 text-[1.3rem]', impactPts >= 5 ? 'text-lumen-ink' : 'text-ink')}>{impactPts.toFixed(1)} pts</dd>
+                <dt className="text-[0.78rem] text-ink-3">Last fill moves it to</dt>
+                <dd className="t-figure mt-0.5 text-[1.3rem]">{formatPrice(res.worstPrice)}</dd>
               </div>
               <div>
-                <dt className="text-[0.78rem] text-ink-3">Fills</dt>
-                <dd className="t-figure mt-0.5 text-[1.3rem]">
-                  {formatAmount(res.filled, { maxDecimals: 0 })} <span className="font-sans text-[0.8rem] font-[450] text-ink-3">{symbol}</span>
+                <dt className="text-[0.78rem] text-ink-3">Slippage vs mid {formatPrice(depth.mid)}</dt>
+                <dd className={cn('t-figure mt-0.5 text-[1.3rem]', slipPts >= 5 ? 'text-lumen-ink' : 'text-ink')}>
+                  {slipPts.toFixed(1)} pts <span className="font-sans text-[0.75rem] font-[450] text-ink-3">({relPct.toFixed(0)}% relative)</span>
                 </dd>
               </div>
               <div>
-                <dt className="text-[0.78rem] text-ink-3">Executable at this size</dt>
+                <dt className="text-[0.78rem] text-ink-3">Fills</dt>
                 <dd className={cn('mt-0.5 text-[0.95rem] font-[650]', res.executable ? 'text-ink' : 'text-flare-ink')}>
-                  {res.executable ? 'Yes, the book can fill it' : 'No, the book runs out'}
+                  {res.executable ? 'All of it' : `Only ${formatAmount(res.filled, { maxDecimals: 0 })} ${symbol}`}
+                  <span className="block text-[0.75rem] font-[450] text-ink-3">{formatAmount(res.tokens, { maxDecimals: 1 })} tokens</span>
                 </dd>
               </div>
             </dl>

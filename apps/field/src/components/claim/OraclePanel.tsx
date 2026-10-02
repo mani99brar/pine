@@ -26,14 +26,28 @@ function answerText(a: RealityAnswer): string {
  * Bond ladder: each answer is a step, its height the bond on a doubling (log2) scale. Reading left to
  * right shows how the dispute escalated, then the arbitration step if one was requested.
  */
-export function BondLadder({ history, minBond, token, arbitration }: { history: OracleAnswerEntry[]; minBond: string; token: string; arbitration?: { requested: boolean; cost: string; currency: string } }) {
+export function BondLadder({
+  history,
+  minBond,
+  token,
+  arbitration,
+  next,
+}: {
+  history: OracleAnswerEntry[]
+  minBond: string
+  token: string
+  arbitration?: { requested: boolean; cost: string; currency: string }
+  /** The minimum bond for the next challenge, drawn as a dashed ghost step */
+  next?: string
+}) {
   const min = Math.max(Number(minBond) || 1, 1e-9)
   const levels = history.map((h) => Math.max(0, Math.log2(Math.max(Number(h.bond), min) / min)))
-  const top = Math.max(3, ...levels.map((l) => l + 1))
+  const nextLevel = next ? Math.max(0, Math.log2(Math.max(Number(next), min) / min)) : undefined
+  const top = Math.max(3, ...levels.map((l) => l + 1), nextLevel !== undefined ? nextLevel + 1 : 0)
   const H = 150
   return (
     <figure aria-label="Bond escalation">
-      <div className="flex items-end gap-1.5 overflow-x-auto pb-1" style={{ minHeight: H + 64 }}>
+      <div className="flex items-end gap-1.5 relative overflow-x-auto pb-1" style={{ minHeight: H + 64 }}>
         {history.map((h, i) => {
           const hh = Math.round(((levels[i]! + 1) / top) * H)
           return (
@@ -48,6 +62,17 @@ export function BondLadder({ history, minBond, token, arbitration }: { history: 
             </div>
           )
         })}
+        {next && nextLevel !== undefined && !arbitration?.requested && (
+          <div className="flex w-[clamp(4.5rem,18%,7.5rem)] shrink-0 flex-col items-stretch" aria-hidden>
+            <p className="t-figure mb-1 text-center text-[1rem] text-ink-3">
+              ≥{formatAmount(next, { maxDecimals: 3 })}
+              <span className="ml-1 font-sans text-[0.7rem] font-[500]">{token}</span>
+            </p>
+            <div className="rounded-t-[2px] border-[1.5px] border-dashed border-ink-3" style={{ height: Math.round(((nextLevel + 1) / top) * H) }} />
+            <p className="mt-1.5 text-center text-[0.75rem] font-[650] leading-tight text-ink-3">Next challenge</p>
+            <p className="text-center text-[0.7rem] text-ink-3">any other answer</p>
+          </div>
+        )}
         {arbitration?.requested && (
           <div className="flex w-[clamp(4.5rem,18%,7.5rem)] shrink-0 flex-col items-stretch">
             <p className="t-figure mb-1 text-center text-[1rem]">
@@ -93,7 +118,7 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
   return (
     <div className="grid gap-8">
       {/* Current state */}
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)]">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] lg:items-start">
         <div className="rounded-[var(--radius-tile)] border border-line bg-sheet p-5">
           <h3 className="t-h3">Where the answer stands</h3>
           {o.isFinalized && o.finalAnswer ? (
@@ -105,10 +130,8 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
               </span>
             </p>
           ) : last && o.currentAnswer ? (
-            <div className="mt-3 flex flex-wrap items-center gap-5">
-              {o.finalizesAt && !arb.requested && (
-                <TimeRing start={last.at} end={o.finalizesAt} size={64} variant="challenge" />
-              )}
+            <div className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] items-start gap-5">
+              {o.finalizesAt && !arb.requested ? <TimeRing start={last.at} end={o.finalizesAt} size={64} variant="challenge" /> : <span aria-hidden />}
               <div className="min-w-0">
                 <p className="flex items-center gap-2 font-[650]">
                   <span aria-hidden className={cn('h-4 w-2.5 rounded-[1px]', answerFill(o.currentAnswer))} />
@@ -171,7 +194,13 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
           <p className="mt-4 text-[0.9rem] text-ink-2">No answers yet. The first answer needs at least {o.minBond} {o.bondToken}.</p>
         ) : (
           <div className="mt-5">
-            <BondLadder history={o.history} minBond={o.minBond} token={o.bondToken} arbitration={{ requested: arb.requested, cost: arb.cost || arbCfg.feeEstimate, currency: arbCfg.feeCurrency }} />
+            <BondLadder
+              history={o.history}
+              minBond={o.minBond}
+              token={o.bondToken}
+              arbitration={{ requested: arb.requested, cost: arb.cost || arbCfg.feeEstimate, currency: arbCfg.feeCurrency }}
+              next={!o.isFinalized && !arb.requested ? nextBond : undefined}
+            />
           </div>
         )}
         {o.history.length > 0 && (
@@ -225,8 +254,8 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
           </>
         ) : (
           <p className="mt-2 max-w-[70ch] text-[0.9rem] text-ink-2">
-            Not requested. If an answer is contested, anyone can request arbitration on {l1.name} by paying about {arbCfg.feeEstimate} {arbCfg.feeCurrency} through {arbCfg.requestContractName}. A
-            first ruling typically takes about {arbCfg.typicalRulingDays} days and each appeal about {arbCfg.typicalAppealDays} more.
+            Not requested. If an answer is contested, anyone can request arbitration on {l1.name} by paying about {arbCfg.feeEstimate} {arbCfg.feeCurrency}. A first ruling
+            typically takes about {arbCfg.typicalRulingDays} days and each appeal about {arbCfg.typicalAppealDays} more.
             {arbCfg.bridgeDelayNote ? ` ${arbCfg.bridgeDelayNote}` : ''}
           </p>
         )}

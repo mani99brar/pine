@@ -51,7 +51,7 @@ export function DepthChart({ depth, symbol, height = 200, loading }: { depth?: D
   }
 
   const within5 = depthByBand(depth, [0.05])[0] ?? 0
-  const xticks = [lo, (lo + mid) / 2, mid, (mid + hi) / 2, hi]
+  const xticks = [...new Set([lo, (lo + mid) / 2, mid, (mid + hi) / 2, hi])].filter((t) => t === mid || Math.abs(x(t) - x(mid)) > 56)
 
   return (
     <div ref={ref} className="w-full">

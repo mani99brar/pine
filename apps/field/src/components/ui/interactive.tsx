@@ -113,7 +113,7 @@ export function CodeBlock({ code, label, className }: { code: string; label?: st
   return (
     <div className={cn('group relative rounded-[var(--radius-tile)] bg-ink text-on-ink', className)}>
       {label && <div className="border-b border-white/10 px-3 py-1.5 text-[0.75rem] text-on-ink/70">{label}</div>}
-      <pre className="t-code overflow-x-auto px-3 py-2.5 pr-11 text-[0.8rem] leading-[1.55] whitespace-pre-wrap [overflow-wrap:anywhere]">
+      <pre className="t-code relative overflow-x-auto px-3 py-2.5 pr-11 text-[0.8rem] leading-[1.55] whitespace-pre-wrap [overflow-wrap:anywhere]">
         <code>{code}</code>
       </pre>
       <CopyButton
@@ -243,7 +243,7 @@ export const Tabs = RTabs.Root
 
 export function TabList({ children, label, className }: { children: ReactNode; label: string; className?: string }) {
   return (
-    <RTabs.List aria-label={label} className={cn('scrollbar-none -mx-4 flex gap-1 overflow-x-auto border-b border-line px-4 sm:mx-0 sm:px-0', className)}>
+    <RTabs.List aria-label={label} className={cn('scrollbar-none relative flex gap-1 overflow-x-auto border-b border-line', className)}>
       {children}
     </RTabs.List>
   )

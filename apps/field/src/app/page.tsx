@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { Bot, GitCommitHorizontal, Plus } from 'lucide-react'
 import { COPY } from '@pine/core/copy'
-import { HeroLive } from '@/components/landing/HeroLive'
+import { GlyphWall } from '@/components/landing/GlyphWall'
 import { BoardPreview } from '@/components/landing/BoardPreview'
 import { LifecycleRope } from '@/components/landing/Lifecycle'
 import { ButtonLink } from '@/components/ui/Button'
@@ -10,14 +10,14 @@ import { OutcomeSwatch } from '@/components/glyphs/Status'
 export default function LandingPage() {
   return (
     <>
-      {/* Hero */}
+      {/* Hero: a short headline, then the board itself */}
       <section className="border-b border-line-strong">
-        <div className="mx-auto max-w-[1320px] px-4 pb-14 pt-12 sm:px-6 sm:pt-16 lg:pb-20">
-          <h1 className="t-display-xl max-w-[16ch]">Pin a commit. Make one claim. Let the field try to break it.</h1>
-          <div className="mt-7 grid gap-8 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
-            <p className="max-w-[60ch] text-[1.12rem] leading-[1.55] text-ink-2">
-              Pine Field is an open board of bounded claims about exact commits. Each claim opens a prediction market on one question: will anyone
-              demonstrate a reproducible counterexample before an absolute UTC deadline?
+        <div className="mx-auto flex max-w-[1320px] flex-col px-4 pb-14 pt-8 sm:px-6 sm:pt-14 lg:pb-16">
+          <h1 className="t-display-xl order-1 max-w-[20ch]">Every claim here is an open challenge.</h1>
+          <div className="order-3 mt-6 grid gap-6 sm:order-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <p className="max-w-[62ch] text-[1.08rem] leading-[1.55] text-ink-2">
+              Each one pins an exact commit and one bounded requirement, with live odds on whether anyone demonstrates a reproducible counterexample before an absolute UTC
+              deadline. Teams put claims up; investigators and agents try to break them.
             </p>
             <div className="flex flex-wrap gap-3">
               <ButtonLink href="/board" size="lg">
@@ -28,7 +28,9 @@ export default function LandingPage() {
               </ButtonLink>
             </div>
           </div>
-          <HeroLive />
+          <div className="order-2 sm:order-3">
+            <GlyphWall />
+          </div>
         </div>
       </section>
 
@@ -72,13 +74,13 @@ export default function LandingPage() {
 
       {/* Live board */}
       <section className="mx-auto max-w-[1320px] px-4 pt-20 sm:px-6" aria-labelledby="on-board">
-        <div className="mb-8 max-w-[60ch]">
+        <div className="mb-8">
           <h2 id="on-board" className="t-display-l">
-            On the board now
+            The whole field at a glance
           </h2>
-          <p className="mt-3 text-ink-2">
+          <p className="mt-3 max-w-[60ch] text-ink-2">
             Each ring is an open claim. Higher means the market leans toward an accepted counterexample; further left means less time to submit evidence;
-            bigger means more executable depth.
+            bigger means more collateral is tradable near the price.
           </p>
         </div>
         <BoardPreview />
@@ -96,7 +98,7 @@ export default function LandingPage() {
       <section className="mx-auto max-w-[1320px] px-4 pt-20 sm:px-6" aria-labelledby="meaning">
         <div className="grid gap-10 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
           <div>
-            <h2 id="meaning" className="t-display-l max-w-[14ch]">
+            <h2 id="meaning" className="t-display-l max-w-[18ch]">
               What the result does and does not say
             </h2>
             <p className="mt-4 max-w-[52ch] text-ink-2">{COPY.notAReview}</p>
@@ -109,8 +111,8 @@ export default function LandingPage() {
             {(
               [
                 ['yes', COPY.outcome.yes, COPY.outcomeLong.yes, 'Bad news for the code, not an alarm: someone showed the exact violation, reproducibly, in time.'],
-                ['no', COPY.outcome.no, COPY.outcomeLong.no, COPY.noIsNotSafety],
-                ['invalid', COPY.outcome.invalid, COPY.outcomeLong.invalid, COPY.invalidIsNotRefund],
+                ['no', COPY.outcome.no, COPY.outcomeLong.no, 'A held claim, not a clean bill of health: nothing outside this one bounded claim was examined.'],
+                ['invalid', COPY.outcome.invalid, COPY.outcomeLong.invalid, 'Usually the sign of an ambiguous question or a refusal to arbitrate. Tight, bounded wording is the best protection.'],
               ] as const
             ).map(([k, title, long, caveat]) => (
               <li key={k} className="grid grid-cols-[auto_1fr] gap-4 rounded-[var(--radius-tile)] border border-line bg-sheet p-5">

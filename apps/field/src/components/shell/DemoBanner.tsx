@@ -43,9 +43,12 @@ export function DemoBanner() {
   const armed = dw.pendingFailure !== null
   return (
     <div role="region" aria-label="Demo mode" className="border-b border-ink/20 bg-lumen text-[#161a33]">
-      <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-2 text-[0.84rem] sm:px-6">
+      <div className="mx-auto flex max-w-[1320px] flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 text-[0.8rem] sm:gap-x-4 sm:px-6 sm:text-[0.84rem]">
         <FlaskConical size={15} aria-hidden className="shrink-0" />
-        <p className="min-w-0 flex-1 basis-[16rem] font-[550]">{COPY.demoMode}</p>
+        <p className="min-w-0 flex-1 basis-[12rem] font-[550]">
+          <span className="sm:hidden">Demo mode: sample data, simulated wallet, no real funds.</span>
+          <span className="hidden sm:inline">{COPY.demoMode}</span>
+        </p>
         <button
           type="button"
           onClick={() => dw.failNext()}
@@ -54,7 +57,12 @@ export function DemoBanner() {
           className="inline-flex h-7 items-center gap-1.5 rounded-full border-[1.5px] border-[#161a33] px-2.5 font-[650] hover:bg-[#161a33]/10 disabled:bg-[#161a33] disabled:text-[#ffc21a]"
         >
           <span aria-hidden className={armed ? 'h-2 w-2 rounded-full bg-[#ffc21a]' : 'h-2 w-2 rounded-full border-[1.5px] border-[#161a33]'} />
-          {armed ? 'Next transaction will fail' : 'Simulate a failure on the next transaction'}
+          {armed ? 'Next transaction will fail' : (
+            <>
+              <span className="sm:hidden">Fail next transaction</span>
+              <span className="hidden sm:inline">Simulate a failure on the next transaction</span>
+            </>
+          )}
         </button>
         <button type="button" onClick={dismiss} className="-mr-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full hover:bg-[#161a33]/10" aria-label="Dismiss demo notice">
           <X size={15} aria-hidden />

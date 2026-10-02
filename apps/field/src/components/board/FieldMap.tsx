@@ -48,13 +48,13 @@ export function FieldMap({
       </figcaption>
       <div className="grid grid-cols-[22px_1fr] gap-x-3">
         {/* y axis: a vertical tension bar */}
-        <div className="relative" style={{ height }} aria-hidden>
+        <div className="relative" style={{ height: `min(${height}px, 105vw)` }} aria-hidden>
           <span className="absolute left-0 right-0 top-0 h-[2px] bg-ink" />
           <span className="hatch-yes absolute left-[5px] right-[5px] top-[4px]" style={{ height: `calc(50% - 6px)` }} />
           <span className="absolute left-[5px] right-[5px] bg-cobalt" style={{ top: 'calc(50% + 2px)', bottom: 4 }} />
           <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-ink" />
         </div>
-        <div className="relative min-w-0 rounded-[var(--radius-tile)] border border-line bg-sheet" style={{ height }}>
+        <div className="relative min-w-0 rounded-[var(--radius-tile)] border border-line bg-sheet" style={{ height: `min(${height}px, 105vw)` }}>
           {/* gridlines */}
           <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" aria-hidden>
             {[0.25, 0.5, 0.75].map((y) => (

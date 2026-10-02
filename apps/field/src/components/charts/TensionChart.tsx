@@ -51,12 +51,15 @@ export function TensionChart({
   range,
   height = 300,
   loading,
+  fit = true,
 }: {
   points: PricePoint[]
   events: TimelineEvent[]
   range: PriceRange
   height?: number
   loading?: boolean
+  /** Zoom the vertical axis to the data (true) or show the full 0–100% scale */
+  fit?: boolean
 }) {
   const [ref, width] = useWidth<HTMLDivElement>()
   const uid = useId().replace(/:/g, '')
@@ -68,12 +71,21 @@ export function TensionChart({
   const t1 = data[data.length - 1]?.t ?? 1
   const iw = Math.max(10, width - M.left - M.right)
   const ih = height - M.top - M.bottom
+  const dataMax = data.reduce((m, d) => Math.max(m, d.yes), 0)
+  const dataMin = data.reduce((m, d) => Math.min(m, d.yes), 1)
+  const top = fit ? Math.min(1, Math.max(0.2, Math.ceil((dataMax + 0.06) * 20) / 20)) : 1
+  const bottom = fit ? Math.max(0, Math.min(top - 0.2, Math.floor((dataMin - 0.06) * 20) / 20)) : 0
   const x = (t: number) => M.left + ((t - t0) / Math.max(1, t1 - t0)) * iw
-  const y = (p: number) => M.top + (1 - p) * ih
+  const y = (p: number) => M.top + (1 - (Math.min(top, Math.max(bottom, p)) - bottom) / (top - bottom)) * ih
+  const span = top - bottom
+  const tickStep = [0.01, 0.02, 0.05, 0.1, 0.2, 0.25].find((st) => span / st <= 6) ?? 0.25
+  const labelVals: number[] = []
+  for (let v = Math.ceil(bottom / tickStep - 1e-9) * tickStep; v <= top + 1e-9; v += tickStep) labelVals.push(Math.round(v * 1000) / 1000)
+  const gridVals = labelVals.filter((v) => v > bottom + 1e-9 && v < top - 1e-9)
 
   const line = data.map((d, i) => `${i === 0 ? 'M' : 'L'}${x(d.t).toFixed(1)},${y(d.yes).toFixed(1)}`).join('')
-  const yesArea = data.length ? `${line}L${x(t1).toFixed(1)},${y(0)}L${x(t0).toFixed(1)},${y(0)}Z` : ''
-  const noArea = data.length ? `${line}L${x(t1).toFixed(1)},${y(1)}L${x(t0).toFixed(1)},${y(1)}Z` : ''
+  const yesArea = data.length ? `${line}L${x(t1).toFixed(1)},${y(bottom)}L${x(t0).toFixed(1)},${y(bottom)}Z` : ''
+  const noArea = data.length ? `${line}L${x(t1).toFixed(1)},${y(top)}L${x(t0).toFixed(1)},${y(top)}Z` : ''
 
   const pinned = useMemo(
     () =>
@@ -88,8 +100,8 @@ export function TensionChart({
   const hp = hover !== null ? data[hover] : undefined
   const first = data[0]
   const last = data[data.length - 1]
-  const min = data.reduce((m, d) => Math.min(m, d.yes), 1)
-  const max = data.reduce((m, d) => Math.max(m, d.yes), 0)
+  const min = dataMin
+  const max = dataMax
   const summary = last && first
     ? `Implied chance of an accepted counterexample over ${range === 'all' ? 'the market lifetime' : `the last ${range}`}: from ${formatPrice(first.yes)} to ${formatPrice(last.yes)}, low ${formatPrice(min)}, high ${formatPrice(max)}. ${pinned.length} events marked.`
     : 'No price history yet.'
@@ -157,15 +169,15 @@ export function TensionChart({
               <path d={yesArea} fill={`url(#h-${uid})`} />
             </g>
             {/* gridlines */}
-            {[0.25, 0.5, 0.75].map((g) => (
+            {gridVals.map((g) => (
               <g key={g}>
                 <line x1={M.left} x2={M.left + iw} y1={y(g)} y2={y(g)} stroke="var(--sheet)" strokeOpacity={0.9} strokeWidth={1} />
                 <line x1={M.left} x2={M.left + iw} y1={y(g)} y2={y(g)} stroke="var(--line-strong)" strokeDasharray="2 4" />
               </g>
             ))}
-            {[0, 0.25, 0.5, 0.75, 1].map((g) => (
+            {labelVals.map((g) => (
               <text key={g} x={M.left - 8} y={y(g) + 4} textAnchor="end" className="t-figure" fontSize={11.5} fill="var(--ink-3)">
-                {Math.round(g * 100)}%
+                {Math.round(g * 1000) / 10}%
               </text>
             ))}
             {/* anchors: the chart is bounded like the bar */}
@@ -268,7 +280,7 @@ export function TensionChart({
           )}
         </div>
       )}
-      <p className="mt-2 text-[0.75rem] text-ink-3">Times in UTC. Pins: M market created, E evidence, D evidence deadline, A answer, C challenge, K arbitration, R ruling, F finalized.</p>
+      <p className="mt-2 text-[0.75rem] text-ink-3">{fit && (top < 1 || bottom > 0) ? `Vertical axis zoomed to ${Math.round(bottom * 100)}–${Math.round(top * 100)}%. ` : ''}Times in UTC. Pins: M market created, E evidence, D evidence deadline, A answer, C challenge, K arbitration, R ruling, F finalized.</p>
     </div>
   )
 }

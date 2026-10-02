@@ -103,7 +103,7 @@ export function BoardView() {
         <dl className="grid grid-cols-3 gap-x-8 gap-y-2" aria-live="polite">
           <BoardStat label="Open now" value={claimsQ.isLoading ? '…' : String(openItems.length)} />
           <BoardStat label="Close within 24 h" value={claimsQ.isLoading ? '…' : String(closingSoon)} accent={closingSoon > 0} />
-          <BoardStat label={`${symbol} executable ±5 pts`} value={claimsQ.isLoading ? '…' : formatAmount(executable, { compact: executable >= 10000, maxDecimals: 0 })} />
+          <BoardStat label={`${symbol} tradable within 5 pts of price`} value={claimsQ.isLoading ? '…' : formatAmount(executable, { compact: executable >= 10000, maxDecimals: 0 })} />
         </dl>
       </div>
 
@@ -128,7 +128,7 @@ export function BoardView() {
               value={searchDraft}
               onChange={(e) => setSearchDraft(e.target.value)}
               onBlur={() => searchDraft.trim() !== (s.q ?? '') && set({ q: searchDraft.trim() || null })}
-              placeholder="Search claims, repos, SHAs"
+              placeholder="Search the board"
               className="h-10 w-full rounded-full border-[1.5px] border-line-strong bg-sheet pl-9 pr-9 text-[0.94rem] placeholder:text-ink-3 focus:border-ink focus:outline-none focus-visible:shadow-[0_0_0_3px_var(--lumen)]"
             />
             {searchDraft && (
@@ -171,7 +171,7 @@ export function BoardView() {
         </div>
 
         <div id="board-filters" className={cn('mt-3 flex-wrap items-center gap-2', filtersOpen ? 'flex' : 'hidden lg:flex')}>
-          <div className="scrollbar-none -mx-1 flex max-w-full gap-2 overflow-x-auto px-1 py-0.5">
+          <div className="scrollbar-none -mx-1 flex max-w-full gap-2 relative overflow-x-auto px-1 py-0.5">
             {STATUS_GROUPS.map((g) => (
               <Chip key={g.value} active={status.value === g.value} onClick={() => set({ status: g.value === 'open' ? null : g.value })} count={allQ.data ? statusCount(g) : undefined}>
                 {g.label}
@@ -179,7 +179,7 @@ export function BoardView() {
             ))}
           </div>
           <span aria-hidden className="mx-1 hidden h-6 w-px bg-line-strong sm:block" />
-          <div className="scrollbar-none -mx-1 flex max-w-full gap-2 overflow-x-auto px-1 py-0.5">
+          <div className="scrollbar-none -mx-1 flex max-w-full gap-2 relative overflow-x-auto px-1 py-0.5">
             {FAMILIES.map((f) => (
               <Chip
                 key={f}

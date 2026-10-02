@@ -234,12 +234,9 @@ export function StageSource({ c, initialInput }: { c: ClaimComposer; initialInpu
             )}
             <div className="mt-5 flex flex-wrap items-center gap-3">
               {justPinned && pinned?.commit.sha === candidate.commit.sha ? (
-                <>
-                  <p className="inline-flex items-center gap-2 font-[650]">
-                    <Lock size={15} aria-hidden /> Pinned. This exact commit is what the claim is about.
-                  </p>
-                  <Button onClick={() => c.setStage('policy')}>Continue to policy</Button>
-                </>
+                <p className="inline-flex items-center gap-2 font-[650]">
+                  <Lock size={15} aria-hidden /> Pinned. This exact commit is what the claim is about.
+                </p>
               ) : (
                 <Button onClick={pin} disabled={c.frozen} icon={<Lock size={15} aria-hidden />}>
                   Pin this commit

@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+import type { Hex } from '@pine/core'
 import type { TxRunner, TxRunnerStep } from '@pine/react'
 import { explorerTxUrl, shortHash } from '@pine/core'
 import { Check, ExternalLink as ExtIcon, Lock, PenLine, X } from 'lucide-react'
@@ -30,6 +32,50 @@ const STATUS_TEXT: Record<string, string> = {
   skipped: 'Skipped',
 }
 
+/** A step done outside Pine (DEX liquidity): open the DEX, then mark it done with an optional tx hash. */
+function ManualStep({ runner, step }: { runner: TxRunner; step: TxRunnerStep }) {
+  const [hash, setHash] = useState('')
+  const valid = hash === '' || /^0x[0-9a-fA-F]{64}$/.test(hash.trim())
+  return (
+    <div className="mt-3 rounded-[3px] border-l-[3px] border-lumen bg-lumen-wash px-3 py-2.5 text-[0.84rem]">
+      <p>This step happens on the DEX, the same way Seer adds liquidity. Add the position there, then come back and mark it done.</p>
+      <label className="mt-2.5 block text-[0.78rem] font-[600] text-ink-2" htmlFor={`manual-${step.id}`}>
+        Transaction hash <span className="font-[450] text-ink-3">optional, lets Pine link and reconcile it</span>
+      </label>
+      <input
+        id={`manual-${step.id}`}
+        value={hash}
+        onChange={(e) => setHash(e.target.value)}
+        placeholder="0x…"
+        spellCheck={false}
+        aria-invalid={!valid}
+        className="mt-1 h-9 w-full rounded-[4px] border-[1.5px] border-line-strong bg-sheet px-2.5 font-mono text-[0.78rem] focus:border-ink focus:outline-none aria-[invalid=true]:border-flare-ink"
+      />
+      {!valid && <p className="mt-1 text-[0.75rem] font-[550] text-flare-ink">A transaction hash is 0x followed by 64 hex characters.</p>}
+      <div className="mt-2.5 flex flex-wrap gap-2">
+        {step.actionUrl && (
+          <a
+            href={step.actionUrl}
+            target="_blank"
+            rel="noopener noreferrer nofollow"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-btn)] border-[1.5px] border-ink px-3 font-[620] hover:bg-ink/[0.06]"
+          >
+            Open the DEX <ExtIcon size={13} aria-hidden />
+          </a>
+        )}
+        <Button size="sm" disabled={!valid} onClick={() => void runner.confirmManual(step.id, hash.trim() ? (hash.trim() as Hex) : undefined)}>
+          Mark done
+        </Button>
+        {step.optional && (
+          <Button size="sm" variant="ghost" onClick={() => runner.skip(step.id)}>
+            Skip for now
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 /**
  * The step tracker for any multi-step transaction run (publish, finish funding, evidence, redeem). It
  * is a vertical rope: done steps are filled knots; the terms-freeze point is marked; manual DEX steps
@@ -57,10 +103,19 @@ export function TxSteps({ runner, className, chainId }: { runner: TxRunner; clas
                   {awaitingManual ? 'Waiting for you' : STATUS_TEXT[s.status]}
                 </p>
               </div>
-              <p className="mt-0.5 text-[0.84rem] text-ink-2">{s.description}</p>
-              {s.estimatedCost && (
-                <p className="mt-1 text-[0.78rem] text-ink-3">
-                  Estimated cost <span className="t-figure text-[0.9rem] text-ink-2">{s.estimatedCost.amount}</span> {s.estimatedCost.currency}
+              <p className="mt-0.5 text-[0.84rem] text-ink-2 [overflow-wrap:anywhere]">{s.description}</p>
+              {((s.estimatedCost && Number(s.estimatedCost.amount) > 0) || (s.collateralCost && Number(s.collateralCost.amount) > 0)) && (
+                <p className="mt-1 flex flex-wrap gap-x-4 text-[0.78rem] text-ink-3">
+                  {s.collateralCost && Number(s.collateralCost.amount) > 0 && (
+                    <span>
+                      Moves <span className="t-figure text-[0.9rem] text-ink">{s.collateralCost.amount}</span> {s.collateralCost.currency} into the market
+                    </span>
+                  )}
+                  {s.estimatedCost && Number(s.estimatedCost.amount) > 0 && (
+                    <span>
+                      Estimated gas <span className="t-figure text-[0.9rem] text-ink-2">{s.estimatedCost.amount}</span> {s.estimatedCost.currency}
+                    </span>
+                  )}
                 </p>
               )}
               {s.txHash && (
@@ -78,31 +133,7 @@ export function TxSteps({ runner, className, chainId }: { runner: TxRunner; clas
                   {s.error}
                 </p>
               )}
-              {awaitingManual && (
-                <div className="mt-3 rounded-[3px] border-l-[3px] border-lumen bg-lumen-wash px-3 py-2.5 text-[0.84rem]">
-                  <p>This step happens on the DEX, the same way Seer adds liquidity. Add the position there, then come back and mark it done.</p>
-                  <div className="mt-2.5 flex flex-wrap gap-2">
-                    {s.actionUrl && (
-                      <a
-                        href={s.actionUrl}
-                        target="_blank"
-                        rel="noopener noreferrer nofollow"
-                        className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-btn)] border-[1.5px] border-ink px-3 font-[620] hover:bg-ink/[0.06]"
-                      >
-                        Open the DEX <ExtIcon size={13} aria-hidden />
-                      </a>
-                    )}
-                    <Button size="sm" onClick={() => void runner.confirmManual(s.id)}>
-                      I added the liquidity
-                    </Button>
-                    {s.optional && (
-                      <Button size="sm" variant="ghost" onClick={() => runner.skip(s.id)}>
-                        Skip for now
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              )}
+              {awaitingManual && <ManualStep runner={runner} step={s} />}
               {s.freezesTerms && (
                 <p className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-fog-2 px-2 py-0.5 text-[0.75rem] font-[650] text-ink-2">
                   <Lock size={11} aria-hidden /> {s.status === 'confirmed' ? 'Terms are frozen from here on' : 'Terms freeze when this confirms'}

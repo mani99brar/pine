@@ -44,14 +44,15 @@ export function ClaimRow({ claim, depth, depthLoading }: { claim: ClaimSummary; 
         <div className="col-span-2 min-w-0 lg:col-span-1">
           <div className="flex items-center gap-2 text-[0.8rem]">
             <span className="t-figure text-[0.85rem] text-ink-2">{formatClaimNumber(claim.number)}</span>
+            <PolicyMark family={claim.policy.family} code={claim.policy.id} gated={claim.policy.family === 'SC'} size={12} className="text-[0.78rem] lg:hidden" />
             {claim.status !== 'open' && <StatusPill status={claim.status} size="sm" />}
           </div>
-          <p className="mt-0.5 truncate font-[650] text-ink">{claim.title}</p>
+          <p className="mt-0.5 truncate font-[650] text-ink" title={claim.title}>{claim.title}</p>
           <p className="truncate text-[0.8rem] text-ink-3">
             {claim.source.owner}/{claim.source.repo} <code className="t-code text-[0.75rem] text-ink-2">@{shortSha(claim.source.commitSha)}</code>
           </p>
         </div>
-        <div className="lg:block">
+        <div className="hidden lg:block">
           <PolicyMark family={claim.policy.family} code={claim.policy.id} gated={claim.policy.family === 'SC'} size={14} />
         </div>
         <div className="col-span-2 min-w-0 lg:col-span-1">

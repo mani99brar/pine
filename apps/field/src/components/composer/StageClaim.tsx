@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react'
 import { Popover } from 'radix-ui'
 import type { ClaimDraft, ClaimSpec, EnvironmentPin, PolicyParameterSpec } from '@pine/core'
-import { EVIDENCE_MECHANISMS, LIMITS, formatUtcMinute, shortHash, shortSha } from '@pine/core'
+import { ENABLED_EVIDENCE_MECHANISMS, EVIDENCE_MECHANISMS, LIMITS, evidenceMechanismQuestionLabel, formatUtcMinute, shortHash, shortSha } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import type { ClaimComposer } from '@pine/react'
 import { Check, ChevronDown, Lock, PenLine } from 'lucide-react'
@@ -149,16 +149,16 @@ function ViolationSlot({ c }: { c: ClaimComposer }) {
 function MechanismSlot({ c }: { c: ClaimComposer }) {
   const [open, setOpen] = useState(false)
   const id = c.draft.spec.evidence?.mechanism ?? 'erc1497-arbitrator-proxy'
-  const mech = EVIDENCE_MECHANISMS[id]
+  const phrase = evidenceMechanismQuestionLabel(id, c.fundingInput.chainId).replace(/0x[0-9a-fA-F]{40}/g, (a) => `${a.slice(0, 6)}…${a.slice(-4)}`)
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger asChild>
         <button
           type="button"
-          className="mx-[0.12em] inline rounded-[4px] bg-ink/[0.06] px-[0.3em] py-[0.05em] text-left font-[650] shadow-[inset_0_-3px_0_var(--ink)] [box-decoration-break:clone] hover:bg-ink/[0.1]"
+          className="mx-[0.12em] inline rounded-[4px] bg-ink/[0.06] px-[0.3em] py-[0.05em] text-left text-[0.86em] font-[520] shadow-[inset_0_-2px_0_var(--line-strong)] [box-decoration-break:clone] hover:bg-ink/[0.1]"
           aria-label="Evidence mechanism: change"
         >
-          {mech?.label ?? id}
+          {phrase}
           <ChevronDown size={14} aria-hidden className="ml-1 inline -translate-y-[1px] opacity-50" />
         </button>
       </Popover.Trigger>
@@ -168,18 +168,19 @@ function MechanismSlot({ c }: { c: ClaimComposer }) {
             <button
               key={m.id}
               type="button"
-              disabled={c.frozen}
+              disabled={c.frozen || !ENABLED_EVIDENCE_MECHANISMS.includes(m.id)}
               onClick={() => {
                 c.update((d: ClaimDraft) => ({ ...d, spec: { ...d.spec, evidence: { ...(d.spec.evidence ?? { deadline: '' }), mechanism: m.id } } }))
                 setOpen(false)
               }}
-              className={cn('block w-full rounded-[4px] px-3 py-2.5 text-left hover:bg-fog-2', m.id === id && 'bg-fog-2')}
+              className={cn('block w-full rounded-[4px] px-3 py-2.5 text-left hover:bg-fog-2 disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent', m.id === id && 'bg-fog-2')}
             >
               <span className="flex items-center gap-2 font-[650]">
                 {m.id === id && <Check size={14} aria-hidden />}
                 {m.label}
               </span>
-              <span className="mt-0.5 block text-[0.82rem] text-ink-2">{m.description}</span>
+              <span className="mt-0.5 block text-[0.82rem] text-ink-2 [overflow-wrap:anywhere]">{m.description}</span>
+              {!ENABLED_EVIDENCE_MECHANISMS.includes(m.id) && <span className="mt-1 block text-[0.78rem] font-[650] text-ink">Not available for new claims yet.</span>}
               {m.launchGate && <span className="mt-1 block text-[0.78rem] font-[550] text-lumen-ink">Launch gate: {m.launchGate}</span>}
             </button>
           ))}
@@ -331,6 +332,11 @@ export function StageClaim({ c }: { c: ClaimComposer }) {
           <Slot as="span" filled={!!policy} locked placeholder="(choose a policy)" label="Policy">
             {policy ? `${policy.id}@${policy.version}` : ''}
           </Slot>
+          {policy && (
+            <>
+              {' '}(<code className="font-mono text-[0.78em] text-ink-2">{shortHash(policy.contentHash, 4)}</code>)
+            </>
+          )}
           , submitted through <MechanismSlot c={c} /> before{' '}
           <Slot filled={!!deadline} placeholder="the deadline" label="Evidence deadline" onClick={() => c.setStage('deadlines')}>
             {deadline ? formatUtcMinute(deadline) : ''}

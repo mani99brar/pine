@@ -11,7 +11,6 @@ import { Field, Input } from '@/components/ui/form'
 import { Note } from '@/components/ui/primitives'
 import { useNowMs } from '@/lib/now'
 import { StageHeader, StageIssues, StageNav, issueFor } from './shared'
-import { cn } from '@/lib/cn'
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -40,7 +39,11 @@ function localLabel(iso?: string): string {
   }
 }
 
-/** The visual timeline: evidence window, oracle opening, fixed challenge window, possible arbitration. */
+/**
+ * The visual timeline, drawn as a schematic (segments are not to scale, durations are written on
+ * them): evidence window, the gap until answers open, the fixed challenge window, and arbitration if
+ * someone escalates.
+ */
 export function DeadlineTimeline({
   now,
   deadline,
@@ -57,62 +60,55 @@ export function DeadlineTimeline({
   appealDays: number
 }) {
   const final = opening + timeoutSeconds * 1000
-  const arbEnd = final + rulingDays * DAY
-  const end = arbEnd
-  const span = Math.max(1, end - now)
-  const pct = (t: number) => `${(Math.max(0, Math.min(1, (t - now) / span)) * 100).toFixed(2)}%`
-  const w = (a: number, b: number) => `${((Math.max(0, b - a) / span) * 100).toFixed(2)}%`
-  const marks = [
-    { t: now, label: 'Now', sub: '' },
-    { t: deadline, label: 'Evidence deadline', sub: formatDate(new Date(deadline).toISOString(), 'utc') },
-    { t: opening, label: 'Answers open', sub: opening - deadline > 0 ? `${formatDuration(opening - deadline)} later` : 'at the deadline' },
-    { t: final, label: 'Earliest final', sub: 'if nobody challenges' },
-  ]
+  const iso = (t: number) => new Date(t).toISOString()
+  const gap = opening - deadline
   return (
     <figure aria-label="Claim timeline">
-      <div className="relative pt-2">
-        <div className="relative h-8">
-          <span className="absolute inset-y-0 left-0 w-[2px] bg-ink" />
-          <span className="absolute inset-y-[7px] bg-ink" style={{ left: 2, width: `calc(${w(now, deadline)} - 2px)` }} />
-          <span className="absolute inset-y-[13px] bg-line-strong" style={{ left: pct(deadline), width: w(deadline, opening) }} />
-          <span
-            className="absolute inset-y-[7px] bg-cobalt"
-            style={{
-              left: pct(opening),
-              width: w(opening, final),
-              backgroundImage: 'repeating-linear-gradient(90deg, transparent 0 6px, rgb(255 255 255 / .35) 6px 8px)',
-            }}
-          />
-          <span className="absolute inset-y-[7px] rounded-r-[2px] border-[1.5px] border-dashed border-ink-3" style={{ left: pct(final), width: w(final, arbEnd) }} />
-          <span className="absolute -top-1 bottom-[-4px] w-[3px] -translate-x-1/2 bg-lumen shadow-[0_0_0_1.5px_var(--ink)]" style={{ left: pct(deadline) }} />
+      <div className="relative pt-7">
+        {/* above-bar label for the oracle opening */}
+        <span className="absolute top-0 -translate-x-1/2 whitespace-nowrap text-[0.75rem] font-[650]" style={{ left: '49%' }}>
+          Answers open{gap > 0 ? ` +${formatDuration(gap)}` : ''}
+        </span>
+        <div className="flex h-9 items-stretch gap-[3px] text-[0.75rem] font-[650]">
+          <div className="flex w-[46%] min-w-0 items-center rounded-l-[3px] bg-ink px-3 text-on-ink">
+            <span className="block truncate">Evidence window, {formatDuration(deadline - now)}</span>
+          </div>
+          <div className="w-[3%] bg-line-strong" aria-hidden />
+          <div
+            className="flex w-[23%] min-w-0 items-center bg-cobalt px-3 text-white"
+            style={{ backgroundImage: 'repeating-linear-gradient(90deg, transparent 0 10px, rgb(255 255 255 / .18) 10px 12px)' }}
+          >
+            <span className="block truncate">Challenge, {formatDuration(timeoutSeconds * 1000)}</span>
+          </div>
+          <div className="flex min-w-0 flex-1 items-center rounded-r-[3px] border-[1.5px] border-dashed border-ink-3 px-3 text-ink-2">
+            <span className="block truncate">If disputed: Kleros, ~{rulingDays}d</span>
+          </div>
         </div>
-        <ol className="relative mt-2 h-14 text-[0.75rem]">
-          {marks.map((m, i) => (
-            <li
-              key={m.label}
-              className={cn('absolute top-0 max-w-[9rem] leading-tight', i === 0 ? '' : i === marks.length - 1 ? '-translate-x-full text-right' : '-translate-x-1/2 text-center', i === 2 && 'top-7')}
-              style={{ left: pct(m.t) }}
-            >
-              <span className="block font-[650] text-ink">{m.label}</span>
-              {m.sub && <span className="block text-ink-3">{m.sub}</span>}
-            </li>
-          ))}
-        </ol>
+        {/* boundary posts */}
+        <span aria-hidden className="absolute bottom-[-6px] top-6 w-[3px] -translate-x-1/2 bg-lumen shadow-[0_0_0_1.5px_var(--ink)]" style={{ left: '46%' }} />
+        <span aria-hidden className="absolute bottom-[-6px] top-6 w-[2px] -translate-x-1/2 bg-ink" style={{ left: '49%' }} />
+        <span aria-hidden className="absolute bottom-[-6px] top-6 w-[2px] -translate-x-1/2 bg-ink" style={{ left: '72.5%' }} />
       </div>
-      <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-[0.78rem] text-ink-2">
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="h-2.5 w-5 bg-ink" /> Evidence window ({formatDuration(deadline - now)})
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="h-2.5 w-5 bg-cobalt" /> Challenge window, fixed {formatDuration(timeoutSeconds * 1000)} per answer
-        </span>
-        <span className="inline-flex items-center gap-1.5">
-          <span aria-hidden className="h-2.5 w-5 border-[1.5px] border-dashed border-ink-3" /> If disputed: Kleros, about {rulingDays} days plus {appealDays} per appeal
-        </span>
-      </div>
+      <ol className="relative mt-3 grid grid-cols-[46%_26.5%_1fr] text-[0.75rem] leading-tight">
+        <li>
+          <span className="block font-[650]">Now</span>
+        </li>
+        <li className="-ml-1">
+          <span className="block font-[650]">Evidence deadline</span>
+          <span className="block text-ink-3">{formatDate(iso(deadline), 'utc')}</span>
+        </li>
+        <li className="-ml-1">
+          <span className="block font-[650]">Earliest final</span>
+          <span className="block text-ink-3">{formatDate(iso(final), 'utc')}, if unchallenged</span>
+        </li>
+      </ol>
+      <p className="mt-4 text-[0.78rem] text-ink-3">
+        Segments are not to scale. Each new answer restarts the {formatDuration(timeoutSeconds * 1000)} challenge window, fixed by Seer. Arbitration takes about {rulingDays} days plus about {appealDays}{' '}
+        days per appeal.
+      </p>
       <figcaption className="sr-only">
-        Evidence window until {formatDate(new Date(deadline).toISOString(), 'long')}. Answers open {formatDate(new Date(opening).toISOString(), 'long')}. Each answer can be challenged for{' '}
-        {formatDuration(timeoutSeconds * 1000)}. Arbitration, if requested, takes about {rulingDays} days.
+        Evidence window until {formatDate(iso(deadline), 'long')}. Answers open {formatDate(iso(opening), 'long')}. Each answer can be challenged for {formatDuration(timeoutSeconds * 1000)}.
+        Arbitration, if requested, takes about {rulingDays} days.
       </figcaption>
     </figure>
   )

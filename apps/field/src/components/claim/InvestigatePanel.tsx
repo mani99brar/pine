@@ -41,8 +41,8 @@ export function AgentBriefActions({ claim, compact }: { claim: ClaimDetail; comp
   const curl = `curl -s ${apiUrl} | jq .`
   return (
     <div className={compact ? 'flex flex-wrap gap-2' : 'grid gap-2'}>
-      <CopyButton variant="button" text={markdown} label="Copy agent brief" copiedLabel="Agent brief copied" />
-      <CopyButton variant="button" text={curl} label="Copy curl" copiedLabel="curl copied" />
+      <CopyButton variant="button" text={markdown} label="Copy agent brief" copiedLabel="Agent brief copied" className={compact ? 'h-8 text-[0.82rem]' : undefined} />
+      {!compact && <CopyButton variant="button" text={curl} label="Copy curl" copiedLabel="curl copied" />}
       {!compact && (
         <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[0.84rem]">
           <a href={`/api/agent/v1/claims/${claim.id}`} className="underline underline-offset-2" target="_blank" rel="noopener noreferrer">
@@ -209,10 +209,10 @@ export function InvestigatePanel({ claim }: { claim: ClaimDetail }) {
             Evidence channel
           </h3>
           <p className="mt-2 font-[620]">{mech?.label ?? spec.evidence.mechanism}</p>
-          {mech?.description && <p className="mt-1 text-[0.86rem] text-ink-2">{mech.description}</p>}
+          {mech?.description && <p className="mt-1 text-[0.86rem] text-ink-2 [overflow-wrap:anywhere]">{mech.description}</p>}
           <p className="mt-3 text-[0.86rem] text-ink-2">
-            Deadline <span className="font-[650] text-ink">{formatDate(spec.evidence.deadline, 'long')}</span>, by block timestamp. Submissions go to {arb.requestContractName} on {l1.name}, so your
-            wallet switches to {l1.name} to submit.
+            Deadline <span className="font-[650] text-ink">{formatDate(spec.evidence.deadline, 'long')}</span>, by block timestamp. Submitting is a transaction on {l1.name}
+            {claim.chainId !== arb.chainId ? ` even though the market is on ${getChainOrDefault(claim.chainId).name}` : ''}, so your wallet switches to {l1.name}.
           </p>
           {mech?.launchGate && <Note tone="caution" className="mt-3">{mech.launchGate}</Note>}
           {claim.status === 'open' && (

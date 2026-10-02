@@ -125,6 +125,7 @@ export function TensionBar({
   const showTrail = q !== undefined && Math.abs(p - q) >= 0.004
   const knotW = size === 'lg' ? 4 : 3
   const knotOver = size === 'lg' ? 6 : 4
+  const trailGap = size === 'lg' ? 9 : 6
 
   return (
     <div role="img" aria-label={label} className={cn('tension relative', className)} style={style}>
@@ -147,36 +148,27 @@ export function TensionBar({
           style={{ width: 'calc((100% - 6px) * var(--inv))' }}
         />
       )}
-      {/* 24h ghost post */}
+      {/* 24h move, drawn under the bar: a dashed "was here" post, then a trail to the knot */}
       {q !== undefined && (
         <span
           aria-hidden
-          className="absolute border-l border-dashed border-ink/70"
-          style={{
-            left: `calc(3px + (100% - 6px) * ${q})`,
-            top: -knotOver - 1,
-            bottom: -knotOver - 1,
-          }}
+          className="absolute w-0 border-l-[1.5px] border-dashed border-ink/75"
+          style={{ left: `calc(3px + (100% - 6px) * ${q})`, top: Math.round(h * 0.15), height: h - Math.round(h * 0.15) + trailGap + 1 }}
         />
       )}
-      {/* move trail: from ghost to knot, above the bar */}
       {showTrail && q !== undefined && (
         <span
           aria-hidden
-          className="absolute h-0 border-t-[1.5px] border-ink"
+          className="absolute h-[1.5px] bg-ink"
           style={{
-            top: -knotOver - 1,
+            top: h + trailGap,
             left: `calc(3px + (100% - 6px) * ${Math.min(p, q)})`,
             width: `calc((100% - 6px) * ${Math.abs(p - q)})`,
           }}
         >
           <span
-            className="absolute -top-[4.5px] h-0 w-0 border-y-[4px] border-y-transparent"
-            style={
-              p > q
-                ? { right: -2, borderLeft: '6px solid var(--ink)' }
-                : { left: -2, borderRight: '6px solid var(--ink)' }
-            }
+            className="absolute top-1/2 h-0 w-0 -translate-y-1/2 border-y-[4px] border-y-transparent"
+            style={p > q ? { right: -1, borderLeft: '6px solid var(--ink)' } : { left: -1, borderRight: '6px solid var(--ink)' }}
           />
         </span>
       )}
@@ -187,7 +179,7 @@ export function TensionBar({
         style={{
           left: 'calc(3px + (100% - 6px) * var(--p))',
           top: -knotOver,
-          bottom: -knotOver,
+          bottom: showTrail ? -(trailGap + 1) : -knotOver,
           width: knotW + 4,
           transform: 'translateX(-50%)',
           background: 'var(--gap-bg)',

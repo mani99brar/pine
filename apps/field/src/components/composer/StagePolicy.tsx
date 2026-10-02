@@ -50,9 +50,9 @@ function PolicyCard({ p, selected, onSelect, disabled }: { p: PolicyVersion; sel
       <p className="t-figure mt-4 text-[1.6rem]">{p.id}</p>
       <p className="mt-1 font-[650]">{p.title}</p>
       <p className="mt-2 text-[0.88rem] text-ink-2">{p.summary}</p>
-      {p.intendedUse.length > 0 && (
-        <ul className="mt-3 space-y-1 text-[0.84rem] text-ink-2">
-          {p.intendedUse.slice(0, 2).map((u, i) => (
+      {p.examples.length > 0 && (
+        <ul className="mt-3 space-y-1 text-[0.84rem] text-ink-2" aria-label="For example">
+          {p.examples.slice(0, 2).map((u, i) => (
             <li key={i} className="flex gap-2">
               <span aria-hidden className="mt-[0.6em] h-[3px] w-2 shrink-0 bg-ink-3" />
               {u}
@@ -61,9 +61,10 @@ function PolicyCard({ p, selected, onSelect, disabled }: { p: PolicyVersion; sel
         </ul>
       )}
       {gated && (
-        <p className="mt-4 rounded-[3px] bg-fog-2 px-3 py-2 text-[0.82rem] font-[550] text-ink">
+        <p className="mt-4 rounded-[3px] bg-fog-2 px-3 py-2 text-[0.82rem] font-[600] text-ink">
           <Lock size={12} aria-hidden className="mr-1.5 inline" />
-          {p.gateReason ?? COPY.scGate}
+          {(p.gateReason ?? COPY.scGate).split('. ')[0]}.
+          <span className="mt-0.5 block font-[450] text-ink-2">Shown for reference; it cannot be selected yet.</span>
         </p>
       )}
       <p className="mt-auto flex items-center justify-between gap-2 pt-4 text-[0.75rem] text-ink-3">

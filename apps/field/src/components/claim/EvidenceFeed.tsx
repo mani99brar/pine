@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useState } from 'react'
 import type { ClaimDetail, Evidence } from '@pine/core'
 import { explorerTxUrl, formatAmount, formatDate, shortHash } from '@pine/core'
 import { COPY } from '@pine/core/copy'
@@ -26,8 +27,12 @@ function safeHref(uri: string): string | undefined {
   return undefined
 }
 
+const LONG = 900
+
 export function EvidenceCard({ e, deadline }: { e: Evidence; deadline: string }) {
   const href = safeHref(e.uri)
+  const [expanded, setExpanded] = useState(false)
+  const long = (e.summary?.length ?? 0) > LONG
   return (
     <article className="min-w-0 rounded-[var(--radius-tile)] border border-line bg-sheet">
       <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-line px-4 py-3">
@@ -61,7 +66,19 @@ export function EvidenceCard({ e, deadline }: { e: Evidence; deadline: string })
         <p className="mt-1 text-[0.78rem] text-ink-3">
           Submitted by <code className="t-code">{shortHash(e.submitter)}</code>
         </p>
-        {e.summary && <SafeMarkdown className="mt-3 text-[0.92rem] text-ink-2">{e.summary}</SafeMarkdown>}
+        {e.summary && (
+          <div className="relative mt-3">
+            <div className={long && !expanded ? 'max-h-[14rem] overflow-hidden' : undefined}>
+              <SafeMarkdown className="text-[0.92rem] text-ink-2">{e.summary}</SafeMarkdown>
+            </div>
+            {long && !expanded && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--sheet)] to-transparent" />}
+            {long && (
+              <button type="button" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded} className="mt-2 text-[0.84rem] font-[650] underline underline-offset-2">
+                {expanded ? 'Collapse' : `Show the full text (${e.summary.length.toLocaleString('en-US')} characters)`}
+              </button>
+            )}
+          </div>
+        )}
 
         {e.commitment && (
           <p className="mt-3 flex flex-wrap items-center gap-2 text-[0.84rem] text-ink-2">

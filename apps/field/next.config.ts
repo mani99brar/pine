@@ -7,7 +7,36 @@ const securityHeaders = [
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
 ]
 
+// Optional x402 payment modules lazily imported by @coinbase/cdp-sdk (via RainbowKit's Base Account
+// connector) are not installed; Pine never calls them. Alias them to a stub module so bundling succeeds.
+const X402_OPTIONAL = [
+  '@x402/core/client',
+  '@x402/core/schemas',
+  '@x402/core/server',
+  '@x402/evm',
+  '@x402/evm/auth-capture/client',
+  '@x402/evm/batch-settlement/client',
+  '@x402/evm/exact/client',
+  '@x402/evm/exact/server',
+  '@x402/evm/exact/v1/client',
+  '@x402/evm/upto/client',
+  '@x402/evm/upto/server',
+  '@x402/express',
+  '@x402/extensions/bazaar',
+  '@x402/extensions/builder-code',
+  '@x402/fetch',
+  '@x402/svm/exact/client',
+  '@x402/svm/exact/server',
+  '@x402/svm/exact/v1/client',
+  '@x402/svm/upto/client',
+  '@x402/svm/upto/server',
+]
+const emptyShim = './src/lib/shims/x402.js'
+
 const nextConfig: NextConfig = {
+  agentRules: false,
+  devIndicators: false,
+  turbopack: { resolveAlias: Object.fromEntries(X402_OPTIONAL.map((m) => [m, emptyShim])) },
   transpilePackages: ['@pine/core', '@pine/data', '@pine/react', '@pine/server'],
   reactStrictMode: true,
   env: {

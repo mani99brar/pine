@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import type { ComposerStage } from '@pine/core'
 import type { ClaimComposer } from '@pine/react'
 import { Lock } from 'lucide-react'
@@ -10,9 +11,17 @@ import { cn } from '@/lib/cn'
 export function StepRail({ c }: { c: ClaimComposer }) {
   const cur = stageIndex(c.draft.stage)
   const frozenStages: ComposerStage[] = c.frozen ? ['source', 'policy', 'claim', 'deadlines'] : []
+  const listRef = useRef<HTMLOListElement | null>(null)
+  // Keep the current step visible when the rail scrolls horizontally on phones.
+  useEffect(() => {
+    const ol = listRef.current
+    const li = ol?.children[cur] as HTMLElement | undefined
+    if (!ol || !li || ol.scrollWidth <= ol.clientWidth) return
+    ol.scrollTo({ left: Math.max(0, li.offsetLeft - ol.clientWidth / 2 + li.clientWidth / 2), behavior: 'smooth' })
+  }, [cur])
   return (
     <nav aria-label="Composer steps">
-      <ol className="scrollbar-none -mx-4 flex overflow-x-auto px-4 sm:mx-0 sm:px-0">
+      <ol ref={listRef} className="scrollbar-none relative -mx-4 flex overflow-x-auto px-4 sm:mx-0 sm:px-0">
         {STAGES.map((s, i) => {
           const issues = issuesFor(c, s.id).length
           const here = i === cur

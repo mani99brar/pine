@@ -42,26 +42,3 @@ export function depthWithin5(depth: DepthSnapshot | null | undefined): number {
   return depthByBand(depth, [0.05])[0] ?? 0
 }
 
-/**
- * Walk the book with `amount` of collateral and return the marginal price after the trade (the new
- * knot position). Buys walk asks upward; sells walk bids downward. Returns the last level reached
- * when the book runs out.
- */
-export function priceAfterTrade(depth: DepthSnapshot | null | undefined, side: 'buy' | 'sell', amount: number): number | undefined {
-  if (!depth) return undefined
-  const levels = depth.levels
-    .filter((l) => l.side === (side === 'buy' ? 'ask' : 'bid'))
-    .sort((a, b) => (side === 'buy' ? a.price - b.price : b.price - a.price))
-  let remaining = amount
-  let prevSize = 0
-  let price = depth.mid
-  for (const l of levels) {
-    const delta = Math.max(0, l.size - prevSize)
-    const cost = delta * l.price
-    price = l.price
-    if (cost >= remaining) return l.price
-    remaining -= cost
-    prevSize = Math.max(prevSize, l.size)
-  }
-  return price
-}

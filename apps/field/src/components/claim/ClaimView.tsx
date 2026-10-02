@@ -23,11 +23,14 @@ import { LifecycleRope } from '@/components/landing/Lifecycle'
 export function ClaimView({ id }: { id: string }) {
   const claimQ = useClaim(id, { live: true })
   const claim = claimQ.data
-  const [range, setRange] = useState<PriceRange>('7d')
+  const [rangeState, setRange] = useState<PriceRange | null>(null)
+  const [scale, setScale] = useState<'fit' | 'full'>('fit')
   const [depthOutcome, setDepthOutcome] = useState<'yes' | 'no'>('yes')
   const hasMarket = !!claim?.market && claim.status !== 'publishing' && claim.status !== 'failed'
+  const trading = hasMarket && claim?.status !== 'resolved' && claim?.status !== 'settled'
+  const range: PriceRange = rangeState ?? (claim && !trading ? 'all' : '7d')
   const history = usePriceHistory(hasMarket ? id : undefined, range)
-  const depth = useDepth(hasMarket ? id : undefined, depthOutcome)
+  const depth = useDepth(trading ? id : undefined, depthOutcome)
   const evidenceQ = useEvidence(claim ? id : undefined)
   const activityQ = useActivity(claim ? { claimId: id, limit: 50 } : undefined)
   const [tabState, setTab] = useState<string | null>(null)
@@ -71,7 +74,18 @@ export function ClaimView({ id }: { id: string }) {
           </div>
         )}
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22.5rem]">
+        {!hasMarket ? (
+          recovering ? null : (
+            <div className="max-w-[40rem]">
+              <NextStepCard claim={claim} />
+            </div>
+          )
+        ) : (
+        <>
+        <div className="mb-6 lg:hidden">
+          <NextStepCard claim={claim} />
+        </div>
+        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22.5rem] lg:items-start">
           <div className="grid min-w-0 content-start gap-6">
             {hasMarket && (
               <section aria-labelledby="chart-title" className="rounded-[var(--radius-tile)] border border-line bg-sheet p-4 sm:p-5">
@@ -82,23 +96,35 @@ export function ClaimView({ id }: { id: string }) {
                     </h2>
                     <p className="text-[0.8rem] text-ink-3">Hatched: implied chance of an accepted counterexample. Solid: none submitted.</p>
                   </div>
-                  <Segmented
-                    label="Chart range"
-                    size="sm"
-                    value={range}
-                    onChange={setRange}
-                    options={[
-                      { value: '24h', label: '24h' },
-                      { value: '7d', label: '7d' },
-                      { value: '30d', label: '30d' },
-                      { value: 'all', label: 'All' },
-                    ]}
-                  />
+                  <div className="flex flex-wrap gap-2">
+                    <Segmented
+                      label="Vertical scale"
+                      size="sm"
+                      value={scale}
+                      onChange={setScale}
+                      options={[
+                        { value: 'fit', label: 'Fit', title: 'Zoom to the data' },
+                        { value: 'full', label: '0–100%', title: 'Full scale' },
+                      ]}
+                    />
+                    <Segmented
+                      label="Chart range"
+                      size="sm"
+                      value={range}
+                      onChange={setRange}
+                      options={[
+                        { value: '24h', label: '24h' },
+                        { value: '7d', label: '7d' },
+                        { value: '30d', label: '30d' },
+                        { value: 'all', label: 'All' },
+                      ]}
+                    />
+                  </div>
                 </div>
-                <TensionChart points={history.data ?? []} events={claim.timeline} range={range} loading={history.isLoading || history.isFetching} />
+                <TensionChart points={history.data ?? []} events={claim.timeline} range={range} fit={scale === 'fit'} loading={history.isLoading || history.isFetching} />
               </section>
             )}
-            {hasMarket && (
+            {trading && (
               <section aria-labelledby="depth-title" className="rounded-[var(--radius-tile)] border border-line bg-sheet p-4 sm:p-5">
                 <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
                   <div>
@@ -124,11 +150,15 @@ export function ClaimView({ id }: { id: string }) {
           </div>
 
           <aside className="grid min-w-0 content-start gap-6">
-            <NextStepCard claim={claim} />
-            {hasMarket && claim.status !== 'settled' && <ImpactSimulator claim={claim} />}
-            {!recovering && <PositionPanel claim={claim} />}
+            <div className="hidden lg:block">
+              <NextStepCard claim={claim} />
+            </div>
+            {trading && <ImpactSimulator claim={claim} />}
+            <PositionPanel claim={claim} />
           </aside>
         </div>
+        </>
+        )}
 
         <div className="mt-12">
           <Tabs value={tab} onValueChange={setTab}>

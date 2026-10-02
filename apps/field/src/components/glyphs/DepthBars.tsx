@@ -35,7 +35,12 @@ export function DepthBars({ depth, symbol, size = 'md', caption = true, loading,
     : `Executable depth: ${DEPTH_BANDS.map((b, i) => `${formatAmount(amounts[i] ?? 0, { maxDecimals: 0 })} ${symbol} within ${Math.round(b * 100)} ${b === 0.01 ? 'point' : 'points'}`).join(', ')} of mid`
 
   return (
-    <span role="img" aria-label={loading ? 'Loading depth' : aria} className={cn('inline-flex items-end gap-2', className)}>
+    <span
+      role="img"
+      aria-label={loading ? 'Loading depth' : aria}
+      title="Collateral you could trade before the price moves 1, 2, 5, 10 and 20 percentage points. Hollow bars mean thin depth."
+      className={cn('inline-flex items-end gap-2', className)}
+    >
       <svg width={width} height={d.h} viewBox={`0 0 ${width} ${d.h}`} aria-hidden className="block shrink-0 overflow-visible">
         {DEPTH_BANDS.map((band, i) => {
           const x = i * (d.w + d.gap)
@@ -73,8 +78,8 @@ export function DepthBars({ depth, symbol, size = 'md', caption = true, loading,
                 {formatAmount(within5, { compact: within5 >= 10_000, maxDecimals: 0 })}
               </span>{' '}
               <span className="text-ink-3">
-                {symbol} {size === 'lg' ? 'executable within ±5 pts' : '±5 pts'}
-                {thin && size !== 'sm' ? ', thin' : ''}
+                {symbol} {size === 'sm' ? 'within 5 pts' : 'tradable within 5 pts of the price'}
+                {thin && size !== 'sm' ? ' (thin)' : ''}
               </span>
             </>
           )}
