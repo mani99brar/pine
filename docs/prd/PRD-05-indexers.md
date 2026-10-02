@@ -36,15 +36,20 @@ int8 and counts explicitly.
 ### 2.3 Ingestion (finalized only; SEC-IDX-01/02/04/05/06)
 - Each cycle: read `finalized` block (number and hash) from both RPC providers; `target = min(numbers)`; both providers must
   report the same hash for `target`, else record a halt (`rpc_disagreement`) and stop advancing (alert via metrics and logs).
-- Fetch `[cursor + 1, min(target, cursor + 2000)]` in two phases: (a) logs of the ClaimRegistry and EvidenceRegistry (all their
-  event topic0s); apply ClaimCreated first so newly tracked question/condition ids are known; (b) logs of Reality.eth, CTF and the
-  Kleros home proxy for the topic0s listed in `chain-events.ts`, filtered to tracked ids in code (or with topic OR-lists when the
-  provider supports them). Decode strictly with viem `decodeEventLog` (`strict: true`) and validate with zod; a log that does not
-  decode under its topic0 is an integrity error (halt), never silently skipped.
-- Verify every log's `blockHash` against the canonical header hash for its block number (fetched once per block in the range); for
-  ranges containing Pine registry logs or logs of tracked Reality/CTF/Kleros ids, re-query those logs (same addresses and topics)
-  from the secondary provider and require the identical set of `(blockHash, logIndex, topics, data)`; mismatch → halt
-  (`log_disagreement`). A faulty primary could otherwise hide a tracked oracle answer.
+- Fetch `[cursor + 1, min(target, cursor + 2000)]` in ONE pass: every log of the five exact addresses (ClaimRegistry,
+  EvidenceRegistry, Reality.eth, CTF, Kleros home proxy) whose topic0 is one of the topic0s listed in `chain-events.ts` (topic0
+  OR-list per address; no tracked-id filtering in the request). Decode strictly with viem `decodeEventLog` (`strict: true`),
+  validate with zod (a log that does not decode under its topic0 is an integrity error: halt, never skipped), merge-sort ALL
+  logs by (blockNumber, logIndex) and pass the whole ordered list to `applyEvents`, which ignores untracked ids by row lookup
+  exactly as the reference does. This keeps tracking correct whatever the order of ClaimCreated, LogReopenQuestion (whose new
+  id is in topic1 and tracked id in topic2) and later answers within one range. Measured on 2026-10-02 over 2000 recent blocks:
+  Reality 2 logs, Kleros proxy 0, CTF 1504 logs of all topics (only ConditionResolution is requested), so the volume is small.
+  Required poller test: a range containing ClaimCreated, then LogReopenQuestion, then an answer and a Kleros event on the
+  replacement id ends with the replacement tracked and both events applied (as `scenarioOracle` does through `applyEvents`).
+- Verify every log's `blockHash` against the canonical header of its block (headers fetched only for blocks that contain logs,
+  plus the range end; they also give each event its `blockTimestamp`); re-run the same single-pass query on the secondary provider
+  for every non-empty range and require the identical full set of `(blockHash, logIndex, topics, data)`; any difference → halt
+  (`log_disagreement`). A faulty primary therefore cannot hide an oracle answer.
 - Logs are requested only for the exact configured addresses; a log with a known topic0 from any other address is ignored
   (SEC-IDX-05). Decoded values must lie in the domain the frozen `ChainEvent` types allow; the ClaimRegistry guarantees that domain
   for Pine events (e.g. `1 <= repositoryId <= 2^53 - 1`, enforced on-chain by the chain hardening run), so a violation is a
@@ -57,8 +62,10 @@ int8 and counts explicitly.
   evidence registry addresses and deployment block, Reality/CTF/home-proxy addresses (defaults from `GNOSIS_EXTERNAL`), question
   timeout (302400), poll interval, metrics port.
 ### 2.4 Tests
-- `describeReadModelConformance("native", factory)` where the factory runs migrations on PGlite and applies the scenario events
-  through `applyEvents` (the same function the poller uses).
+- `describeReadModelConformance("native", factory)` where the factory opens a fresh PGlite per call (the suite calls it several
+  times per file; close each in teardown; the file holds the test lock throughout), runs migrations, applies the scenario events
+  through `applyEvents` (the same function the poller uses) and advances the cursor to the last event's block with the same
+  cursor function the poller uses (the suite asserts `status().indexedBlock`).
 - Poller with a scripted RPC: both-provider agreement, disagreement halt, finalized lag, two-phase tracked ids within one range,
   range chunking, idempotent re-run of a range, crash between apply and cursor impossible (single transaction; simulate a throw),
   log/header hash mismatch halt, strict decoding failure halt, startup cursor re-verification, startup `eth_chainId` mismatch on
@@ -77,17 +84,24 @@ int8 and counts explicitly.
 - `schema.graphql` entities mirroring the read-model records (Claim, EvidenceSubmission, OracleQuestion, OracleAnswer,
   Arbitration + ArbitrationStage, ConditionResolution, TrackedQuestion/TrackedCondition), lowercase hex ids.
 - Handlers implement the reference semantics exactly; they are deterministic, make no external calls (Envio runs handlers twice:
-  preload and processing), and ignore events for untracked ids by entity lookup.
+  preload and processing), and ignore events for untracked ids by entity lookup. `viem` is a direct dependency of
+  `@pine/indexer-envio` (added by the operator for `keccak256`/`encodePacked`, e.g. the reveal's commitment id).
+- `config.yaml` addresses: Pine registry addresses come from env with the scenario placeholder addresses as defaults so `envio
+  codegen` and tests run without env; the README and deploy docs state that production must set them (a run with placeholders
+  indexes nothing).
 - Tests (vitest, `createTestIndexer()`, no Docker): for each frozen scenario, convert the `ChainEvent`s to simulated Envio events
   with explicit block numbers/log indexes, process them, and assert the resulting entities equal the records of
-  `MemoryReadModel` for the same events (field by field, after mapping).
+  `MemoryReadModel` for the same events (field by field, after mapping). The same tests write a committed JSON snapshot of the
+  actual entity rows per scenario (`packages/read-model-envio/test/fixtures/<scenario>.entities.json`, regenerated and compared
+  with `--check` semantics: a test fails when the snapshot differs).
 ### 3.2 read-model-envio
 - `createEnvioReadModel({ graphqlUrl, adminSecret?, fetch })` implementing `ReadModel` with Hasura GraphQL queries over the entities
   (where/order_by/limit, keyset pagination encoded in opaque cursors), zod-validated responses, 10 s timeouts, redacted errors, and
   `status()` from `_meta` / `chain_metadata` (indexed block, head, `halted: false` unless the endpoint reports errors).
 - Tests: the conformance suite with a factory that builds a fake GraphQL endpoint (an in-test `fetch` serving the lane's own
-  queries from entity rows produced by mapping the reference records), plus unit tests of query construction and validation
-  failures. A `test:live` script (excluded from the default test run) runs the conformance queries against a real Envio endpoint
+  queries from the committed entity snapshots that the indexer-envio handlers actually produced, never from rows mapped by hand),
+  with Hasura semantics stated and tested (numerics and bigints as strings, `_gt`/`_lt` on numerics, `order_by`, `limit`), plus
+  unit tests of query construction and validation failures. A `test:live` script (excluded from the default test run) runs the conformance queries against a real Envio endpoint
   given `ENVIO_GRAPHQL_URL`; running it against a real deployment is a launch gate for choosing the Envio option.
 
 ## 4. Checks (per lane)

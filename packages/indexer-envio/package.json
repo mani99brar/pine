@@ -10,7 +10,8 @@
     "start": "envio start"
   },
   "dependencies": {
-    "envio": "3.12.1"
+    "envio": "3.12.1",
+    "viem": "2.57.0"
   },
   "devDependencies": {
     "@pine/shared": "workspace:*"

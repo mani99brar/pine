@@ -10,7 +10,11 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
 - Each indexer owns its own storage and migrations; nothing imports `@pine/api`.
 - Native roles: `pine_indexer` (DML on `pine_index` only, no DDL) and `pine_readonly` (SELECT only, the API's read-model login),
   created idempotently by the indexer migrations and proven with `SET ROLE` on PGlite.
-- The secondary-provider re-query covers Pine registry logs and logs of tracked Reality/CTF/Kleros ids; any difference halts.
+- Native poller: one pass per range over the five exact addresses and the known topic0s (no tracked-id request filtering),
+  merge-sorted by (block, logIndex), `applyEvents` ignores untracked ids; the secondary re-runs the same query for every non-empty
+  range and any difference halts. Headers only for blocks with logs plus the range end.
+- `viem` is a direct dependency of `@pine/indexer-envio` (operator change for keccak).
+- Envio read-model fake serves the committed entity snapshots produced by the real handlers.
 - Decoded values outside the frozen `ChainEvent` domain halt (the ClaimRegistry enforces `repositoryId <= 2^53 - 1`).
 - Driver portability: never read `rowCount`/`affectedRows`; explicit int8/count casts in raw SQL.
 - Test memory: a PGlite instance takes several hundred MB on this host and vitest runs test files in parallel fork processes; the

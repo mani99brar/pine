@@ -265,6 +265,9 @@ importers:
       envio:
         specifier: 3.12.1
         version: 3.12.1(react-dom@19.3.0(react@19.2.5))(supports-color@8.1.1)(typescript@6.0.3)(zod@4.6.5)
+      viem:
+        specifier: 2.57.0
+        version: 2.57.0(typescript@6.0.3)(zod@4.6.5)
     devDependencies:
       '@pine/shared':
         specifier: workspace:*
