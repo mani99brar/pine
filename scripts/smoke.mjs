@@ -64,10 +64,11 @@ for (const base of bases) {
     for (const re of FORBIDDEN) {
       const m = text.match(re)
       if (m) {
-        // allow negated usage, e.g. "not certified", "never audited"
+        // allow negated usage anywhere earlier in the same sentence ("No promised … or guaranteed refund")
         const idx = text.search(re)
-        const before = text.slice(Math.max(0, idx - 40), idx).toLowerCase()
-        if (!/(not|never|no|isn't|is not|without|nor|n't)\s+(\w+\s+){0,3}$/.test(before)) fail(`${path} uses forbidden wording "${m[0]}" …${text.slice(Math.max(0, idx - 60), idx + 40).replace(/\s+/g, ' ')}…`)
+        const sentenceStart = Math.max(text.lastIndexOf('.', idx), text.lastIndexOf('\n', idx), text.lastIndexOf('•', idx), 0)
+        const before = text.slice(sentenceStart, idx).toLowerCase()
+        if (!/\b(not|never|no|none|without|nor|neither)\b|n't\b/.test(before)) fail(`${path} uses forbidden wording "${m[0]}" …${text.slice(Math.max(0, idx - 60), idx + 40).replace(/\s+/g, ' ')}…`)
       }
     }
     for (const m of html.matchAll(/href="(\/[^"#?]*)(\?[^"#]*)?"/g)) {
