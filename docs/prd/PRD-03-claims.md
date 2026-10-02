@@ -159,6 +159,24 @@ The integrity job runs in two phases so that a run that stops partway never lose
   closed, wrong type, pattern violation) fail. The refinements JSON Schema cannot express are tested against the frozen parse
   functions instead.
 
+## 8a. Review fixes carried by claims-006 (claims-005 review)
+- Listing eligibility (SEC-CLAIM-06 intent): `claims_index` gets `listable`, true only when the integrity result is `verified`
+  AND the claim's policy is currently publishable (catalog status `approved`, or `draft` with `allowDraftPolicies`; family
+  enabled; never `SC-001`) AND the document's policy parameters validate against the per-version parameter schema. Public
+  listings and agent feeds show only `listable` claims; detail endpoints still show every claim with its integrity and a
+  `listable` flag. A claim created directly on-chain with SC-001 or malformed parameters is therefore never listed.
+- A first `POST /publications` racing a `DELETE /drafts/:id`: a foreign-key violation (23503) on the publication insert maps to
+  NOT_FOUND ("Preview not found"), never 500.
+- Agent feeds: `GET /api/v1/agents/claims` caps `limit` at 25; list items carry digests, CIDs, URLs and the platform facts but not
+  the document body; parsed verified documents are cached by digest (immutable; LRU of 500); the ETag is computed from the item
+  keys before any expensive work, so a matching `If-None-Match` returns 304 cheaply.
+- A `block`-moderated claim never exposes its user-content URL (agent detail included).
+- Moderated public resources (claim lists, claim details, agent feeds) use `Cache-Control: no-cache` with the ETag so a hide or
+  block takes effect immediately even behind a shared cache; policies may stay `max-age=300`.
+- Stored drafts are read tolerantly (a draft saved under an older rule still lists and loads) and revalidated with the current
+  rules at update and preview, returning a validation error instead of 500.
+- The test lock's stale takeover is atomic: rename the stale directory to a unique name, then remove it.
+
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;
 draft IDOR; GitHub error mapping; membership failure blocks preview; preview determinism except nonce/createdAt; attestation
@@ -176,6 +194,13 @@ evidenceDeadline − 1 day; quota consumed only for new publications; two concur
 same response (no 500); a retry after the plan offer expired returns `planExpired: true` without a plan; compliance refusal on a retry;
 deleting a draft without publications removes its previews; preview-to-publish 24 h cap; NOT_READY when the read model is halted;
 module registration throws when `config.seer` differs from the manifest.
+claims-006 additions: SC-001 refused at preview and at publication (rows inserted directly for the setup; FEATURE_DISABLED and no
+preview, publication or plan created); the integrity run verifies at most 50 claims per run, oldest first (assert the count and the
+order after one run), and the backoff grows across attempts and is capped at 1 h; a content-store exception other than "not
+found" leaves the claim `pending` while the other claims are verified; every publication transition (created, submitted, mined
+on request and in reconcile, confirmed, failed, expired) writes its audit entry; `listable` false for an SC-001 claim and for
+malformed parameters; the FK race maps to NOT_FOUND; blocked claims expose no user-content URL; moderated resources send
+`no-cache`.
 
 ## 10. Checks
 `pnpm --filter @pine/api typecheck`, `pnpm exec eslint packages/api/src` (typecheck), `node scripts/check-forbidden.mjs` (unit),
