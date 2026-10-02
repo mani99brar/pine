@@ -47,6 +47,10 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - The webhook route parses JSON and form bodies as raw Buffers (64 KiB) so the HMAC covers the exact bytes.
 - Webhook: bad/missing signature → gateway throws `ApiError("UNAUTHENTICATED")` → 401 + `github.webhook.rejected`; other errors →
   500 + `github.webhook.failed`.
+- platform-004 review fixes (carried by platform-005): branch membership resolves a real branch of this repository first and
+  compares against its head SHA (SEC-GH-11; SHA-shaped names, `refs/` and tags refused); unlink revokes the grant, not only the
+  token; lease runs abort when renewals keep failing near the TTL; rejected webhooks are audited at most once per IP per minute;
+  `/readyz` is cached for 5 s.
 - Metrics use a dedicated prom-client `Registry`. Migrations always run as the migrator role (default privileges depend on it).
 - Metrics adapter: lazy, cached by name, label names fixed at first use, mismatching samples dropped with one warning.
 - Gateways I/O injection: `createGateways(deps)` wraps an exported `buildGateways(deps, io)` (`fetch` + two viem transports);

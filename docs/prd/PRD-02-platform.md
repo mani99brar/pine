@@ -102,7 +102,9 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   top-level navigation must land on the web app; the security property — nothing is linked — is what the test asserts).
 - `POST /api/v1/webhooks/github` (no session, CSRF-exempt, raw body ≤ 64 KiB) → `githubAuth.handleWebhook`; core audits
   `github.webhook.accepted` (details: `X-GitHub-Event`, `X-GitHub-Delivery`) when it resolves (204). The gateway throws
-  `ApiError("UNAUTHENTICATED")` for a missing or invalid signature: core answers 401 and audits `github.webhook.rejected`; any other
+  `ApiError("UNAUTHENTICATED")` for a missing or invalid signature: core answers 401 and audits `github.webhook.rejected` at most
+  once per client IP per minute (the first rejection in the IP's window; every rejection increments
+  `pine_github_webhook_rejected_total`), so anonymous traffic cannot grow the append-only audit table without bound; any other
   error is an internal failure: 500 (GitHub redelivers) and `github.webhook.failed`. The HMAC covers the exact raw bytes, so the
   webhook route's plugin scope registers content-type parsers for `application/json` and `application/x-www-form-urlencoded` with
   `parseAs: "buffer"` and `bodyLimit: 65536` and passes that Buffer unchanged; a core test sends a body with whitespace and
@@ -141,7 +143,8 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   now() + $ttl) ON CONFLICT (name) DO UPDATE SET holder = $2, started_at = now(), expires_at = now() + $ttl WHERE
   job_leases.expires_at <= now() RETURNING holder` — acquired iff a row is returned (holder = random per-process id).
 - Renew every ttl/3 while running: `UPDATE ... SET expires_at = now() + $ttl WHERE name = $1 AND holder = $2` (abort the job when
-  zero rows are updated). TTL: see Timing below.
+  zero rows are updated, and also when the renewal statement fails and the time since the last successful renewal reaches
+  ttl − one renewal period, so a database error can never let two processes run the job at once). TTL: see Timing below.
 - Release on finish: `UPDATE ... SET expires_at = started_at + $interval WHERE name = $1 AND holder = $2`, so no process (including
   this one) starts the job again before one interval has passed since this run started; `expires_at` is never NULL.
 - Timing: the lease TTL is a runner option independent of the job's interval (default 60 s, so a crashed holder blocks any job for
@@ -200,7 +203,9 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   SIGTERM/SIGINT shutdown (stop accepting, abort jobs, close servers, gateways, read model and pool, exit 0).
 - `src/migrate.ts`: `runMigrations` with `PINE_MIGRATOR_DATABASE_URL` (DDL role), prints applied ids, exits non-zero on error.
 - `/healthz` (process alive) and `/readyz` (DB reachable, migrations verified, read model not halted and its indexed block timestamp
-  within `maxIndexerLagSeconds` of the clock) on the main app (public, no cookies).
+  within `maxIndexerLagSeconds` of the clock) on the main app (public, no cookies). The readiness result is computed at most once
+  every 5 s and served from that cache (migrations are verified at startup and then at most every 60 s), so the public route never
+  costs a database round trip per request.
 - `README.md`: architecture, environment variables, Postgres roles and grants (migrator, api with INSERT-only audit, indexer,
   readonly), process list, TLS, backups, key rotation, launch gates from ADR-0001.
 
@@ -217,8 +222,9 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   and deletes the user's tokens for `github_app_authorization` revocations. A missing or invalid signature throws
 `ApiError("UNAUTHENTICATED")` (from `contracts/errors.ts`); other failures propagate as ordinary errors (core maps them to 500).
 - Token lifecycle duties (SEC-GH-07/10): a gateways job re-encrypts stored tokens under the `current` key and reports how many
-  remain under retired keys; `unlink` first revokes the token at GitHub (`DELETE /applications/{client_id}/token` with client
-  credentials) and then deletes it; any GitHub 401 for a user token, a token that fails to decrypt (wrong AAD, unknown key id,
+  remain under retired keys; `unlink` first revokes the whole authorization at GitHub (`DELETE /applications/{client_id}/grant`
+  with client credentials and a currently valid access token, refreshing first when the stored one expired; a refresh that fails
+  means the authorization is already unusable) and then deletes the local tokens regardless; any GitHub 401 for a user token, a token that fails to decrypt (wrong AAD, unknown key id,
   tampered ciphertext) and a rejected refresh all delete the stored token, mark the link revoked (so `identityOf` returns null) and
   throw `GitHubGatewayError("GITHUB_NOT_LINKED")` — never `UPSTREAM`. They also increment `pine_github_link_revoked_total{reason}`
   and log a redacted line; core audits them through its decorator (section 2.4). The metric is emitted as
@@ -231,8 +237,14 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   token (logins are renamed and re-registered, SEC-GH-05; the stored login is never a lookup key), then uses
   `GET /users/{login}/repos?type=owner&sort=pushed`; `getRepoById` uses `GET /repositories/{id}`; `listPullCommits` pages up to 250;
   `verifyCommitMembership`: `pull_head` iff `GET /repos/{o}/{r}/pulls/{n}` head sha equals the commit; `pull_commit` iff listed in
-  the PR commits; `branch_ancestor` iff `GET /repos/{o}/{r}/compare/{sha}...{branch}` has status `ahead` or `identical` and
-  `behind_by == 0`; otherwise `NOT_A_MEMBER`.
+  the PR commits; `branch_ancestor` only for a real branch of THIS repository: the ref name must be a branch name (refuse
+  40-hex SHA-shaped names, any `refs/` prefix and names containing `..`, `^`, `~`, `:` or `@{`), it is resolved with
+  `GET /repos/{o}/{r}/branches/{name}` (404 → `NOT_A_MEMBER`; the returned `name` must equal the requested one), and membership
+  holds iff `GET /repos/{o}/{r}/compare/{sha}...{branch head sha}` (the resolved commit SHA, never the caller's text) has status
+  `ahead` or `identical` and `behind_by == 0`; otherwise `NOT_A_MEMBER`. GitHub's compare resolves any commit-ish across the fork
+  network, so passing a caller-supplied name to it would let a fork commit "prove" membership (SEC-GH-11; platform-004 review P1).
+  Tests: a SHA as branch name, `refs/pull/1/head`, a tag name, a fork-only commit compared against a real branch, and a branch
+  that does not exist all yield `NOT_A_MEMBER`.
 
 ### 3.2 Content store and user-content server (SEC-EVID-01..11)
 - Table `content_blobs(sha256 text pk, size int, cid text, declared_media_type text, bytes bytea, created_at)`; `put` checks
