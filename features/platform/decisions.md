@@ -12,8 +12,14 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - Chain gateway: two RPC providers; `finalizedBlock()` requires both to agree on the hash at the finalized number.
 - Runtime uses `node --import tsx` (pinned); migrations run only via `src/migrate.ts` with a separate migrator URL; the API verifies migrations at startup and refuses to start otherwise.
 
-- Jobs: cross-process exclusion through a core-internal `JobLock` seam (pg advisory xact lock on a dedicated connection in
-  production, in-memory fake in tests); real-Postgres verification of that path is a launch gate.
+- Jobs: cross-process exclusion through lease rows in a core table (one atomic upsert with TTL, renewal and release; database time
+  only), provable on PGlite with two holder ids. This replaces the advisory-lock wording in the frozen JobDefinition comment while
+  keeping its guarantee (at most one execution of a job at a time across processes).
+- Roles and grants live in platform migrations (`pine_api` created idempotently as NOLOGIN, default privileges for later tables,
+  INSERT/SELECT-only on `audit_log`, a hardened SECURITY DEFINER IP-retention function), proven with `SET ROLE pine_api` on PGlite.
+- Inside transactions, helpers use the transaction handle only (PGlite serialises queries; nested `ctx.db` calls deadlock).
+- Per-IP rate limiting happens before any session lookup; core registers `@fastify/multipart` (one file, size limit from config) and
+  maps `GitHubGatewayError` to ApiError codes in its error handler.
 - Concurrency-sensitive writes are single atomic SQL statements (quota consume, nonce consume, rate-limit increment).
 - The user-content server has no in-app per-IP rate limit; the edge proxy/CDN provides it (documented in the README).
 - Accepted deviations from docs/security/requirements.md (reviewers: these are decisions, not defects): admin sessions share the

@@ -49,8 +49,15 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   `gateways.githubAuth.identityOf`, set `request.session`; touch the idle expiry at most once per 5 minutes.
 - `app.requireSession`, `app.requireAdmin` (admin + session authenticated within 300 s, else `STEP_UP_REQUIRED`).
 - Error handler: `toErrorResponse(error, request.id, ctx.redact)`, `Retry-After` when present; 5xx logged with the redacted message.
-- Rate limiting: `@fastify/rate-limit` with a Postgres-backed store (fixed window table), key = user id or client IP; default
-  120/min; `config.pine.rateLimitPerMinute` overrides per route.
+- Rate limiting in two stages: a per-IP limit in `onRequest` BEFORE any session lookup (unauthenticated floods with random cookies
+  cost one statement each), then the per-user limit after authentication; Postgres-backed fixed windows; default 120/min;
+  `config.pine.rateLimitPerMinute` overrides per route. A cookie that matches no session skips `identityOf`. Test that an
+  authenticated request is keyed by user id.
+- Multipart: core registers `@fastify/multipart` once with `limits: { fileSize: config.evidence.maxUploadBytes, files: 1, fields: 10,
+  parts: 11 }`; only routes with `config.pine.multipart` accept that content type (CSRF rules), everything else is JSON-only.
+- Errors: the core error handler maps `GitHubGatewayError` codes to ApiError codes before `toErrorResponse` (GITHUB_NOT_LINKED →
+  FORBIDDEN, REPO_NOT_PUBLIC and NOT_A_MEMBER → UNPROCESSABLE, NOT_FOUND → NOT_FOUND, RATE_LIMITED → RATE_LIMITED, UPSTREAM →
+  UPSTREAM_UNAVAILABLE) so routine GitHub failures never surface as 500.
 - Registers every module from `src/modules.ts` inside its own plugin scope, passing `ctx`.
 
 ### 2.3 Wallet authentication (SEC-AUTH-01..13)
@@ -85,21 +92,31 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 
 ### 2.5 Jobs runner
 Runs `[...gateways.jobs, ...modules.flatMap(m => m.jobs ?? [])]`: one loop per job, never overlapping itself; `AbortSignal` on
-shutdown; errors logged redacted, counted, retried next interval. Cross-process exclusion goes through an injected
-`JobLock { tryRun(name, fn): Promise<boolean> }` seam (core-internal): the production implementation takes a dedicated
-`pg` pool connection, `BEGIN; SELECT pg_try_advisory_xact_lock(hashtext($1))`, holds it across `fn` (which uses `ctx.db`, i.e.
-other connections), then `COMMIT`/`ROLLBACK` and releases on finish or abort; the test implementation is an in-memory fake that can
-simulate a foreign holder. PGlite is a single backend (advisory locks are re-entrant and `query`/`transaction` share one mutex), so
-the real cross-process path cannot be proven in the lane's checks: it is a launch-gate test against real Postgres (ADR-0001 D15).
+shutdown; errors logged redacted, counted, retried next interval. Cross-process exclusion uses **lease rows** (this settles the
+JobDefinition guarantee "at most one execution at a time across all API processes" without holding a connection): table
+`job_leases(name pk, holder text, expires_at timestamptz)`; acquire with ONE statement
+`INSERT ... ON CONFLICT (name) DO UPDATE SET holder = $holder, expires_at = now() + $ttl WHERE job_leases.expires_at < now()
+OR job_leases.holder = $holder RETURNING holder` (holder = random per-process id); renew every ttl/3 while running (abort the job's
+signal if a renewal fails); release by clearing `expires_at` on finish. TTL = max(60 s, 2 × the job's interval). Database time
+(`now()`) is the only clock used. This is provable on PGlite with two holder ids (test it), so no launch gate is needed.
 
 ### 2.5a Concurrency-safe statements and housekeeping
+- Inside a transaction every helper uses the transaction handle (`tx`), never `ctx.db`: PGlite serialises all queries through one
+  mutex, so a nested `ctx.db` query inside an open transaction deadlocks the tests (and would break atomicity in production).
 - Every concurrency-sensitive operation is ONE atomic SQL statement so PGlite's serialisation cannot hide a race: quota consume
   (`INSERT ... ON CONFLICT DO UPDATE ... WHERE used + $n <= limit RETURNING`), nonce consume (`DELETE ... RETURNING`), rate-limit
   increment (`INSERT ... ON CONFLICT DO UPDATE SET count = count + 1 RETURNING`), session lookup/touch.
 - Cleanup job (core): purge expired nonces, pre-sessions, sessions, OAuth states (via gateways only through its own job) and
   rate-limit windows older than one hour; bounded batches.
-- Audit IP retention: a `SECURITY DEFINER` function created in a platform migration that only nulls `ip` on rows older than 30
-  days, executable by the API role (the API role keeps INSERT-only on `audit_log`); the cleanup job calls it.
+- Roles and grants are owned by platform migrations so tests and production behave the same: `0002_` (or later) creates the role
+  `pine_api` idempotently (`DO $$ ... IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'pine_api') THEN CREATE ROLE pine_api
+  NOLOGIN ...`; in production the DBA pre-creates it with LOGIN and the migration is a no-op for creation), grants USAGE on the schema
+  and DML on existing tables, `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO pine_api`
+  (so later groups' tables are covered), and `REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM pine_api` (INSERT and SELECT only).
+- Audit IP retention: a `SECURITY DEFINER` function (`SET search_path = public, pg_temp`, `REVOKE EXECUTE ... FROM PUBLIC`,
+  `GRANT EXECUTE ... TO pine_api`) that only nulls `ip` on rows older than 30 days; the cleanup job calls it. Tests use
+  `SET ROLE pine_api` on PGlite to prove UPDATE/DELETE on `audit_log` fail with a permission error and the function still works
+  (SEC-OPS-07/10).
 - Session rotation copies `authenticatedAt` (the time of the last wallet signature) from the old session: linking GitHub never
   refreshes the admin step-up window (test it).
 - CSRF details: the checks run in `onRequest` (before body parsing) so failures are always `CSRF_REJECTED`; requests without a
