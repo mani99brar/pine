@@ -6,6 +6,8 @@ Implement `contracts/src/EvidenceRegistry.sol` exactly as specified in `docs/prd
 
 ## Context
 
+- Rerun: run chain-004 produced candidate commit `6ddcd2764568ffc10a08ad6d92d817505c5a9ce8` (branch `keep/chain-004-candidate`), which passed every check; its review was blocked only because `scripts/forge-test-tap.mjs` reported the two invariants of `ERInvariantTest` as one test (forge 1.8 runs them as one campaign; the wrapper now reports each predicate). Start from it: `git checkout 6ddcd2764568ffc10a08ad6d92d817505c5a9ce8 -- contracts/src/EvidenceRegistry.sol contracts/test/evidence-registry`, review it against the current PRD-01 and decisions, confirm the unit check now lists both invariants (44 tests), and keep the ER prefixes and the other operator-settled choices (list them again in your completion).
+
 - The commitment formula and TYPEHASH are frozen in the interface NatSpec; the cross-language vector is `EVIDENCE_COMMITMENT_VECTOR` in `packages/shared/src/testing/vectors.ts` (TypeScript twin: `packages/shared/src/evidence.ts`).
 - Claim deadlines come from `IClaimRegistry.getClaim(market)`; registration from `isRegistered(market)`. The ClaimRegistry implementation is written by another lane: use a test-local mock claim registry that you control (deadlines, registration).
 - Timing operators (frozen): commit and publish iff `block.timestamp < evidenceDeadline`; reveal iff `block.timestamp < revealDeadline`.

@@ -44,23 +44,43 @@ let fail = 0;
 let skipped = 0;
 let n = 0;
 const lines = [];
+function record(label, status, result) {
+  n += 1;
+  if (status === "success") {
+    pass += 1;
+    lines.push(`ok ${n} - ${label}`);
+  } else if (status === "skipped") {
+    skipped += 1;
+    lines.push(`ok ${n} - ${label} # SKIP`);
+  } else {
+    fail += 1;
+    lines.push(`not ok ${n} - ${label}`);
+    const reason = result.reason ? String(result.reason) : "failed";
+    lines.push(`  ---\n  reason: ${JSON.stringify(reason)}\n  counterexample: ${JSON.stringify(result.counterexample ?? null)}\n  ...`);
+  }
+}
+
 for (const [suiteName, suite] of Object.entries(suites)) {
+  const contract = suiteName.split(":").pop();
   for (const [testName, result] of Object.entries(suite.test_results ?? {})) {
-    n += 1;
     const status = String(result.status ?? "").toLowerCase();
-    const label = `${suiteName.split(":").pop()}::${testName}`;
-    if (status === "success") {
-      pass += 1;
-      lines.push(`ok ${n} - ${label}`);
-    } else if (status === "skipped") {
-      skipped += 1;
-      lines.push(`ok ${n} - ${label} # SKIP`);
-    } else {
-      fail += 1;
-      lines.push(`not ok ${n} - ${label}`);
-      const reason = result.reason ? String(result.reason) : "failed";
-      lines.push(`  ---\n  reason: ${JSON.stringify(reason)}\n  counterexample: ${JSON.stringify(result.counterexample ?? null)}\n  ...`);
+    // Forge >= 1.x runs every invariant of a contract in one campaign and reports it as ONE test entry (named after the
+    // first invariant) with `invariant_predicate_results` listing each invariant function. Report each predicate as its own
+    // test so every invariant has its own evidence; the campaign entry itself is not counted twice.
+    const predicates = Array.isArray(result.invariant_predicate_results) ? result.invariant_predicate_results : [];
+    if (predicates.length > 0) {
+      for (const predicate of predicates) {
+        const predicateStatus = String(predicate.status ?? "").toLowerCase();
+        // A failed campaign fails every predicate it could not prove, even if the predicate entry says otherwise.
+        const effective = status === "success" ? predicateStatus : predicateStatus === "success" ? "success" : "failure";
+        record(`${contract}::${predicate.name}()`, effective, { ...result, reason: predicate.reason ?? result.reason });
+      }
+      if (status !== "success" && predicates.every((predicate) => String(predicate.status ?? "").toLowerCase() === "success")) {
+        record(`${contract}::${testName} (campaign)`, status, result);
+      }
+      continue;
     }
+    record(`${contract}::${testName}`, status, result);
   }
 }
 

@@ -22,16 +22,12 @@
       "required_check_kinds": [
         "build",
         "integration",
-        "typecheck",
-        "unit"
+        "typecheck"
       ],
       "owned_paths": [
         "contracts/script",
         "contracts/test/e2e",
-        "scripts/fixtures",
-        "contracts/src/ClaimRegistry.sol",
-        "contracts/test/claim-registry",
-        "contracts/test/fork"
+        "scripts/fixtures"
       ],
       "checks": [
         {
@@ -58,18 +54,6 @@
           "scenarios": []
         },
         {
-          "id": "unit",
-          "kind": "unit",
-          "argv": [
-            "node",
-            "scripts/forge-test-tap.mjs",
-            "--match-path",
-            "test/claim-registry/**/*.sol"
-          ],
-          "timeout_seconds": 2400,
-          "scenarios": []
-        },
-        {
           "id": "e2e",
           "kind": "integration",
           "argv": [
@@ -89,18 +73,6 @@
             "scripts/check-forbidden.mjs"
           ],
           "timeout_seconds": 120,
-          "scenarios": []
-        },
-        {
-          "id": "fork",
-          "kind": "integration",
-          "argv": [
-            "node",
-            "scripts/forge-test-tap.mjs",
-            "--match-path",
-            "test/fork/**/*.sol"
-          ],
-          "timeout_seconds": 2400,
           "scenarios": []
         }
       ]
