@@ -24,7 +24,30 @@ Idempotency (SEC-TX-08): every plan-creating POST requires the header `Idempoten
 otherwise 400). The key is scoped to (user, route); the first request stores the plan with the key and a SHA-256 of the
 canonical request body in one `INSERT ... ON CONFLICT DO NOTHING RETURNING`; a retry with the same key and body returns the
 stored plan unchanged (same plan id, same calldata) and consumes `plans_per_day` only once; the same key with a different body is
-409 CONFLICT. Database portability: tests run on PGlite but production uses node-postgres, so compare-and-set success is read
+409 CONFLICT.
+
+Plan store (identical contract in both lanes, each in its own tables `<lane>_plans` and `<lane>_plan_steps`):
+- Row: id (uuid), user (FK `users`), route, idempotency key, body hash, kind, market, wire steps (`planToWire`), state,
+  `expires_at`, timestamps; unique (user, route, idempotency key); per step: reported tx hashes (several allowed: speed-ups and
+  replacements), step state, the redacted revert reason.
+- Reveal plans are the exception: their wire steps are NOT stored (the calldata contains the salt) and their body hash covers only
+  `(submissionId, contentSha256)`; a retry rebuilds the identical calldata from the request body in memory. No table, column or
+  log ever holds the salt, with or without `0x` (tests cast every row of every module table to text and search both forms).
+- `POST /api/v1/<lane>/plans/:planId/submitted {stepId, txHash}` (session, owner only, otherwise NOT_FOUND; idempotent; `<lane>` is
+  `markets` or `funding`) records a hint and moves the plan `planned → submitted`.
+- States: plan `planned → submitted → confirmed | failed | expired` (compare-and-set only). A step is `confirmed` when a reported
+  hash has a successful receipt at or below `ctx.chain.finalizedBlock()` whose logs include the step's expected event from the
+  step's target contract with the expected arguments; markets steps may instead be confirmed from read-model facts (evidence
+  commit/reveal/publish by submitter and market, oracle answers by answerer, question and bond). The plan is `confirmed` when every
+  step is; when `expires_at` + 1 h passed without that, it becomes `expired` if no step was confirmed, else `failed` (partial
+  execution; the response points to the merge plan as recovery).
+- `expires_at` = min(created + 24 h, kind deadline): commit and publish `evidenceDeadline − 60 s`, reveal `revealDeadline − 60 s`,
+  oracle helper plans created + 1 h (their arguments go stale), ladder created + 20 min (its mint deadline), withdraw created +
+  20 min, merge and redeem created + 1 h. A same-key retry after expiry returns the stored plan with its state; a fresh plan
+  needs a new key.
+- Limits for `verifyPlan`: `maxTotalValueWei` = 10,000 xDAI in both lanes (client-supplied bonds, bounties and budgets above it are
+  VALIDATION_FAILED); `maxApprovalAmount` = 0 in markets (no approvals) and 10,000 × 10^18 in funding.
+- Reconciliation jobs `markets.reconcile` and `funding.reconcile` (30 s) implement these transitions idempotently. Database portability: tests run on PGlite but production uses node-postgres, so compare-and-set success is read
 only from drizzle `.returning()` rows (never `rowCount`/`affectedRows`) and raw SQL casts int8 and counts explicitly; inside a
 transaction every query uses the transaction handle.
 
@@ -58,15 +81,20 @@ transaction every query uses the transaction handle.
   (`name`, `description` = fixed text + manifest title as data, `fileURI` = `ipfs://<manifest cid>`, `fileHash` = sha256) for parties
   to submit to the Kleros foreign proxy on Ethereum themselves, with instructions (address, `submitEvidence(uint256 questionId, string uri)`).
 ### 2.3 Oracle and arbitration (ADR D7)
-- `GET /api/v1/markets/:market/oracle` (public): question record, answers, `deriveOracleStatus(question, now)`, arbitration record
-  and stages, condition resolution and payouts, phase, staleness, and `dueActions(...)`: a pure function returning the permissionless
-  actions currently possible (`answer` after opening, `fund_bounty`, `request_arbitration_on_ethereum` (instructions only),
+- `GET /api/v1/markets/:market/oracle?account` (public): question record, answers, `deriveOracleStatus(question, now)`, arbitration
+  record and stages, condition resolution and payouts, phase, staleness, and `dueActions(...)`: a pure function over read-model facts
+  plus values read by `eth_call` at request time (Reality `getHistoryHash(questionId)` once finalized: zero means winnings were
+  already claimed; with `account`, Reality `balanceOf(account)` for `withdraw`; account-specific actions appear only when `account`
+  is given), returning the permissionless actions currently possible (`answer` after opening, `fund_bounty`, `request_arbitration_on_ethereum` (instructions only),
   `handle_notified_request`, `handle_rejected_request`, `report_arbitration_answer` (needs the last history hash/answer/answerer from
   the answer list), `reopen_question` after "answered too soon", `resolve_market` after finalization, `claim_winnings`, `withdraw`).
 - Plans (session; `answer_oracle`): `submitAnswer {market, outcome: yes|no|invalid, bond}` with `maxPrevious = current bond` and
   `bond >= max(minBond, 2 × current bond)`; `fundAnswerBounty {market, amount}`; `resolve`, `reopen`, `handleNotifiedRequest`,
   `handleRejectedRequest`, `reportArbitrationAnswer`, `claimWinnings` (arguments reconstructed from the answer history in reverse
-  order exactly as Reality requires), `withdraw`. `reopenQuestion` uses nonce = the number of questions already in this market's
+  order exactly as Reality requires), `withdraw`. `reopenQuestion` re-creates the original content exactly: template 2, question =
+  `marketName` ␟ `"Yes","No"` ␟ `config.claims.questionCategory` ␟ `config.claims.questionLanguage` (asserted at registration to
+  equal the ClaimRegistry constants `misc` and `en_US`), the original arbitrator, timeout, opening time and min bond from the
+  question record; it uses nonce = the number of questions already in this market's
   reopen chain (from the read model), because the reopened question id includes the sender and the nonce and a second reopen by
   the same account with nonce 0 would collide with the first and revert. Each plan is verified and its arguments re-derived from the read model at request
   time (never from client-supplied history).
@@ -76,8 +104,9 @@ transaction every query uses the transaction handle.
   (unique per claim, kind and target block/time) for the claim creator and evidence submitters; never notify on data the read model
   has not indexed.
 - `GET /api/v1/notifications` / `POST /api/v1/notifications/:id/read` (session, owner-only).
-- `GET /api/v1/accounts/:wallet/activity` (public): claims created, evidence submitted, oracle answers (from the read model), with
-  cursor pagination.
+- `GET /api/v1/accounts/:wallet/activity` (public): claims created (`listClaims({creator})`) and evidence submitted
+  (`listEvidence({submitter})`) from the read model, with cursor pagination. Oracle answers by wallet are deferred: the frozen
+  `ReadModel` has no lookup by answerer.
 
 ## 3. funding lane (ADR D8)
 ### 3.1 Market liquidity state (public, cached ≤ 30 s per market)
@@ -88,7 +117,12 @@ price impact; `null` values with a reason when no pool exists. Spot prices are l
 ### 3.2 YES sell-ladder funding plan
 `POST /api/v1/funding/plans/ladder {market, budgetWei, lowerPrice, upperPrice}` (session; `fund_market`; prices as decimal strings
 in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
-1. Claim must be verified (integrity), in `evidence_open` phase, with at least 1 hour before the evidence deadline.
+1. The claim must be in `evidence_open` phase with at least 1 hour before the evidence deadline, not hidden or blocked by
+   moderation (`ctx.moderation.states`), and pass an inline integrity check (the claims lane's `claims_index` is not available to
+   this lane): `ctx.contentStore.retrieve(claimDocumentSha256, 262144)`, `parseClaimDocumentBytes(bytes, digest)`, and the PRD-03
+   section 7 field comparison against the read-model `ClaimRecord` (creator, repository id, commit, policy sha256, deadlines, min
+   bond, registries, title, `marketName == renderQuestion(...)`, constant fields equal `buildDeploymentManifest(config.contracts)`);
+   unavailable or mismatching → `INTEGRITY_FAILED` (409) naming the failed fields, never a plan.
 2. `shares = sDAI.previewDeposit(budgetWei)` (eth_call), `S = shares − ceil(shares × 10 / 10000)` (10 bps margin for interest
    accrual between plan and execution; the remainder stays in the wallet as full sets).
 3. Orientation: tokens sorted (`token0 < token1`). If YES is token0, Algebra price = sDAI per YES: the ladder is a token0-only
@@ -99,15 +133,18 @@ in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
    `createAndInitializePoolIfNecessary(token0, token1, sqrtPriceX96 at lowerPrice in the pool's orientation)` (it initialises an
    existing uninitialised pool at that price). If it exists, its current price must lie outside the range on the correct side (YES cheaper than
    `lowerPrice`) so the position is single-sided; otherwise refuse with an explanation (no re-pricing swaps in v1).
-5. Steps: `gnosisRouter.splitFromBase{value: budgetWei}(market)`; `outcomeToken.approve(positionManager, S)` on the YES token;
+5. Steps: `gnosisRouter.splitFromBase{value: budgetWei}(market)` — omitted when the account already holds at least `S` YES
+   (`balanceOf` at the pinned block), so a fresh plan after a partially executed one never splits twice;
+   `outcomeToken.approve(positionManager, S)` on the YES token;
    (optional pool creation); `positionManager.mint({token0, token1, tickLower, tickUpper, amount(YES side) = S, other side 0,
    amountMin(YES side) = S − S×50/10000, other min 0, recipient = account, deadline = now + 20 min})`.
 6. Response also gives: maximum loss if YES resolves `S × (1 − sqrt(lowerPrice × upperPrice))` in sDAI and xDAI (+ gas estimate),
    loss if NO or Invalid resolves (gas only, plus the 10 bps remainder is kept as full sets), the fee range of the pool, the
    withdrawability statement (positions can be withdrawn at any time; liquidity is not a bounty), and the disclosures of policy C7.
 ### 3.3 Positions, withdrawal, merge and redemption
-- `GET /api/v1/funding/positions/:wallet` (public): the wallet's Algebra positions (`balanceOf`, `tokenOfOwnerByIndex`, `positions`)
-  in Pine market pools, with amounts, plus outcome token balances per claim market.
+- `GET /api/v1/funding/positions/:wallet?cursor&market` (public, bounded): the wallet's Algebra positions (`balanceOf`,
+  `tokenOfOwnerByIndex`, `positions`) in Pine market pools, 20 NFTs per page and at most 200 scanned per wallet (`truncated: true`
+  beyond); outcome token balances only for the `market` given.
 - Plans: `withdraw {tokenId}` → `decreaseLiquidity(all, mins from a fresh quote with 50 bps slippage, deadline)`, `collect(recipient =
   account, max)`, `burn` (only when liquidity becomes zero); `merge {market, amount}` → three exact approvals (YES, NO, INVALID to the
   GnosisRouter) + `mergeToBase(market, amount)`; `redeem {market}` (after `ConditionResolution`) → exact approvals of the winning
@@ -115,6 +152,11 @@ in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
 - Funding history: plans with states and confirmed receipts per wallet; reconciliation job `funding.reconcile` (30 s).
 
 ## 4. Required tests (vitest with the frozen harness, scripted chain responses; name SEC ids in negative tests)
+Test apps: the frozen `buildTestApp` registers no `@fastify/multipart` and logs nothing, so each lane writes a local test-app helper
+that mirrors it and additionally registers `@fastify/multipart` with exactly the core options of PRD-02 section 2.2 and a logger
+writing to an in-memory stream (for the "never logged" assertions). The module itself never registers multipart (core does, once;
+a second registration throws at boot). Uploads are read with `request.parts()` so `expectedSha256` may come before or after the
+file part.
 - markets: manifest validation (wrong submitter, wrong claim, missing artifact, non-canonical), artifact size limit enforced while
   streaming (413, nothing stored, no quota consumed; SEC-EVID-01), `expectedSha256` mismatch 422 (SEC-EVID-03), a filename like
   `../../etc/passwd` with bidi characters never reaching storage or responses (SEC-EVID-08), idempotent plan retries (same key and
@@ -123,7 +165,10 @@ in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
   evidence listing timeliness at the exact deadline second, ERC-1497 output, `dueActions` for every oracle state including
   answered-too-soon/reopen, arbitration stages and finalization, `claimWinnings` argument reconstruction against a hand-computed
   history, notification idempotency, NOT_READY when stale, compliance refusals.
-- funding: tick/price conversion and orientation for both token orders (property tests: the range never exceeds the requested
+- both lanes: the plan store (same-key retry, different body 409, `/submitted` owner-only and idempotent, reconcile transitions
+  including partial execution → failed, expiry per kind), reveal plans never storing the salt in any form.
+- funding: the inline integrity gate (unavailable document and each mismatching field → INTEGRITY_FAILED, no plan), splitFromBase
+  omitted when the YES balance already covers S, bounded positions paging, tick/price conversion and orientation for both token orders (property tests: the range never exceeds the requested
   prices; single-sidedness), share margin, pool missing vs existing-uninitialised (initialised in the plan) vs existing correctly
   priced vs mispriced (refused), idempotent plan retries (SEC-TX-08), exact approval equals
   the mint amount, recipient = account, max-loss formula against hand-computed values, withdraw/merge/redeem plans verified, quoter

@@ -17,6 +17,15 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - An existing but uninitialised Algebra pool (price 0) is initialised by the plan like a missing pool.
 - `reopenQuestion` nonce = number of questions already in the market's reopen chain.
 - Artifact uploads: 413 before any store or quota consumption; optional `expectedSha256` is only compared (422 on mismatch).
+- One plan-store contract for both lanes (PRD-04 section 1): `<lane>_plans`/`<lane>_plan_steps`, `POST /api/v1/<lane>/plans/:planId/submitted`,
+  per-kind expiry, confirmation from finalized receipts (markets also from read-model facts), partial execution = `failed`.
+- Reveal plans never store calldata or any form of the salt; retries rebuild the calldata from the request.
+- Funding's "claim verified" gate is an inline integrity check with the frozen shared parsers (INTEGRITY_FAILED, 409), because the
+  claims lane's index is outside this feature.
+- Account activity lists claims and evidence only; oracle answers by wallet are deferred (no frozen lookup by answerer).
+- verifyPlan limits: maxTotalValueWei 10,000 xDAI; maxApprovalAmount 0 (markets) and 10,000e18 (funding).
+- Positions paging: 20 NFTs per page, 200 scanned per wallet; outcome balances only for a given market.
+- Lane-local test apps add @fastify/multipart (core options) and a capturing logger; modules never register multipart.
 - Coverage matrix (lesson from the platform and claims reviews): each lane's completion maps every required test of its PRD section
   and every decision/operator clarification to the test file and test name that would fail if the behaviour were removed, and
   closes every gap before completing (the independent coverage reviewer blocks on any untested requirement).
