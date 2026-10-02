@@ -33,6 +33,17 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
 - Deleting a draft without publications deletes its previews in the same transaction; with a publication it is 409.
 - Schema endpoint test: separate Fastify with Ajv `removeAdditional: false, coerceTypes: false, useDefaults: false`; structural
   tampering only; refinements are tested against the frozen parse functions; served schemas carry a `$comment` about server-side rules.
+- Operator clarifications (claims-004, design-challenge P2s): (1) driver portability — compare-and-set success only from drizzle
+  `.returning()` rows, never `rowCount`/`affectedRows`; explicit int8/count casts in raw SQL; (2) inside a transaction only the
+  transaction handle; (3) `pending` integrity rows also get `next_attempt_at` (exponential backoff capped at 1 h), selected by
+  `next_attempt_at <= now` oldest first; (4) jobs never depend on `register()` having run: one memoized loader verifies the catalog
+  and the config.seer/manifest assertion for both; (5) for a `pull` membership ref the base commit is verified with
+  `{ kind: "branch", name: pull.baseRef }` (a PR base sha is never a PR commit; accepted deviation from "against the same ref");
+  (6) bidi/zero-width/BOM characters appear in tests only as `\u` escapes (the forbidden gate scans tests); (7) the window rule
+  stays "round up to the minute, then check bounds" and the refusal message states the maximum minus 60 s.
+- Claim index `repository_id` is unbounded `numeric` (an on-chain uint64 never breaks discovery); the ClaimRegistry now also caps
+  it at 2^53 - 1.
+- Tests serialize PGlite-heavy files with a module-local lock (each PGlite instance takes ~400 MB on this host).
 - "Public routes never read cookies" is proven by the platform; this module proves its public handlers ignore sessions (identical
   responses with and without `x-test-session` and a `Cookie` header).
 
