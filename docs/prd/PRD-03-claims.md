@@ -160,22 +160,30 @@ The integrity job runs in two phases so that a run that stops partway never lose
   functions instead.
 
 ## 8a. Review fixes carried by claims-006 (claims-005 review)
-- Listing eligibility (SEC-CLAIM-06 intent): `claims_index` gets `listable`, true only when the integrity result is `verified`
-  AND the claim's policy is currently publishable (catalog status `approved`, or `draft` with `allowDraftPolicies`; family
-  enabled; never `SC-001`) AND the document's policy parameters validate against the per-version parameter schema. Public
-  listings and agent feeds show only `listable` claims; detail endpoints still show every claim with its integrity and a
-  `listable` flag. A claim created directly on-chain with SC-001 or malformed parameters is therefore never listed.
+- Listing eligibility (SEC-CLAIM-06 intent), computed at query time, never stored: migration `0002_` stores only fixed facts —
+  `parameters_valid boolean` (decided once at verification against the per-version parameter schema) and the policy sha256 if
+  `0001` lacks it. Listings and feeds filter in SQL with `integrity = 'verified' AND parameters_valid AND policy_sha256 =
+  ANY($publishable)`, where `$publishable` is the set of currently publishable policy digests from the memoized catalog/config
+  loader (status `approved`, or `draft` with `allowDraftPolicies`; family enabled; never `SC-001`). Detail endpoints compute the
+  same `listable` flag. A config or catalog change takes effect at the next request; a claim created directly on-chain with
+  SC-001 or malformed parameters is never listed.
 - A first `POST /publications` racing a `DELETE /drafts/:id`: a foreign-key violation (23503) on the publication insert maps to
-  NOT_FOUND ("Preview not found"), never 500.
+  NOT_FOUND ("Preview not found"), never 500. drizzle wraps driver errors, so the code is read through the `cause` chain. The
+  test makes the race deterministic by replacing `ctx.quotas.consume` with a fake that deletes the draft and its previews before
+  resolving.
 - Agent feeds: `GET /api/v1/agents/claims` caps `limit` at 25; list items carry digests, CIDs, URLs and the platform facts but not
-  the document body; parsed verified documents are cached by digest (immutable; LRU of 500); the ETag is computed from the item
-  keys before any expensive work, so a matching `If-None-Match` returns 304 cheaply.
+  the document body; parsed verified documents are cached by digest (immutable; LRU of 500). ETags (agent feeds, claim lists and
+  details) are computed before the expensive work from everything that can change the response: per item the market key, its
+  moderation state, its clock-derived phase (or deadlines plus the bound `now` bucket), integrity, `listable`, oracle status and
+  resolution facts, plus the read model's indexed block; a matching `If-None-Match` returns 304 cheaply.
 - A `block`-moderated claim never exposes its user-content URL (agent detail included).
 - Moderated public resources (claim lists, claim details, agent feeds) use `Cache-Control: no-cache` with the ETag so a hide or
   block takes effect immediately even behind a shared cache; policies may stay `max-age=300`.
 - Stored drafts are read tolerantly (a draft saved under an older rule still lists and loads) and revalidated with the current
   rules at update and preview, returning a validation error instead of 500.
-- The test lock's stale takeover is atomic: rename the stale directory to a unique name, then remove it.
+- The test lock's stale takeover: rename the stale directory to a unique name, re-read the pid inside the renamed directory and,
+  if that process is alive (another waiter took over first), put it back when the lock path is free or simply wait and retry;
+  only a confirmed-dead owner's directory is removed.
 
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;
