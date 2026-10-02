@@ -11,6 +11,7 @@ Replace the stub `packages/api/src/platform/gateways/index.ts` with `createGatew
 - External HTTP (GitHub, IPFS gateways, Kubo, pinning service, RPC) must be injectable (a `fetch`-like dependency or viem transport) so tests use recorded fixtures and never touch the network.
 - The content server has no in-app per-IP rate limit (decided: edge proxy); `listPublicRepos` refreshes the login via `GET /user` first.
 - GitHub 401, token decrypt/AAD failure and a rejected refresh: delete the token, mark the link revoked (`identityOf` → null), increment `pine_github_link_revoked_total{reason}` and throw `GitHubGatewayError("GITHUB_NOT_LINKED")` (never `UPSTREAM`); core audits it (PRD-02 sections 2.4 and 3.1).
+- `createGateways(deps)` wraps an exported `buildGateways(deps, io)` (`io`: `fetch` plus the two viem transports) so every test runs offline; `buildGateways` checks `eth_chainId` on both transports (PRD-02 section 3.3). Revocation metric: `metrics.increment("github_link_revoked", { reason })`.
 - Your migrations never mention the role `pine_api`: it is created by platform `0002_`, which is not in your worktree, and its default privileges cover your tables.
 - Build in this order with separate test files per area: crypto/token store → GitHub auth flow → GitHub gateway and membership → content store/retrieve/pin outbox → content server → chain gateway → createGateways.
 
@@ -28,4 +29,4 @@ Replace the stub `packages/api/src/platform/gateways/index.ts` with `createGatew
 
 ## Stop
 
-Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure. Ask a `question` before choosing a behaviour PRD-02 leaves open that affects security.
+Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure with the same root cause (failures in different test areas while you build area by area are normal progress; run the narrower `vitest run <area dir or file>` while iterating, and commit after each area passes). Ask a `question` before choosing a behaviour PRD-02 leaves open that affects security.

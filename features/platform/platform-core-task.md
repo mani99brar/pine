@@ -28,4 +28,4 @@ Implement the API platform core described in `docs/prd/PRD-02-platform.md` secti
 
 ## Stop
 
-Stop and report `blocked` when a frozen contract prevents a required behaviour (describe the exact gap), or after three failed attempts at the same check failure. Ask a `question` before inventing configuration that changes security behaviour beyond PRD-02.
+Stop and report `blocked` when a frozen contract prevents a required behaviour (describe the exact gap), or after three failed attempts at the same check failure with the same root cause (failures in different test areas while you build area by area are normal progress; run the narrower `vitest run <area dir or file>` while iterating, and commit after each area passes). Ask a `question` before inventing configuration that changes security behaviour beyond PRD-02.

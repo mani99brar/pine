@@ -19,8 +19,9 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
   rejection, unlink, webhook accepted/rejected, revocations); gateways never write `audit_log` directly (accepted deviation from the
   "gateway audits" reading of SEC-GH-04/06/10). The revocation channel is the frozen code `GITHUB_NOT_LINKED`: gateways map GitHub
   401, token decrypt/AAD failure and a rejected refresh to it after deleting the token and marking the link revoked (never
-  `UPSTREAM`), plus the metric `pine_github_link_revoked_total{reason}`; core wraps `gateways.github` in an auditing decorator as
-  `ctx.github` that records `github.link.revoked` (actor = the userId argument) before rethrowing. Webhook-driven revocations are
+  `UPSTREAM`), plus `metrics.increment("github_link_revoked", { reason })`; core wraps `gateways.github` in an auditing decorator
+  as `ctx.github` that reads `identityOf(userId)` before forwarding and records `github.link.revoked` (actor = the userId argument)
+  only when that identity was non-null and the call rejected with `GITHUB_NOT_LINKED` (never-linked users get no audit row). Webhook-driven revocations are
   not attributed to a Pine user in the audit log because `handleWebhook` returns `void` (accepted; metric and log carry them).
 - SEC-GH-03 deviation (accepted): an OAuth callback with a missing, expired, reused or foreign-session state links nothing, is
   audited as `github.link.failed` and redirects 303 to `/settings?github=error` instead of answering 403.
@@ -30,6 +31,15 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
   lease tests run in real time with sub-second values; tests never update `job_leases` directly.
 - Grants: platform `0002_` grants DML on platform tables by name, only `SELECT` on `schema_migrations`, and default privileges for
   later tables; gateways and later migration groups never mention `pine_api`.
+- PGlite was verified on 2026-10-02 to enforce the planned roles: `CREATE ROLE` in a `DO` block, grants by table name, default
+  privileges for later tables, `SET ROLE pine_api` (UPDATE/DELETE on `audit_log` and UPDATE on `schema_migrations` fail with
+  42501, the SECURITY DEFINER retention function works) and `now()` advancing between autocommit statements.
+- `@fastify/cors` is not registered; public routes get `Access-Control-Allow-Origin: *` from an `onSend` hook keyed on the matched
+  route's config; OPTIONS is not routed.
+- Per-IP flood guard default 600/min (`PINE_IP_FLOOD_LIMIT_PER_MINUTE`, NAT-tolerant); per-user limit default 120/min.
+- Metrics adapter: lazy, cached by name, label names fixed at first use, mismatching samples dropped with one warning.
+- Gateways I/O injection: `createGateways(deps)` wraps an exported `buildGateways(deps, io)` (`fetch` + two viem transports);
+  it checks `eth_chainId` on both RPC transports.
 - SIWE test signing helpers live only in `*.test.ts` or `src/platform/core/testing/` (exempt from the forbidden-pattern gate);
   production code never imports from a `testing/` directory.
 - PGlite serialises queries, so race-freedom of quota/nonce/rate-limit/refresh statements is guaranteed by their single-statement or

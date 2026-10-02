@@ -44,7 +44,10 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - Security headers (helmet): API responses `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`, `nosniff`,
   `Referrer-Policy: no-referrer`, HSTS in production, `Cache-Control: no-store` on authenticated responses.
 - CORS: none for credentialed routes. Routes with `config.pine.public` get `Access-Control-Allow-Origin: *`, no credentials,
-  GET/HEAD only; the platform does not read cookies for them.
+  GET/HEAD only; the platform does not read cookies for them. `@fastify/cors` is NOT registered (a preflight would match Fastify's
+  wildcard OPTIONS route, whose config is not the target route's): an `onSend` hook adds the header from the matched route's own
+  `config.pine.public`; public routes are simple GET/HEAD requests that need no preflight and OPTIONS is not routed (test that an
+  OPTIONS request never yields `Access-Control-Allow-Credentials` and credentialed routes never carry CORS headers).
 - CSRF (SEC-AUTH-14) on POST/PUT/PATCH/DELETE: exact `Origin` match with `publicOrigin` (reject missing Origin), reject
   `Sec-Fetch-Site: cross-site`, require `x-pine-csrf: 1`, require `content-type: application/json` unless the route sets
   `config.pine.multipart` (then `multipart/form-data`). Failures are `CSRF_REJECTED`. Exempt only the GitHub webhook route.
@@ -55,7 +58,8 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - Error handler: `toErrorResponse(error, request.id, ctx.redact)`, `Retry-After` when present; 5xx logged with the redacted message.
 - Rate limiting in two stages: a per-IP flood guard in `onRequest` BEFORE any session lookup using `@fastify/rate-limit`'s
   in-memory store (no database write for anonymous traffic; N processes allow N× the limit, acceptable for a flood guard; fleet-wide
-  per-IP limits belong to the edge proxy), then the per-user limit after authentication in Postgres fixed windows; default
+  per-IP limits belong to the edge proxy) with its own NAT-tolerant default of 600 requests/min per IP
+  (`PINE_IP_FLOOD_LIMIT_PER_MINUTE`), then the per-user limit after authentication in Postgres fixed windows; default
   120/min; `config.pine.rateLimitPerMinute` overrides per route. A cookie that matches no session skips `identityOf`. Test that an
   authenticated request is keyed by user id.
 - Multipart: core registers `@fastify/multipart` once with `limits: { fileSize: config.evidence.maxUploadBytes, files: 1, fields: 10,
@@ -97,15 +101,19 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   failure (including scope rejection and identity conflicts), unlink, webhook results, and token revocations reported by gateways.
   The revocation channel is the frozen error code: the gateway throws `GitHubGatewayError("GITHUB_NOT_LINKED")` after it has
   deleted an unusable token (GitHub 401, decrypt/AAD failure, refresh rejected). Core builds `ctx.github` as an auditing decorator
-  around `gateways.github`: every method is forwarded unchanged, and when one rejects with `GITHUB_NOT_LINKED` the decorator records
-  `github.link.revoked` (actor = the `userId` argument, details: method name) before rethrowing, so modules that catch the error
-  themselves cannot hide it. Test it with a fake gateway.
+  around `gateways.github`: before forwarding a call it reads `gateways.githubAuth.identityOf(userId)`; when that identity was
+  non-null and the call then rejects with `GITHUB_NOT_LINKED`, the decorator records `github.link.revoked` (actor = the `userId`
+  argument, details: method name) before rethrowing, so modules that catch the error themselves cannot hide it. A user who never
+  linked GitHub (identity null before the call) gets the same error and NO audit row: the claims routes call `ctx.github` routinely
+  for such users and map the error to "connect GitHub". Test both cases with fakes.
 - `moderation`: table of `(subject, id) -> {action hide|block, reason, actor, at}`; admin routes
   `GET/POST/DELETE /api/v1/admin/moderation` (requireAdmin, audit every change). Moderation never edits documents or chain data.
 - `compliance.assertAllowed(request, session, action)`: blocked wallet list (static denylist file or env), geofence from the
   configured trusted header (only honoured when trustProxy is configured) per action, fail-closed in production when the country is
   unknown for `publish_claim` and `fund_market`, and terms acceptance of the current digest (`TERMS_REQUIRED`).
-- `metrics` via prom-client on an internal listener (`/metrics`, bound to the configured internal port, not the public app).
+- `metrics` via prom-client on an internal listener (`/metrics`, bound to the configured internal port, not the public app). The
+  adapter creates counters and histograms lazily, caches them by name (never registers a name twice), fixes a metric's label names
+  at its first use, and drops (with one redacted warning per name) a later sample whose label keys differ instead of throwing.
 - `clock` (system clock), `redact`, `db` (drizzle over `pg` Pool, statement timeout 15 s).
 
 ### 2.5 Jobs runner
@@ -121,7 +129,9 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
 - Release on finish: `UPDATE ... SET expires_at = started_at + $interval WHERE name = $1 AND holder = $2`, so no process (including
   this one) starts the job again before one interval has passed since this run started; `expires_at` is never NULL.
 - The TTL floor (default 60 s) and the renewal period (default ttl/3) are constructor options of the runner so tests run in real
-  time with sub-second values (e.g. ttl 300 ms, interval 200 ms); tests never write `job_leases` directly.
+  time with short values: tests use a floor of 0, an interval of at least 1 s (ttl = 2 × interval) and a renewal period of at
+  least 250 ms, so every "before the interval" assertion has a window of ≥ 1 s under CPU contention; all lease tests live in one
+  file; tests never write `job_leases` directly.
 - Required tests on PGlite with two holder ids: B cannot acquire while A holds; A releases; B cannot acquire before the interval;
   B acquires after it; an expired (crashed) holder is taken over; a holder that lost its lease aborts.
 
@@ -188,7 +198,9 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   credentials) and then deletes it; any GitHub 401 for a user token, a token that fails to decrypt (wrong AAD, unknown key id,
   tampered ciphertext) and a rejected refresh all delete the stored token, mark the link revoked (so `identityOf` returns null) and
   throw `GitHubGatewayError("GITHUB_NOT_LINKED")` — never `UPSTREAM`. They also increment `pine_github_link_revoked_total{reason}`
-  and log a redacted line; core audits them through its decorator (section 2.4).
+  and log a redacted line; core audits them through its decorator (section 2.4). The metric is emitted as
+  `metrics.increment("github_link_revoked", { reason })` (exposed as `pine_github_link_revoked_total`), `reason` one of
+  `unauthorized`, `decrypt_failed`, `refresh_rejected`, `webhook`.
 - `GitHubGateway`: `fetch` only to `https://api.github.com` (injectable for tests), `Accept: application/vnd.github+json`,
   `X-GitHub-Api-Version`, 10 s timeout, `redirect: "error"`, zod-validated responses, size cap 2 MiB. Public repositories only:
   refuse `private !== false` or `visibility !== "public"` with `REPO_NOT_PUBLIC`. Map 404→NOT_FOUND, 403/429 with rate-limit headers →
@@ -217,7 +229,11 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   `Cross-Origin-Resource-Policy: cross-origin`; nothing else is served.
 
 ### 3.3 Chain gateway
-viem public clients for both RPC URLs (http transport, 10 s timeout, limited retries); `assertChainId` at startup on both;
+viem public clients for both RPC URLs (http transport, 10 s timeout, limited retries); `assertChainId` at startup on both.
+The frozen `GatewayDependencies` has no I/O injection, so `createGateways(deps)` is a thin wrapper over an exported internal
+`buildGateways(deps, io)` where `io` supplies `fetch` (GitHub, IPFS gateways, Kubo, pinning service) and the two viem
+transports; tests call `buildGateways` with fakes, and `buildGateways` checks `eth_chainId` on BOTH transports (throwing on a
+mismatch) before returning;
 `finalizedBlock()` reads the `finalized` tag from the primary and requires the secondary's hash at that number to match
 (mismatch → throw an integrity error); every error message redacted (RPC URLs embed keys).
 
