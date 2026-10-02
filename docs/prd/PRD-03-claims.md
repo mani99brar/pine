@@ -166,16 +166,22 @@ The integrity job runs in two phases so that a run that stops partway never lose
   ANY($publishable)`, where `$publishable` is the set of currently publishable policy digests from the memoized catalog/config
   loader (status `approved`, or `draft` with `allowDraftPolicies`; family enabled; never `SC-001`). Detail endpoints compute the
   same `listable` flag. A config or catalog change takes effect at the next request; a claim created directly on-chain with
-  SC-001 or malformed parameters is never listed.
+  SC-001 or malformed parameters is never listed. Integrity also requires `document.policy.id` and `.version` to match the catalog
+  entry of the on-chain policy digest (else `mismatch` on `policy`). `parameters_valid` is nullable: NULL means not yet computed,
+  and the integrity job also selects `verified` rows with NULL (bounded per run) to compute it.
 - A first `POST /publications` racing a `DELETE /drafts/:id`: a foreign-key violation (23503) on the publication insert maps to
-  NOT_FOUND ("Preview not found"), never 500. drizzle wraps driver errors, so the code is read through the `cause` chain. The
-  test makes the race deterministic by replacing `ctx.quotas.consume` with a fake that deletes the draft and its previews before
-  resolving.
+  NOT_FOUND ("Preview not found"), never 500; the reverse race (a publication inserted between the delete's check and its preview
+  DELETE) maps the delete's 23503 to 409 CONFLICT. drizzle wraps driver errors, so the code is read through the `cause` chain. Make
+  the race deterministic in tests (e.g. a fake `ctx.quotas.consume` that deletes the draft first, which requires that no
+  transaction is open across the quota call and that `ctx.quotas` is read at call time); if the handler structure prevents that,
+  test the mapping with a real 23503 produced by PGlite.
 - Agent feeds: `GET /api/v1/agents/claims` caps `limit` at 25; list items carry digests, CIDs, URLs and the platform facts but not
-  the document body; parsed verified documents are cached by digest (immutable; LRU of 500). ETags (agent feeds, claim lists and
-  details) are computed before the expensive work from everything that can change the response: per item the market key, its
-  moderation state, its clock-derived phase (or deadlines plus the bound `now` bucket), integrity, `listable`, oracle status and
-  resolution facts, plus the read model's indexed block; a matching `If-None-Match` returns 304 cheaply.
+  the document body (each item still carries the SEC-AGENT-02 sandbox warning code); there is NO in-process document cache (a
+  cache hit would skip the content store's moderation `block` check): the detail route reads the document once per request through
+  `contentStore.get` (≤ 256 KiB) and parses it. ETags (agent feeds, claim lists and details) are computed before the expensive work
+  from everything that can change the response: per item the market key, its claim moderation state and its document's content
+  moderation state, its phase computed from `ctx.clock` to the second, integrity, `listable`, oracle status and resolution facts,
+  plus the read model's indexed block and its `stale`/halted flags; a matching `If-None-Match` returns 304 cheaply.
 - A `block`-moderated claim never exposes its user-content URL (agent detail included).
 - Moderated public resources (claim lists, claim details, agent feeds) use `Cache-Control: no-cache` with the ETag so a hide or
   block takes effect immediately even behind a shared cache; policies may stay `max-age=300`.

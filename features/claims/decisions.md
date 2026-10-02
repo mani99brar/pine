@@ -49,9 +49,10 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
   `6e46a26` on this base passes the exact gate `pnpm --filter @pine/api exec vitest run src/modules/claims` — 10 files, 77 tests,
   61 s, peak RSS 1.4 GB — and the bracket-title change breaks no claims test.
 - claims-005 review fixes (claims-006): `listable` = verified AND parameters_valid (stored) AND policy digest in the currently
-  publishable set (query time, never stored; only listable claims in listings and feeds); FK race → NOT_FOUND; agent feed limit
-  25 without document bodies; no in-process document cache (content moderation applies on every read); blocked claims never
-  expose user-content URLs; moderated resources `no-cache`; tolerant draft reads;
+  publishable set (query time, never stored; only listable claims in listings and feeds); no in-process document cache (content
+  moderation must apply on every read); reverse delete race → 409; document policy id/version must match the digest's catalog
+  entry; FK race → NOT_FOUND; agent feed limit 25 without document bodies; blocked claims never expose user-content URLs;
+  moderated resources `no-cache`; tolerant draft reads;
   atomic stale-lock takeover; the missing tests of PRD-03 section 9 (claims-006 additions).
 - "Public routes never read cookies" is proven by the platform; this module proves its public handlers ignore sessions (identical
   responses with and without `x-test-session` and a `Cookie` header).
