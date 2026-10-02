@@ -191,6 +191,24 @@ The integrity job runs in two phases so that a run that stops partway never lose
   if that process is alive (another waiter took over first), put it back when the lock path is free or simply wait and retry;
   only a confirmed-dead owner's directory is removed.
 
+## 8b. claims-006 review fixes (carried by claims-007)
+- ETags (operator decision, replacing "computed before the expensive work"): an ETag is the SHA-256 of the final serialized body
+  with `indexer.lagSeconds` left out of the hashed form (it changes every second); correctness over a cheaper 304. Tests assert
+  the ETag changes when moderation, phase, integrity, listability, oracle status or resolution change, and not when only the lag
+  changes.
+- The draft delete locks the draft AND its previews (`SELECT ... FROM claim_previews WHERE draft_id = $1 FOR UPDATE`) before the
+  publication check, so a concurrent first publication cannot deadlock it on real Postgres; a deadlock (40P01) or serialization
+  failure (40001) on either path still maps to 409 CONFLICT, never 500.
+- `POST /publications` applies the publishability gate only when it would create a row or build a plan; a retry whose claim is
+  already on-chain returns the market without a plan even if the policy is no longer publishable.
+- Required tests (each must fail when its behaviour is removed): SEC-IDX-08 — a NewMarket from the configured factory for a
+  DIFFERENT market, a different conditionId and a different questionId each make integrity fail; integrity per field — only
+  `document.market.chainId` wrong, only `document.evidence.chainId` wrong, and a document naming the wrong `market.claimRegistry`
+  on an event from the right registry; phases `oracle_open`, `pending_arbitration`, `finalized` and `resolved` and the derived
+  oracle status from MemoryReadModel facts; the test lock's stale takeover (dead-pid owner taken over; live owner not); a reverted
+  receipt stores a redacted reason (inject a secret into the revert text); the publication retry after the policy stopped being
+  publishable.
+
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;
 draft IDOR; GitHub error mapping; membership failure blocks preview; preview determinism except nonce/createdAt; attestation

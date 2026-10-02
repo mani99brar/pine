@@ -54,6 +54,8 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
   entry; FK race → NOT_FOUND; agent feed limit 25 without document bodies; blocked claims never expose user-content URLs;
   moderated resources `no-cache`; tolerant draft reads;
   atomic stale-lock takeover; the missing tests of PRD-03 section 9 (claims-006 additions).
+- claims-006 review fixes (claims-007): ETag = SHA-256 of the final body without `indexer.lagSeconds` (operator decision); draft
+  delete locks draft and previews, 40P01/40001 → 409; publishability gate only for new rows or plans; the tests of PRD-03 8b.
 - "Public routes never read cookies" is proven by the platform; this module proves its public handlers ignore sessions (identical
   responses with and without `x-test-session` and a `Cookie` header).
 - Coverage matrix (lesson from the platform and claims reviews): each lane's completion maps every required test of its PRD section
