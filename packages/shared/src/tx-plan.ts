@@ -13,7 +13,8 @@
 //   - market / question / outcome-token arguments refer to registered claims supplied by the caller's own lookup.
 // No signature requests other than transactions exist in this model (no permits, Permit2, eth_sign, 7702).
 
-import { encodeFunctionData, getAddress, type Abi, type AbiFunction, type Hex } from "viem";
+import { decodeFunctionData, encodeFunctionData, getAddress, type Abi, type AbiFunction, type Hex } from "viem";
+import { z } from "zod";
 import { claimRegistryAbi, evidenceRegistryAbi } from "./abi/generated.js";
 import { erc20Abi, klerosHomeProxyAbi, realityV3Abi, seerGnosisRouterAbi, seerRealityProxyAbi } from "./abi/external.js";
 import { algebraPositionManagerAbi } from "./abi/algebra.js";
@@ -334,4 +335,99 @@ export function verifyPlan(plan: TxPlan, manifest: DeploymentManifest, context: 
 /** Normalizes an address argument for display (EIP-55); never used for comparisons. */
 export function displayAddress(address: string): string {
   return getAddress(address);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Wire format (HTTP JSON). Plans travel WITHOUT `args` and with `value` as a decimal string; the receiver decodes the
+// arguments from `data` with the allowlist ABI, so what is verified is exactly the calldata the wallet will sign.
+// Every API response carrying a plan uses planToWire; every client and test decodes with planFromWire, then verifyPlan.
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface WireTxStep {
+  id: string;
+  allowlistId: string;
+  chainId: number;
+  to: Address;
+  data: Hex;
+  /** Native value in wei, base-10 string. */
+  value: string;
+  dependsOn: string[];
+}
+
+export interface WireTxPlan {
+  version: 1;
+  planId: string;
+  chainId: number;
+  account: Address;
+  deploymentHash: Hex32;
+  steps: WireTxStep[];
+}
+
+const wireStepSchema = z
+  .object({
+    id: z.string().min(1).max(64).regex(/^[A-Za-z0-9._-]+$/),
+    allowlistId: z.string().min(1).max(128),
+    chainId: z.number().int().positive(),
+    to: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    data: z.string().regex(/^0x(?:[0-9a-fA-F]{2})*$/).max(200_000),
+    value: z.string().regex(/^(?:0|[1-9][0-9]{0,77})$/),
+    dependsOn: z.array(z.string().min(1).max(64)).max(16),
+  })
+  .strict();
+
+const wirePlanSchema = z
+  .object({
+    version: z.literal(1),
+    planId: z.string().min(1).max(128),
+    chainId: z.number().int().positive(),
+    account: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
+    deploymentHash: z.string().regex(/^0x[0-9a-fA-F]{64}$/),
+    steps: z.array(wireStepSchema).min(1).max(16),
+  })
+  .strict();
+
+export function planToWire(plan: TxPlan): WireTxPlan {
+  return {
+    version: 1,
+    planId: plan.planId,
+    chainId: plan.chainId,
+    account: lower(plan.account),
+    deploymentHash: plan.deploymentHash,
+    steps: plan.steps.map((step) => ({
+      id: step.id,
+      allowlistId: step.allowlistId,
+      chainId: step.chainId,
+      to: lower(step.to),
+      data: step.data,
+      value: step.value.toString(10),
+      dependsOn: [...step.dependsOn],
+    })),
+  };
+}
+
+/** Parses untrusted JSON into a TxPlan, decoding every step's arguments from its calldata. Throws PlanVerificationError. */
+export function planFromWire(json: unknown): TxPlan {
+  const parsed = wirePlanSchema.safeParse(json);
+  if (!parsed.success) throw new PlanVerificationError(null, "malformed plan");
+  const wire = parsed.data;
+  return {
+    version: 1,
+    planId: wire.planId,
+    chainId: wire.chainId,
+    account: lower(wire.account),
+    deploymentHash: wire.deploymentHash.toLowerCase() as Hex32,
+    steps: wire.steps.map((step) => {
+      const item = ALLOWLIST.get(step.allowlistId);
+      if (!item) throw new PlanVerificationError(step.id, "call is not on the allowlist");
+      let args: readonly unknown[];
+      try {
+        const decoded = decodeFunctionData({ abi: [functionAbi(item)], data: step.data as Hex });
+        if (decoded.functionName !== item.functionName) throw new Error("selector");
+        args = (decoded.args ?? []) as readonly unknown[];
+      } catch {
+        throw new PlanVerificationError(step.id, "calldata does not decode for the declared function");
+      }
+      return { id: step.id, allowlistId: step.allowlistId, chainId: step.chainId, to: lower(step.to), data: step.data.toLowerCase() as Hex, value: BigInt(step.value), args, dependsOn: [...step.dependsOn] };
+    }),
+  };
 }

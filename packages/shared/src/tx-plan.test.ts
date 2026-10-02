@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { encodeFunctionData } from "viem";
 import { erc20Abi } from "./abi/external.js";
 import { GNOSIS_EXTERNAL, type DeploymentManifest } from "./deployment.js";
-import { buildStep, newPlan, PlanVerificationError, verifyPlan, type PlanContext, type TxPlan } from "./tx-plan.js";
+import { buildStep, newPlan, planFromWire, planToWire, PlanVerificationError, verifyPlan, type PlanContext, type TxPlan } from "./tx-plan.js";
 import type { Address, Hex32 } from "./types.js";
 
 const manifest: DeploymentManifest = {
@@ -107,5 +107,21 @@ describe("buildDeploymentManifest", () => {
     expect(built).toEqual(manifest);
     expect(deploymentHash(built)).toBe(deploymentHash(manifest));
     expect(() => buildDeploymentManifest({ claimRegistry: manifest.pine.claimRegistry, evidenceRegistry: manifest.pine.evidenceRegistry, deploymentBlock: 1 }, 1)).toThrow(/Unsupported chain/);
+  });
+});
+
+describe("plan wire format", () => {
+  it("round-trips through JSON and still verifies (args decoded from calldata)", () => {
+    const wire = JSON.parse(JSON.stringify(planToWire(fundingPlan())));
+    expect(wire.steps[0].value).toBe("5000000000000000000");
+    expect("args" in wire.steps[0]).toBe(false);
+    expect(verifyPlan(planFromWire(wire), manifest, context, limits)).toBe(5n * 10n ** 18n);
+  });
+  it("rejects malformed wire plans and calldata for another function", () => {
+    const wire = JSON.parse(JSON.stringify(planToWire(fundingPlan())));
+    expect(() => planFromWire({ ...wire, extra: 1 })).toThrow(PlanVerificationError);
+    const swapped = { ...wire, steps: [{ ...wire.steps[1], allowlistId: "positionManager.mint" }] };
+    expect(() => planFromWire(swapped)).toThrow(/decode/);
+    expect(() => planFromWire({ ...wire, steps: [{ ...wire.steps[0], value: "-1" }] })).toThrow(PlanVerificationError);
   });
 });
