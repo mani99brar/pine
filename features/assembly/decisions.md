@@ -12,6 +12,10 @@ Settled by the operator from ADR-0001 on 2026-10-02.
   after every other feature merges.
 - The e2e suite runs on real PostgreSQL 16 with the production driver when `PINE_E2E_DATABASE_URL` is set (required in the
   operator's verification and in CI via `PINE_E2E_REQUIRE_PG=1`), else on PGlite.
+- No filesystem cheatcodes (foundry.toml keeps `fs_permissions = []`): plan vectors are generated into
+  `contracts/test/e2e/generated/PlanVectors.sol` from committed fork observations; the deploy record is printed with
+  `vm.serializeJson`.
+- The vector script is TypeScript run with `pnpm --filter @pine/api exec node --import tsx ../../scripts/fixtures/export-plan-vectors.mts`.
 - Residual allowance after a mint: at most 10 wei, only toward the position manager (Algebra rounding).
 - CI adds gitleaks secret scanning; the release checklist lists every launch gate of PRD-06 section 3.
 

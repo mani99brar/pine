@@ -14,8 +14,10 @@ in-process, and documents deployment. Everything it touches that other features 
 ## 2. deploy-e2e
 - `contracts/script/Deploy.s.sol`: explicit deployer (`vm.startBroadcast(deployer)` only in `run()`), prediction
   `vm.computeCreateAddress(deployer, vm.getNonce(deployer) + 1)`, EvidenceRegistry first, then ClaimRegistry with `ExpectedSeer` from
-  `GNOSIS_EXTERNAL`, assertions of the binding and of every Seer immutable, a JSON deployment record (addresses, block, chain id,
-  constructor args, deployer). The ClaimRegistry constructor does not pin the factory (chain-005 security review, P2), so the
+  `GNOSIS_EXTERNAL`, assertions of the binding and of every Seer immutable, and a deployment record (addresses, block, chain id,
+  constructor args, deployer) built in memory with `vm.serializeJson` and printed with `console.log` (forge's `broadcast/` output
+  is the durable record): `contracts/foundry.toml` sets `fs_permissions = []` and `ffi = false` and stays unchanged, so no test
+  or script reads or writes files. The ClaimRegistry constructor does not pin the factory (chain-005 security review, P2), so the
   script refuses to deploy unless `seerMarketFactory == 0x83183DA839Ce8228E31Ae41222EaD9EDBb5cDcf1` and its `EXTCODEHASH` equals
   `0x387f37b6df5c9faf28875b9b108cd4bf56c27152989d3362600516a2381e2fe6` (runtime code at block 48550000 and today, read on
   2026-10-02); the record also lists the code hashes of every external contract it relies on (Reality, RealityProxy, CTF,
@@ -28,12 +30,24 @@ in-process, and documents deployment. Everything it touches that other features 
   accounting after resolution; and replay of TypeScript-built plan calldata (below) byte-for-byte. Algebra rounds liquidity
   down, so a mint may pull a few wei less than `amountDesired` (= the exact approval): assert the residual allowance is at most
   10 wei and only toward the position manager.
-- `scripts/fixtures/export-plan-vectors.mjs` (run by the lane with `node --import tsx`, output committed under
-  `scripts/fixtures/`): generates calldata for a createClaim plan, commit and reveal plans and a ladder funding plan (split,
-  approve, createAndInitializePoolIfNecessary, mint) with `@pine/shared/tx-plan` `buildStep`/`newPlan` for fixed inputs (ticks and
-  sqrt prices computed in the script with integer math and documented; the funding module's own planner is covered by its unit and
-  property tests and is not a dependency of this lane), so the Solidity e2e test executes exactly what a wallet would be asked to
-  sign. A `--check` mode regenerates and compares.
+- Plan vectors without filesystem cheatcodes: the lane first captures the fork-dependent values with a probe test or `cast`
+  calls at block 48550000 (deployer, predicted registry addresses, block timestamp, the market and its YES/NO/INVALID tokens and
+  their order against sDAI, the sDAI shares minted per xDAI split) into a committed `scripts/fixtures/fork-observations.json`.
+  `scripts/fixtures/export-plan-vectors.mts` reads it, builds a createClaim plan, commit and reveal plans and a ladder funding plan
+  (split, approve, createAndInitializePoolIfNecessary, mint; ticks and sqrt prices computed in the script with integer math and
+  documented; the funding module's planner is covered by its own tests and is not a dependency) with `@pine/shared/tx-plan`
+  (`buildStep`/`newPlan`/`verifyPlan`, imported by relative path `../../packages/shared/src/*.ts`), and writes the JSON vectors in
+  `scripts/fixtures/` plus a generated `contracts/test/e2e/generated/PlanVectors.sol` holding the same calldata as `bytes`
+  constants. Run it as `pnpm --filter @pine/api exec node --import tsx ../../scripts/fixtures/export-plan-vectors.mts [--check]`
+  (verified to resolve; the root has no `tsx`); `--check` regenerates both files and fails on any difference. The e2e test first
+  asserts the observed fork values equal the constants, then replays each step with `vm.prank(account); target.call{value}(data)`
+  byte for byte.
+- Deployment-logic tests inherit the script contract (so `new` runs in the test's own frame under `vm.startPrank(deployer)` and
+  the n / n+1 prediction holds), and every external read before the second CREATE is a `view` call (under broadcast a non-view
+  call would consume a deployer nonce and break the binding only in production).
+- Fork RPC budget: one fork per test contract in `setUp`, `vm.snapshotState`/`vm.revertToState` to run the Yes, No and Invalid
+  variants from one deployed claim, `GNOSIS_RPC_URL` when set; never name a helper file or contract `IClaimRegistry` or
+  `IEvidenceRegistry` (export-abis reads those artifacts by fixed path).
 
 ## 3. composition
 - `packages/api/src/readmodel.ts`: `createReadModel` selects `@pine/indexer-native` (`secrets.readModel.kind === "native"`, a pg pool

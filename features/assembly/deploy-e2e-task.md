@@ -13,6 +13,7 @@ Write the deployment script and the real-pair Gnosis fork lifecycle tests of `do
 
 - Only touch your owned paths; never modify contracts, interfaces, shared or API code. Fork tests pin block 48550000 on `https://rpc.gnosischain.com` (archive) or `GNOSIS_RPC_URL`, never broadcast, and fund test accounts with `vm.deal`.
 - `vm.startBroadcast` appears only in `run()`; test the deployment logic through an internal function under `vm.startPrank(deployer)`.
+- `contracts/foundry.toml` (frozen) sets `fs_permissions = []`: no test or script reads or writes files; follow PRD-06 section 2 for generated Solidity vectors, fork observations and the printed deploy record.
 - The deploy script pins the Seer factory address and runtime code hash (PRD-06 section 2) and has a test proving it refuses a look-alike factory (same getters, different code).
 
 ## Acceptance
