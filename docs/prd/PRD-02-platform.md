@@ -102,9 +102,10 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   top-level navigation must land on the web app; the security property — nothing is linked — is what the test asserts).
 - `POST /api/v1/webhooks/github` (no session, CSRF-exempt, raw body ≤ 64 KiB) → `githubAuth.handleWebhook`; core audits
   `github.webhook.accepted` (details: `X-GitHub-Event`, `X-GitHub-Delivery`) when it resolves (204). The gateway throws
-  `ApiError("UNAUTHENTICATED")` for a missing or invalid signature: core answers 401 and audits `github.webhook.rejected` at most
-  once per client IP per minute (the first rejection in the IP's window; every rejection increments
-  `pine_github_webhook_rejected_total`), so anonymous traffic cannot grow the append-only audit table without bound; any other
+  `ApiError("UNAUTHENTICATED")` for a missing or invalid signature: core answers 401 and audits `github.webhook.rejected` only when
+  the existing atomic Postgres fixed-window statement returns count 1 for key `webhook-rejected:<ip, or its /64 for IPv6>` AND at
+  most 60 times per minute overall (key `webhook-rejected:global`); every rejection increments `pine_github_webhook_rejected_total`.
+  No in-memory map; the audit table therefore grows by at most 60 rows per minute from anonymous traffic; any other
   error is an internal failure: 500 (GitHub redelivers) and `github.webhook.failed`. The HMAC covers the exact raw bytes, so the
   webhook route's plugin scope registers content-type parsers for `application/json` and `application/x-www-form-urlencoded` with
   `parseAs: "buffer"` and `bodyLimit: 65536` and passes that Buffer unchanged; a core test sends a body with whitespace and
@@ -143,8 +144,12 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   now() + $ttl) ON CONFLICT (name) DO UPDATE SET holder = $2, started_at = now(), expires_at = now() + $ttl WHERE
   job_leases.expires_at <= now() RETURNING holder` — acquired iff a row is returned (holder = random per-process id).
 - Renew every ttl/3 while running: `UPDATE ... SET expires_at = now() + $ttl WHERE name = $1 AND holder = $2` (abort the job when
-  zero rows are updated, and also when the renewal statement fails and the time since the last successful renewal reaches
-  ttl − one renewal period, so a database error can never let two processes run the job at once). TTL: see Timing below.
+  zero rows are updated). Local deadline: record a monotonic timestamp just BEFORE sending each renewal; when a renewal updates
+  one row, move a single timer to `sentAt + ttl − renewalPeriod`; when that timer fires (a renewal that fails or hangs, a network
+  partition, a pool waiting for a connection) or a renewal updates zero rows, abort the run whether or not a renewal is still in
+  flight. The pg pool sets `connectionTimeoutMillis` below the renewal period (default 5 s) besides the 15 s statement timeout.
+  Abort is cooperative: every job checks `signal` between batches (gateway and module jobs alike), and the runner never tries to
+  re-acquire a job until its aborted `run()` promise has settled. TTL: see Timing below.
 - Release on finish: `UPDATE ... SET expires_at = started_at + $interval WHERE name = $1 AND holder = $2`, so no process (including
   this one) starts the job again before one interval has passed since this run started; `expires_at` is never NULL.
 - Timing: the lease TTL is a runner option independent of the job's interval (default 60 s, so a crashed holder blocks any job for
@@ -224,7 +229,10 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
 - Token lifecycle duties (SEC-GH-07/10): a gateways job re-encrypts stored tokens under the `current` key and reports how many
   remain under retired keys; `unlink` first revokes the whole authorization at GitHub (`DELETE /applications/{client_id}/grant`
   with client credentials and a currently valid access token, refreshing first when the stored one expired; a refresh that fails
-  means the authorization is already unusable) and then deletes the local tokens regardless; any GitHub 401 for a user token, a token that fails to decrypt (wrong AAD, unknown key id,
+  means the authorization is already unusable) and then deletes the local tokens regardless; a grant revocation that fails is
+  logged redacted and counted (`github_grant_revoke_failed`). Accepted: GitHub may deliver the resulting `github_app_authorization`
+  revoked webhook late; if the user re-linked meanwhile, that stale webhook deletes the new tokens (fail-safe; the user links
+  again); any GitHub 401 for a user token, a token that fails to decrypt (wrong AAD, unknown key id,
   tampered ciphertext) and a rejected refresh all delete the stored token, mark the link revoked (so `identityOf` returns null) and
   throw `GitHubGatewayError("GITHUB_NOT_LINKED")` — never `UPSTREAM`. They also increment `pine_github_link_revoked_total{reason}`
   and log a redacted line; core audits them through its decorator (section 2.4). The metric is emitted as
@@ -244,7 +252,9 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   `ahead` or `identical` and `behind_by == 0`; otherwise `NOT_A_MEMBER`. GitHub's compare resolves any commit-ish across the fork
   network, so passing a caller-supplied name to it would let a fork commit "prove" membership (SEC-GH-11; platform-004 review P1).
   Tests: a SHA as branch name, `refs/pull/1/head`, a tag name, a fork-only commit compared against a real branch, and a branch
-  that does not exist all yield `NOT_A_MEMBER`.
+  that does not exist all yield `NOT_A_MEMBER`. The branch request uses `redirect: "manual"`: a 301 (renamed branch) is
+  `NOT_A_MEMBER` (the name is not a current branch); branch names with `/` are encoded per path segment with
+  `encodeURIComponent`; compare 404/5xx on a branch that exists is `UPSTREAM`, never a membership verdict.
 
 ### 3.2 Content store and user-content server (SEC-EVID-01..11)
 - Table `content_blobs(sha256 text pk, size int, cid text, declared_media_type text, bytes bytea, created_at)`; `put` checks

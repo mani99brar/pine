@@ -49,8 +49,11 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
   500 + `github.webhook.failed`.
 - platform-004 review fixes (carried by platform-005): branch membership resolves a real branch of this repository first and
   compares against its head SHA (SEC-GH-11; SHA-shaped names, `refs/` and tags refused); unlink revokes the grant, not only the
-  token; lease runs abort when renewals keep failing near the TTL; rejected webhooks are audited at most once per IP per minute;
-  `/readyz` is cached for 5 s.
+  token; lease runs abort on a local deadline timer (`sentAt + ttl − renewalPeriod`, reset by each successful renewal) or a
+  zero-row renewal, with a pg `connectionTimeoutMillis` below the renewal period; jobs check `signal` between batches and are not
+  re-acquired before an aborted run settles; rejected webhooks are audited only on the first rejection per IP (/64 for IPv6) per
+  minute and at most 60 per minute overall, via the Postgres fixed-window statement; `/readyz` is cached for 5 s; a renamed branch
+  (301) is NOT_A_MEMBER; a stale revoked webhook after a quick re-link deleting the new tokens is accepted (fail-safe).
 - Metrics use a dedicated prom-client `Registry`. Migrations always run as the migrator role (default privileges depend on it).
 - Metrics adapter: lazy, cached by name, label names fixed at first use, mismatching samples dropped with one warning.
 - Gateways I/O injection: `createGateways(deps)` wraps an exported `buildGateways(deps, io)` (`fetch` + two viem transports);
