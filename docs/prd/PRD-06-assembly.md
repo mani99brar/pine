@@ -68,7 +68,10 @@ in-process, and documents deployment. Everything it touches that other features 
   `pine_api`, `pine_indexer`, `pine_readonly` pre-created idempotently WITH LOGIN (as a DBA would), migrations of the API and of
   `@pine/indexer-native` run as the database owner, the API connects as `pine_api` and the native read model as `pine_readonly`
   (proving the grants, including DML on gateways/claims/markets/funding tables created after platform `0002_`), and the database is
-  dropped afterwards. Otherwise it uses PGlite. With `PINE_E2E_REQUIRE_PG=1` a missing URL fails the suite. The operator verifies
+  dropped afterwards. Otherwise it uses PGlite. With `PINE_E2E_REQUIRE_PG=1` a missing URL fails the suite. On real Postgres the
+  suite also runs the concurrency cases PGlite cannot show: a draft delete racing a first publication (no 500, no deadlock leaks
+  to the client), concurrent quota consumption at the limit (never over-consumed), two job runners competing for one lease (at
+  most one runs) and two identical publication requests (one row). The operator verifies
   this feature with both variables set (local PostgreSQL 16); CI provides a `postgres:16` service container.
 - `packages/api/test/e2e`: boots the real `buildApp` with real platform-core, real gateways using injected fake `fetch`/RPC transports,
   all route modules, PGlite, and the native read model fed by `applyEvents` with scenario events; drives the customer journey of
