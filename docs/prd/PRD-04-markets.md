@@ -35,10 +35,13 @@ Plan store (identical contract in both lanes, each in its own tables `<lane>_pla
   log ever holds the salt, with or without `0x` (tests cast every row of every module table to text and search both forms).
 - `POST /api/v1/<lane>/plans/:planId/submitted {stepId, txHash}` (session, owner only, otherwise NOT_FOUND; idempotent; `<lane>` is
   `markets` or `funding`) records a hint and moves the plan `planned → submitted`.
-- States: plan `planned → submitted → confirmed | failed | expired` (compare-and-set only). A step is `confirmed` when a reported
-  hash has a successful receipt at or below `ctx.chain.finalizedBlock()` whose logs include the step's expected event from the
-  step's target contract with the expected arguments; markets steps may instead be confirmed from read-model facts (evidence
-  commit/reveal/publish by submitter and market, oracle answers by answerer, question and bond). The plan is `confirmed` when every
+- States: plan `planned → submitted → confirmed | failed | expired` (compare-and-set only). One uniform confirmation rule (no
+  per-function event table: router, proxy and position-manager calls emit their events from other contracts or none at all): a
+  step is `confirmed` when one of its reported hashes has a successful receipt at or below `ctx.chain.finalizedBlock()` and
+  `eth_getTransactionByHash` shows `to == step.to`, `from == plan.account`, `input ==` the stored step calldata and `value ==`
+  step value (sessions are EOA-only; speed-ups and replacements keep the calldata). Reveal steps (calldata not stored) and other
+  evidence/oracle steps are confirmed from read-model facts instead (evidence committed/revealed/published by that submitter for
+  that market and submission, oracle answers by answerer, question and bond). The plan is `confirmed` when every
   step is; when `expires_at` + 1 h passed without that, it becomes `expired` if no step was confirmed, else `failed` (partial
   execution; the response points to the merge plan as recovery).
 - `expires_at` = min(created + 24 h, kind deadline): commit and publish `evidenceDeadline − 60 s`, reveal `revealDeadline − 60 s`,
@@ -46,7 +49,11 @@ Plan store (identical contract in both lanes, each in its own tables `<lane>_pla
   20 min, merge and redeem created + 1 h. A same-key retry after expiry returns the stored plan with its state; a fresh plan
   needs a new key.
 - Limits for `verifyPlan`: `maxTotalValueWei` = 10,000 xDAI in both lanes (client-supplied bonds, bounties and budgets above it are
-  VALIDATION_FAILED); `maxApprovalAmount` = 0 in markets (no approvals) and 10,000 × 10^18 in funding.
+  VALIDATION_FAILED); `maxApprovalAmount` = 0 in markets (no approvals) and 10^30 in funding (a sanity bound; exactness of every
+  approval against the consuming step is what `verifyPlan` enforces).
+- Order with quotas: look up (user, route, key) → if found return it; else consume `plans_per_day`, then `INSERT ... ON CONFLICT DO
+  NOTHING RETURNING` (on conflict return the winner's plan; two racing first requests may consume two units — accepted). A
+  QUOTA_EXCEEDED therefore never leaves a stored plan.
 - Reconciliation jobs `markets.reconcile` and `funding.reconcile` (30 s) implement these transitions idempotently. Database portability: tests run on PGlite but production uses node-postgres, so compare-and-set success is read
 only from drizzle `.returning()` rows (never `rowCount`/`affectedRows`) and raw SQL casts int8 and counts explicitly; inside a
 transaction every query uses the transaction handle.
@@ -70,13 +77,17 @@ transaction every query uses the transaction handle.
 - `POST /api/v1/evidence/plans/commit {market, commitment}` → one step `evidenceRegistry.commitEvidence`; refused when
   `now >= evidenceDeadline − 60 s` (submission margin; the contract is authoritative).
 - `POST /api/v1/evidence/plans/reveal {submissionId, contentSha256, salt}` → one step `revealEvidence`; the salt is used only to
-  build calldata in the response and is never persisted or logged (assert in tests); requires the manifest to be stored (so it is
+  build calldata in the response and is never persisted or logged (assert in tests); the submission must be indexed with
+  `submitter == session.wallet` and `computeEvidenceCommitment(chainId, registry, market, session.wallet, contentSha256, salt)`
+  must equal its indexed commitment (in memory only; mismatch → UNPROCESSABLE, so a wrong salt never costs the user gas); requires the manifest to be stored (so it is
   available to adjudicators) unless the user explicitly acknowledges `unavailableContentAcknowledged: true`, and warns that an
   unobtainable manifest is inadmissible (policy C4). Refused when `now >= revealDeadline − 60 s`.
 - `POST /api/v1/evidence/plans/publish {market, contentSha256}` → `publishEvidence` (manifest must be stored).
 - `GET /api/v1/markets/:market/evidence?status&cursor` (public): read-model submissions joined with stored manifests (parsed with
   `parseEvidenceManifestBytes`; unparsable → `manifest: null, manifestError`), timeliness flags computed from the claim deadlines and
-  the frozen operators, availability (`stored`, `retrievable` via `contentStore.retrieve`), moderation state, `contentTrust: "untrusted"`.
+  the frozen operators, availability `stored` (local `contentStore.has` only: a public listing never triggers remote gateway
+  fetches), moderation state, `contentTrust: "untrusted"`. `retrievable` (via `contentStore.retrieve`) is computed only on the
+  single-submission detail route and cached for 10 minutes.
 - `GET /api/v1/markets/:market/evidence/:registry/:submissionId/erc1497.json` (public): ERC-1497 evidence JSON
   (`name`, `description` = fixed text + manifest title as data, `fileURI` = `ipfs://<manifest cid>`, `fileHash` = sha256) for parties
   to submit to the Kleros foreign proxy on Ethereum themselves, with instructions (address, `submitEvidence(uint256 questionId, string uri)`).
@@ -91,12 +102,15 @@ transaction every query uses the transaction handle.
 - Plans (session; `answer_oracle`): `submitAnswer {market, outcome: yes|no|invalid, bond}` with `maxPrevious = current bond` and
   `bond >= max(minBond, 2 × current bond)`; `fundAnswerBounty {market, amount}`; `resolve`, `reopen`, `handleNotifiedRequest`,
   `handleRejectedRequest`, `reportArbitrationAnswer`, `claimWinnings` (arguments reconstructed from the answer history in reverse
-  order exactly as Reality requires), `withdraw`. `reopenQuestion` re-creates the original content exactly: template 2, question =
+  order exactly as Reality requires, starting from the current on-chain `getHistoryHash` so only still-unclaimed entries are
+  included after a partial claim; a reopened market also offers the claim on its original settled-too-soon question), `withdraw`. `reopenQuestion` re-creates the original content exactly: template 2, question =
   `marketName` ␟ `"Yes","No"` ␟ `config.claims.questionCategory` ␟ `config.claims.questionLanguage` (asserted at registration to
   equal the ClaimRegistry constants `misc` and `en_US`), the original arbitrator, timeout, opening time and min bond from the
-  question record; it uses nonce = the number of questions already in this market's
-  reopen chain (from the read model), because the reopened question id includes the sender and the nonce and a second reopen by
-  the same account with nonce 0 would collide with the first and revert. Each plan is verified and its arguments re-derived from the read model at request
+  question record. `reopens_question_id` is always the ORIGINAL claim question (`ClaimRecord.questionId`; Reality v3 refuses to
+  reopen a reopener, and the module checks this explicitly because `verifyPlan` accepts replacement ids too). The nonce is the
+  smallest `n` in `0..15` whose question id `keccak256(abi.encodePacked(content_hash, arbitrator, timeout, min_bond, realitio,
+  account, n))` does not exist yet (`eth_call getTimeout(id) == 0`; the frozen read model cannot count prior reopens), so a
+  repeated reopen by the same account never collides; none free → CONFLICT. Test the derived id against a hand-computed value. Each plan is verified and its arguments re-derived from the read model at request
   time (never from client-supplied history).
 ### 2.4 Notifications and history
 - Job `markets.watch` (60 s): for each open claim compute due actions and deadline proximity (evidence closes in 24 h, reveal
@@ -130,8 +144,9 @@ in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
    range below the current price, ticks `[ceilTick(1/upperPrice), floorTick(1/lowerPrice)]`. Ticks are aligned to the pool's tick
    spacing (60 for new pools; read `tickSpacing()` for existing ones) inward so the range never exceeds the requested prices.
 4. Pool state: if the pool does not exist, or exists but is not initialised (`globalState().price == 0`), include
-   `createAndInitializePoolIfNecessary(token0, token1, sqrtPriceX96 at lowerPrice in the pool's orientation)` (it initialises an
-   existing uninitialised pool at that price). If it exists, its current price must lie outside the range on the correct side (YES cheaper than
+   `createAndInitializePoolIfNecessary(token0, token1, sqrtPriceX96)` (it initialises an existing uninitialised pool), with the
+   initial price strictly outside the range on the YES-cheaper side so the mint is single-sided: YES = token0 →
+   `getSqrtRatioAtTick(tickLower) − 1`; YES = token1 → `getSqrtRatioAtTick(tickUpper) + 1` (integer TickMath; property-tested). If it exists, its current price must lie outside the range on the correct side (YES cheaper than
    `lowerPrice`) so the position is single-sided; otherwise refuse with an explanation (no re-pricing swaps in v1).
 5. Steps: `gnosisRouter.splitFromBase{value: budgetWei}(market)` — omitted when the account already holds at least `S` YES
    (`balanceOf` at the pinned block), so a fresh plan after a partially executed one never splits twice;
