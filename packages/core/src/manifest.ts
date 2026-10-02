@@ -96,8 +96,9 @@ export function displayClaimId(claimId: string): string {
 }
 
 /**
- * Concise market description referencing the immutable terms. Kept short for on-chain storage
- * (~700–900 chars typical).
+ * Concise market description referencing the immutable terms (~700–900 chars typical). Seer's
+ * CreateMarketParams has no description field, so this text is for Pine pages, the manifest gateway,
+ * indexers and Seer/Curate submissions; the on-chain reference is buildMarketName.
  */
 export function buildMarketDescription(manifest: ClaimManifest, manifestUri: string, manifestHash: Hex): string {
   const { source, policy, claim } = manifest

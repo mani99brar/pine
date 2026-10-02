@@ -40,3 +40,23 @@ describe('policies', () => {
     expect(getPolicy('BOT-001', '9.9.9')).toBeUndefined()
   })
 })
+
+describe('policy text is faithful to policies/README.md', () => {
+  it('contains each README section verbatim', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { fileURLToPath } = await import('node:url')
+    const md = readFileSync(fileURLToPath(new URL('../../../policies/README.md', import.meta.url)), 'utf8')
+    const sections = md.split(/\n(?=## )/)
+    const pick = (prefix: string) => sections.find((s) => s.startsWith(`## ${prefix}`))!.trim()
+    const common = pick('Common publication requirements')
+    for (const [id, prefix] of [
+      ['FUNC-001', 'FUNC-001'],
+      ['BOT-001', 'BOT-001'],
+      ['SC-001', 'SC-001'],
+    ] as const) {
+      const text = getPolicy(id)!.text
+      expect(text).toContain(pick(prefix))
+      expect(text).toContain(common)
+    }
+  })
+})

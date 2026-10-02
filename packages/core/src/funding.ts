@@ -185,9 +185,9 @@ export function estimateFunding(input: FundingInput, ctx: FundingContext = {}): 
       amount: '0',
       currency: sym,
       kind: 'spent',
-      estimate: true,
+      estimate: false,
       payer: 'you',
-      note: 'No Seer market-creation fee is assumed. Verify current protocol fees before launch (SPEC §10.3).',
+      note: 'Seer\u2019s MarketFactory charges no creation fee and the Reality.eth question fee for Seer arbitrators is 0 (read on-chain 2026-10-03; re-check at launch).',
       countsTowardLimit: true,
     },
     {

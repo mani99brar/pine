@@ -64,7 +64,7 @@ describe('buildPublishSteps', () => {
     expect(create.request?.value).toBe('0')
     const decoded = decodeFunctionData({ abi: marketFactoryAbi, data: create.request!.data })
     expect(decoded.functionName).toBe('createCategoricalMarket')
-    const p = decoded.args[0]
+    const p = decoded.args[0]!
     expect(p.marketName.startsWith(question.text)).toBe(true)
     expect(p.marketName).toContain(manifestHash)
     expect(p.marketName).toContain('ipfs://bafyexample/manifest.json')

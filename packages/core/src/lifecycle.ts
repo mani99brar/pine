@@ -138,7 +138,8 @@ function mapFinal(answer: RealityAnswer | undefined): Outcome | undefined {
 /**
  * Derive the lifecycle status from publication progress, market and oracle state and the clock.
  *
- * Precedence: draft → failed/publishing (publication incomplete) → resolved/settled (finalized, or the
+ * Precedence: draft → failed (market never created, not resumable) / publishing (required steps
+ * incomplete) → resolved/settled (finalized, or the
  * current answer's timeout has passed with no arbitration) → arbitration → disputed (more than one answer)
  * → answer_proposed → open (before the evidence deadline) → awaiting_answer.
  * A final "answered too soon" answer maps to awaiting_answer (the question must be reopened).
@@ -155,7 +156,7 @@ export function deriveStatus(input: DeriveStatusInput): { status: ClaimStatus; o
     const incomplete = pub.steps.some(
       (s) => REQUIRED_PUBLICATION_STEPS.includes(s.id) && s.status !== 'confirmed' && s.status !== 'skipped',
     )
-    if (anyFailed && pub.resumable === false) return { status: 'failed' }
+    // Once the market exists on-chain the claim can no longer be "failed": it is live (maybe under-funded).
     if (!marketConfirmed) return { status: anyFailed && pub.resumable === false ? 'failed' : 'publishing' }
     if (incomplete) return { status: 'publishing' }
   } else if (!input.market) {

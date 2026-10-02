@@ -163,3 +163,17 @@ describe('timeRemaining', () => {
     expect(timeRemaining('garbage').past).toBe(true)
   })
 })
+
+describe('deriveStatus edge cases', () => {
+  it('a created market is never "failed", even if a later step failed irrecoverably', () => {
+    const publication = {
+      steps: [
+        { id: 'upload_manifest' as const, status: 'confirmed' as const },
+        { id: 'create_market' as const, status: 'confirmed' as const },
+        { id: 'approve_collateral' as const, status: 'failed' as const },
+      ],
+      resumable: false,
+    }
+    expect(deriveStatus({ publication, market: market(), evidenceDeadline: DEADLINE, now: BEFORE }).status).toBe('publishing')
+  })
+})
