@@ -43,7 +43,8 @@ int8 and counts explicitly.
      activity, which is costly to spam).
   2. The tracked-id set as of the range end: stored tracked questions/conditions + those of this range's ClaimCreated + reopen
      replacements found with `LogReopenQuestion` filtered on topic2 (the reopened, already tracked id; the NEW id is topic1);
-     repeat the reopen query for newly found ids until nothing new appears (bounded; one extra round suffices in practice).
+     repeat the reopen query for newly found ids until nothing new appears, at most 8 rounds; if ids are still appearing, cut the
+     processed range at the block of the last reopen found and continue in the next cycle.
   3. Reality logs of the needed topic0s filtered on topic1 ∈ tracked question ids, and CTF `ConditionResolution` filtered on
      topic1 ∈ tracked condition ids, with OR-lists chunked to 100 ids per request.
   Decode strictly with viem `decodeEventLog` (`strict: true`) and validate with zod (a log that does not decode under its topic0 is
@@ -57,6 +58,13 @@ int8 and counts explicitly.
   (429, 5xx, network) retry the SAME request with capped backoff, and the cycle gives up at the first request still failing. The
   request plan is shared: when either provider forces a split, the refined plan is executed on BOTH providers and the
   cross-check compares the results of the same plan. Operations docs require providers returning ≥ 10,000 logs per response.
+- The PROCESSED range is adaptive, so memory and transaction size stay bounded whatever the flood volume (spam on a tracked
+  question can reach ~2.5k logs per block at the EIP-1559 gas target): the primary is read in sub-chunks until a cumulative cap
+  of 50,000 logs or 32 MB is reached; the range is cut at the last whole block under the cap (minimum one block); the secondary
+  runs exactly that truncated plan; the logs are applied and the cursor advanced to the cut block in one transaction. Test a flood
+  range that is processed over several cycles with bounded memory.
+- A difference between providers is re-checked before halting: wait 10 s and re-fetch the same plan from BOTH providers (at most
+  3 times; load-balanced RPCs can briefly return `[]` from a lagging backend); halt only if the difference persists.
 - Verify every log's `blockHash` against the canonical header of its block (headers fetched only for blocks that contain logs,
   plus the range end; they also give each event its `blockTimestamp`); re-run the same single-pass query on the secondary provider
   for EVERY range processed (every range of at least one block, whether or not the primary returned logs) and require the identical

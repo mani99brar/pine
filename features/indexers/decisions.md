@@ -21,7 +21,9 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
 - Untracked third-party events: the zod domain checks run before tracking is decided but cannot fail for contract-emitted logs;
   no per-event rows are persisted (idempotency = cursor-position guard; `applied_events` dropped by `0002_`). The native poller
   requests Reality/CTF logs filtered to tracked ids (reopens via topic2), so untracked spam is never fetched; tracked-id volume only
-  splits on size-type failures (down to one block) with one plan shared by both providers; other errors retry the same request.
+  splits on size-type failures (down to one block) with one plan shared by both providers; other errors retry the same request;
+  the processed range is cut adaptively at 50,000 logs / 32 MB; provider differences are re-fetched up to 3 times before a halt;
+  the reopen fixpoint is bounded (8 rounds). Envio cannot filter by tracked id: spam only slows the optional backend (documented).
   Further indexers-002 review fixes in PRD-05 section 3a.
 - Envio schema uses BigInt for every id/block/amount/timestamp and avoids Postgres arrays; a test pins config.yaml event
   signatures to the shared ABIs.
