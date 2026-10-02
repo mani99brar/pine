@@ -37,6 +37,12 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - `@fastify/cors` is not registered; public routes get `Access-Control-Allow-Origin: *` from an `onSend` hook keyed on the matched
   route's config; OPTIONS is not routed.
 - Per-IP flood guard default 600/min (`PINE_IP_FLOOD_LIMIT_PER_MINUTE`, NAT-tolerant); per-user limit default 120/min.
+- SEC-AUTH-08: anonymous requests use the route's `rateLimitPerMinute` as a per-route `@fastify/rate-limit` counter (per IP; verified
+  with 11.2.0); SIWE challenge and verify are 20/min per IP and 20/min per address (`siwe:<address>` key in the Postgres fixed-window
+  table, same atomic statement).
+- Webhook: bad/missing signature → gateway throws `ApiError("UNAUTHENTICATED")` → 401 + `github.webhook.rejected`; other errors →
+  500 + `github.webhook.failed`.
+- Metrics use a dedicated prom-client `Registry`. Migrations always run as the migrator role (default privileges depend on it).
 - Metrics adapter: lazy, cached by name, label names fixed at first use, mismatching samples dropped with one warning.
 - Gateways I/O injection: `createGateways(deps)` wraps an exported `buildGateways(deps, io)` (`fetch` + two viem transports);
   it checks `eth_chainId` on both RPC transports.

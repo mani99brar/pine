@@ -61,7 +61,11 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   per-IP limits belong to the edge proxy) with its own NAT-tolerant default of 600 requests/min per IP
   (`PINE_IP_FLOOD_LIMIT_PER_MINUTE`), then the per-user limit after authentication in Postgres fixed windows; default
   120/min; `config.pine.rateLimitPerMinute` overrides per route. A cookie that matches no session skips `identityOf`. Test that an
-  authenticated request is keyed by user id.
+  authenticated request is keyed by user id. For anonymous requests (as the frozen RouteSecurityConfig comment says: "per IP when
+  unauthenticated") core's `onRoute` hook copies a route's `config.pine.rateLimitPerMinute` into that route's own
+  `config.rateLimit` (`{ max, timeWindow: 60000 }`), which gives the route a separate per-IP in-memory counter next to the global
+  flood guard (verified with @fastify/rate-limit 11.2.0: the 21st request gets 429 while other routes and other IPs are
+  unaffected). The flood guard itself writes nothing to the database.
 - Multipart: core registers `@fastify/multipart` once with `limits: { fileSize: config.evidence.maxUploadBytes, files: 1, fields: 10,
   parts: 11 }`; only routes with `config.pine.multipart` accept that content type (CSRF rules), everything else is JSON-only.
 - Errors: the core error handler maps `GitHubGatewayError` codes to ApiError codes before `toErrorResponse` (GITHUB_NOT_LINKED →
@@ -70,6 +74,11 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 - Registers every module from `src/modules.ts` inside its own plugin scope, passing `ctx`.
 
 ### 2.3 Wallet authentication (SEC-AUTH-01..13)
+- SIWE rate limits (SEC-AUTH-08): `POST /auth/siwe/challenge` and `POST /auth/siwe/verify` set `rateLimitPerMinute: 20` (per IP,
+  section 2.2), and both also consume a per-address fixed window in the same Postgres table and atomic statement as the per-user
+  limit, keyed `siwe:<lowercase address>` (20 per minute; for verify the address of the stored message), returning
+  `RATE_LIMITED` with `Retry-After`. Each allowed challenge writes at most one pre-session and one nonce row; the cleanup job purges
+  expired ones.
 - `POST /api/v1/auth/siwe/challenge {address}` → sets `__Host-pine_presession` (random, 10 min), stores a nonce
   (`crypto.randomBytes(16)` hex; at most 5 outstanding per pre-session; single use) and returns the exact EIP-4361 message:
   domain = host of `publicOrigin`, uri = `publicOrigin`, version `1`, chain id 100, nonce, issuedAt now, expirationTime now+10 min,
@@ -90,8 +99,9 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   `github.link.failed` with a reason code, and redirects 303 to `?github=error` (accepted deviation from SEC-GH-03's "403": a
   top-level navigation must land on the web app; the security property — nothing is linked — is what the test asserts).
 - `POST /api/v1/webhooks/github` (no session, CSRF-exempt, raw body ≤ 64 KiB) → `githubAuth.handleWebhook`; core audits
-  `github.webhook.accepted` (details: `X-GitHub-Event`, `X-GitHub-Delivery`) when it resolves and `github.webhook.rejected` when it
-  throws (204 / 401 respectively). The frozen seam returns `void`, so a webhook-driven revocation is not attributed to a Pine user
+  `github.webhook.accepted` (details: `X-GitHub-Event`, `X-GitHub-Delivery`) when it resolves (204). The gateway throws
+  `ApiError("UNAUTHENTICATED")` for a missing or invalid signature: core answers 401 and audits `github.webhook.rejected`; any other
+  error is an internal failure: 500 (GitHub redelivers) and `github.webhook.failed`. The frozen seam returns `void`, so a webhook-driven revocation is not attributed to a Pine user
   in the audit log; the gateways' metric and redacted log line carry it (accepted).
 
 ### 2.4 Platform services in AppContext
@@ -112,7 +122,8 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   configured trusted header (only honoured when trustProxy is configured) per action, fail-closed in production when the country is
   unknown for `publish_claim` and `fund_market`, and terms acceptance of the current digest (`TERMS_REQUIRED`).
 - `metrics` via prom-client on an internal listener (`/metrics`, bound to the configured internal port, not the public app). The
-  adapter creates counters and histograms lazily, caches them by name (never registers a name twice), fixes a metric's label names
+  adapter owns a dedicated `new Registry()` (never the global default registry, so tests and multiple apps never collide), creates
+  counters and histograms lazily, caches them by name (never registers a name twice), fixes a metric's label names
   at its first use, and drops (with one redacted warning per name) a later sample whose label keys differ instead of throwing.
 - `clock` (system clock), `redact`, `db` (drizzle over `pg` Pool, statement timeout 15 s).
 
@@ -154,7 +165,10 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
   and DML on the platform tables by name (never `ON ALL TABLES`), only `SELECT` on `schema_migrations` (so `verifyMigrations` works
   but the ledger cannot be altered), `ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO
   pine_api` (so later groups' tables are covered), and `REVOKE UPDATE, DELETE, TRUNCATE ON audit_log FROM pine_api` (INSERT and
-  SELECT only). Test under `SET ROLE pine_api`: `verifyMigrations` succeeds and `UPDATE schema_migrations` fails. Gateways (and every
+  SELECT only). Test under `SET ROLE pine_api`: `verifyMigrations` succeeds and `UPDATE schema_migrations` fails. `ALTER DEFAULT
+  PRIVILEGES` covers tables later created by the same role, so every migration group always runs as the migrator role in one
+  `runMigrations` call (README: migrations only ever run as `pine_migrator`); the assembly e2e proves DML on later groups' tables as
+  `pine_api` against a real Postgres. Gateways (and every
   later group's) migrations never mention `pine_api`: the default privileges cover them, and the role does not exist in a lane that
   lacks platform `0002_`.
 - Audit IP retention: a `SECURITY DEFINER` function (`SET search_path = public, pg_temp`, `REVOKE EXECUTE ... FROM PUBLIC`,
@@ -192,7 +206,8 @@ table `job_leases(name text pk, holder text not null, started_at timestamptz not
 - Tokens encrypted with AES-256-GCM: random 96-bit IV, AAD = `pine:github:<userId>:<tokenKind>:<keyId>`, key from
   `secrets.tokenEncryptionKeys` (decrypt with any listed key, re-encrypt with `current` on refresh). Refresh is single-flight per
   user (row lock) and rotates the refresh token. `handleWebhook` verifies `X-Hub-Signature-256` (HMAC-SHA256, constant-time compare)
-  and deletes the user's tokens for `github_app_authorization` revocations.
+  and deletes the user's tokens for `github_app_authorization` revocations. A missing or invalid signature throws
+`ApiError("UNAUTHENTICATED")` (from `contracts/errors.ts`); other failures propagate as ordinary errors (core maps them to 500).
 - Token lifecycle duties (SEC-GH-07/10): a gateways job re-encrypts stored tokens under the `current` key and reports how many
   remain under retired keys; `unlink` first revokes the token at GitHub (`DELETE /applications/{client_id}/token` with client
   credentials) and then deletes it; any GitHub 401 for a user token, a token that fails to decrypt (wrong AAD, unknown key id,
@@ -246,7 +261,9 @@ mismatch) before returning;
   TERMS_REQUIRED); jobs never overlap and the lease tests of section 2.5;
   error responses never contain secrets (inject a secret-bearing error); `/readyz` stale/halted handling; log lines contain no query
   strings or cookies; the auditing GitHub decorator; webhook accepted/rejected audits; callback failures redirect to `?github=error`
-  with nothing linked (SEC-GH-03); sanctions config (production refuses `off`, invalid denylist file refused).
+  with nothing linked (SEC-GH-03); sanctions config (production refuses `off`, invalid denylist file refused); SEC-AUTH-08: the
+  21st challenge request in a minute from one IP gets 429 while another IP and another route are unaffected, the per-address limit
+  applies across IPs, verify is limited the same way; webhook bad signature → 401 + rejected audit, internal failure → 500.
 - SIWE tests sign with viem test accounts only inside `*.test.ts` files or `src/platform/core/testing/` (the forbidden-pattern gate
   exempts exactly those); production code never imports from a `testing/` directory.
 - gateways: OAuth state single-use/expiry/session binding; PKCE parameters; token AAD binding (ciphertext swapped between users
