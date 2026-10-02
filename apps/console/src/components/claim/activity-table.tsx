@@ -38,7 +38,7 @@ export function SignedAmount({ amount, token }: { amount?: string; token?: strin
 /** Transaction log: newest first, monospace hashes, explorer links. */
 export function ActivityTable({ items, showClaim }: { items: ActivityItem[]; showClaim?: boolean }) {
   return (
-    <div className="scrollbar-thin overflow-x-auto">
+    <div className="scrollbar-thin relative overflow-x-auto">
       <table className="w-full min-w-[720px] border-collapse text-[13px]">
         <thead>
           <tr className="stretch-cond border-b border-line text-left text-[12px] text-muted">

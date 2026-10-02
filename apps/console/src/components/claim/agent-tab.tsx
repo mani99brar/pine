@@ -5,6 +5,7 @@ import { Bot, ClipboardCopy } from 'lucide-react'
 import type { ClaimDetail } from '@pine/core'
 import { briefToMarkdown, buildClaimJsonLd, toAgentBrief } from '@pine/core/agent'
 import { usePine } from '@pine/react'
+import { useOrigin } from '@/lib/hooks'
 import { Button } from '@/components/ui/button'
 import { CodeBlock } from '@/components/ui/code-block'
 import { useClipboard } from '@/components/ui/copy-button'
@@ -14,9 +15,7 @@ import { Pane } from '@/components/ui/pane'
 
 export function useSiteUrl() {
   const { env } = usePine()
-  const [origin, setOrigin] = React.useState(env.siteUrl.replace(/\/$/, ''))
-  React.useEffect(() => setOrigin(window.location.origin), [])
-  return origin
+  return useOrigin(env.siteUrl.replace(/\/$/, ''))
 }
 
 export function useAgentArtifacts(claim: ClaimDetail | undefined) {
@@ -69,7 +68,7 @@ export function AgentTab({ claim }: { claim: ClaimDetail }) {
         <div className="divide-y divide-line">
           <Pane title="API" className="border-0" description="CORS-enabled GET endpoints, no key needed">
             <div className="space-y-3 p-4">
-              <CodeBlock code={curl} label="curl" prompt wrap={false} />
+              <CodeBlock code={curl} label="curl" prompt />
               <p className="text-[12.5px] text-muted">
                 Discovery: <ExternalLink href={`${a.siteUrl}/llms.txt`}>/llms.txt</ExternalLink>,{' '}
                 <ExternalLink href={`${a.siteUrl}/.well-known/pine.json`}>/.well-known/pine.json</ExternalLink>,{' '}

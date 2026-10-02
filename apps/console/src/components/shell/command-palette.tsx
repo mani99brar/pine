@@ -21,7 +21,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { POLICIES, STATUS_META, formatClaimNumber, parseGitHubRef, shortSha } from '@pine/core'
-import { useClaims, useDemoWallet, useResolveGitHubInput, useWallet } from '@pine/react'
+import { useClaims, useDemoWallet, useGitHubViewerRepos, useResolveGitHubInput, useWallet } from '@pine/react'
 import { NAV } from '@/lib/nav'
 import { cn } from '@/lib/cn'
 import { Kbd } from '@/components/ui/kbd'
@@ -70,14 +70,18 @@ export function CommandPalette() {
   const wallet = useWallet()
   const demo = useDemoWallet()
 
-  React.useEffect(() => {
+  // Seed the query each time the palette opens (render-time transition, no effect).
+  const [wasOpen, setWasOpen] = React.useState(paletteOpen)
+  if (paletteOpen !== wasOpen) {
+    setWasOpen(paletteOpen)
     if (paletteOpen) setQuery(paletteQuery)
-  }, [paletteOpen, paletteQuery])
+  }
 
   const trimmed = query.trim()
   const ref = React.useMemo(() => (trimmed.length > 3 ? parseGitHubRef(trimmed) : null), [trimmed])
   const resolved = useResolveGitHubInput(ref ? trimmed : '')
   const claims = useClaims(paletteOpen ? { limit: 100, sort: 'newest' } : undefined)
+  const repos = useGitHubViewerRepos({ limit: 30 })
   const evidenceIntent = /evid|submit|counterex/i.test(trimmed)
 
   const go = (href: string) => {
@@ -120,30 +124,47 @@ export function CommandPalette() {
         <Kbd>esc</Kbd>
       </div>
       <Command.List className="scrollbar-thin max-h-[min(60vh,460px)] overflow-y-auto overscroll-contain py-1">
-        <Command.Empty className="px-4 py-8 text-center text-sm text-muted">
-          Nothing matches “{trimmed}”. Paste a GitHub URL such as github.com/owner/repo/pull/12 to start a claim.
-        </Command.Empty>
+        {!ref ? (
+          <Command.Empty className="px-4 py-8 text-center text-sm text-muted">
+            Nothing matches “{trimmed}”. Paste a GitHub URL such as github.com/owner/repo/pull/12 to start a claim.
+          </Command.Empty>
+        ) : null}
 
         {ref ? (
           <Command.Group heading="Start from GitHub" className={groupCls} forceMount>
-            <Item
+            <Command.Item
               forceMount
               value={`gh-verify ${trimmed}`}
-              icon={ref.kind === 'repo' ? <FolderGit2 size={15} /> : ref.kind === 'pull' ? <GitPullRequest size={15} /> : <GitCommitHorizontal size={15} />}
               onSelect={() => go(`/new?source=${encodeURIComponent(trimmed)}`)}
-              hint={<Kbd>↵</Kbd>}
+              className="group flex cursor-pointer items-start gap-3 rounded-ctl border border-transparent px-2.5 py-2.5 data-[selected=true]:border-needle/40 data-[selected=true]:bg-needle-soft"
             >
-              <span className="font-medium">Verify {ref.kind === 'repo' ? 'a commit in' : ''} </span>
-              <span className="mono-cond text-[12.5px]">{refLabel}</span>
-              {r?.pull ? <span className="ml-2 text-muted">{r.pull.title}</span> : null}
-              {r?.commit ? (
-                <span className="ml-2 text-muted">
-                  head <span className="mono-cond text-[12px]">{shortSha(r.commit.sha)}</span>
+              <span className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-ctl bg-needle text-needle-ink">
+                {ref.kind === 'repo' ? <FolderGit2 size={15} aria-hidden /> : ref.kind === 'pull' ? <GitPullRequest size={15} aria-hidden /> : <GitCommitHorizontal size={15} aria-hidden />}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[14px] font-semibold text-bark">
+                  {ref.kind === 'pull' ? 'Verify the head commit of this pull request' : ref.kind === 'repo' ? 'Verify a commit in this repository' : 'Verify this exact commit'}
                 </span>
-              ) : null}
-              {resolved.isLoading ? <span className="ml-2 text-faint">resolving…</span> : null}
-              {resolved.reason && resolved.status !== 'resolved' && !resolved.isLoading ? <span className="ml-2 text-flare">{resolved.reason}</span> : null}
-            </Item>
+                <span className="mono-cond block truncate text-[12px] text-muted">{refLabel}</span>
+                <span className="mt-0.5 block truncate text-[12.5px] text-muted">
+                  {resolved.isLoading ? (
+                    'Resolving on GitHub…'
+                  ) : resolved.reason && resolved.status !== 'resolved' ? (
+                    <span className="text-flare">{resolved.reason}</span>
+                  ) : (
+                    <>
+                      {r.pull ? <span className="text-bark">{r.pull.title}</span> : r.commit ? <span className="text-bark">{r.commit.message.split('\n')[0]}</span> : null}
+                      {r.commit ? (
+                        <span className="ml-2">
+                          pins <span className="mono-cond text-[11.5px] text-bark">{shortSha(r.commit.sha)}</span>
+                        </span>
+                      ) : null}
+                    </>
+                  )}
+                </span>
+              </span>
+              <Kbd className="mt-1">↵</Kbd>
+            </Command.Item>
             <Item
               forceMount
               value={`gh-browse ${trimmed}`}
@@ -279,6 +300,23 @@ export function CommandPalette() {
             </Item>
           ))}
         </Command.Group>
+
+        {repos.data?.items.length ? (
+          <Command.Group heading="Repositories" className={groupCls}>
+            {repos.data.items.map((rp) => (
+              <Item
+                key={rp.id}
+                value={`repo ${rp.fullName}`}
+                keywords={[rp.owner, rp.name, ...(rp.topics ?? [])]}
+                icon={<FolderGit2 size={15} />}
+                onSelect={() => go(`/repos/${rp.owner}/${rp.name}`)}
+                hint={typeof rp.openPullRequests === 'number' ? `${rp.openPullRequests} open PRs` : undefined}
+              >
+                <span className="mono-cond text-[12.5px]">{rp.fullName}</span>
+              </Item>
+            ))}
+          </Command.Group>
+        ) : null}
 
         <Command.Group heading="For agents" className={groupCls}>
           <Item value="agents api docs" keywords={['llms', 'json', 'api', 'feed']} icon={<Bot size={15} />} onSelect={() => go('/agents')}>

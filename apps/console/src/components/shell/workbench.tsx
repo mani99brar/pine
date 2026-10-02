@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import { useRouter } from 'next/navigation'
-import { applyTheme, readTheme, type ThemePref } from '@/lib/theme'
+import { applyTheme, type ThemePref } from '@/lib/theme'
 import { dialogOpen, isTypingTarget } from '@/lib/use-keys'
 import { NAV } from '@/lib/nav'
 
@@ -52,18 +52,14 @@ const SEQUENCES: Record<string, string> = Object.fromEntries(
   NAV.filter((n) => n.keys?.startsWith('g ')).map((n) => [n.keys!.slice(2), n.href]),
 )
 
-export function WorkbenchProvider({ children }: { children: React.ReactNode }) {
+export function WorkbenchProvider({ children, initialTheme = 'system' }: { children: React.ReactNode; initialTheme?: ThemePref }) {
   const router = useRouter()
   const [paletteOpen, setPaletteOpenState] = React.useState(false)
   const [paletteQuery, setPaletteQuery] = React.useState('')
   const [shortcutsOpen, setShortcutsOpen] = React.useState(false)
   const [mobileNavOpen, setMobileNavOpen] = React.useState(false)
   const [claim, setClaim] = React.useState<ClaimContext | null>(null)
-  const [theme, setThemeState] = React.useState<ThemePref>('system')
-
-  React.useEffect(() => {
-    setThemeState(readTheme())
-  }, [])
+  const [theme, setThemeState] = React.useState<ThemePref>(initialTheme)
 
   const setTheme = React.useCallback((t: ThemePref) => {
     applyTheme(t)

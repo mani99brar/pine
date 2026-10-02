@@ -75,6 +75,7 @@ export function createDemoExecutor(opts: DemoExecutorOptions): TxExecutor {
         const isCollateral = !opts.collateralSymbol || step.estimatedCost.currency === opts.collateralSymbol
         opts.wallet.recordSpend(step.estimatedCost.amount, isCollateral ? 'collateral' : 'native')
       }
+      if (step.collateralCost) opts.wallet.recordSpend(step.collateralCost.amount, 'collateral')
       return { txHash: hash, result: { simulated: true } }
     },
     async checkPending(_step: TxStep, _txHash: Hex, startedAt: string | undefined): Promise<PendingCheck> {

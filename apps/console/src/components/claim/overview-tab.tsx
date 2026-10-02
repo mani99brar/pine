@@ -141,41 +141,42 @@ export function OverviewTab({ claim, now }: { claim: ClaimDetail; now: Date }) {
         <LifecycleRuler claim={claim} now={now} />
       </section>
 
-      <section className="grid gap-6 px-4 py-5 sm:px-6 lg:grid-cols-2" aria-label="Claim terms">
-        <div className="space-y-4">
+      <section className="space-y-6 px-4 py-5 sm:px-6" aria-label="Claim terms">
+        <div className="grid gap-x-8 gap-y-4 lg:grid-cols-2">
           <div>
             <h2 className="text-[15px] font-semibold">Requirement</h2>
-            <PlainText className="mt-1 text-[14px] leading-[1.6]">{spec.requirement}</PlainText>
+            <PlainText className="mt-1 max-w-[72ch] text-[14px] leading-[1.6]">{spec.requirement}</PlainText>
+            {claimClass ? (
+              <p className="mt-2 text-[13px] text-muted">
+                Claim class: <span className="text-bark">{claimClass.label}</span>
+              </p>
+            ) : null}
+            {spec.specReference ? (
+              <p className="mt-1 text-[13px] text-muted">
+                Source requirement: <ExternalLink href={spec.specReference.url}>{spec.specReference.label}</ExternalLink>
+              </p>
+            ) : null}
           </div>
-          <div>
-            <h3 className="stretch-cond text-[13px] font-semibold text-muted">Violation that resolves YES</h3>
-            <PlainText className="mt-1 text-[14px] leading-[1.6]">{spec.violation}</PlainText>
+          <div className="space-y-4">
+            <div className="rounded-ctl border border-flare/25 bg-flare-soft/40 px-3 py-2.5">
+              <h3 className="stretch-cond text-[13px] font-semibold text-muted">Violation that resolves YES</h3>
+              <PlainText className="mt-1 text-[14px] leading-[1.6]">{spec.violation}</PlainText>
+            </div>
+            {spec.faultModel ? (
+              <div>
+                <h3 className="stretch-cond text-[13px] font-semibold text-muted">Fault model</h3>
+                <PlainText className="mt-1 text-[13.5px]">{spec.faultModel}</PlainText>
+              </div>
+            ) : null}
+            {spec.allowedInputs ? (
+              <div>
+                <h3 className="stretch-cond text-[13px] font-semibold text-muted">Allowed inputs</h3>
+                <PlainText className="mt-1 text-[13.5px]">{spec.allowedInputs}</PlainText>
+              </div>
+            ) : null}
           </div>
-          {claimClass ? (
-            <p className="text-[13px] text-muted">
-              Claim class: <span className="text-bark">{claimClass.label}</span>
-            </p>
-          ) : null}
-          {spec.faultModel ? (
-            <div>
-              <h3 className="stretch-cond text-[13px] font-semibold text-muted">Fault model</h3>
-              <PlainText className="mt-1 text-[13.5px]">{spec.faultModel}</PlainText>
-            </div>
-          ) : null}
-          {spec.allowedInputs ? (
-            <div>
-              <h3 className="stretch-cond text-[13px] font-semibold text-muted">Allowed inputs</h3>
-              <PlainText className="mt-1 text-[13.5px]">{spec.allowedInputs}</PlainText>
-            </div>
-          ) : null}
-          {spec.specReference ? (
-            <p className="text-[13px] text-muted">
-              Source requirement:{' '}
-              <ExternalLink href={spec.specReference.url}>{spec.specReference.label}</ExternalLink>
-            </p>
-          ) : null}
         </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+        <div className="grid gap-x-8 gap-y-5 border-t border-line pt-5 sm:grid-cols-2 2xl:grid-cols-4">
           <div>
             <h3 className="stretch-cond mb-1.5 text-[13px] font-semibold text-muted">In scope</h3>
             <List items={spec.scope.inScope} empty="Not specified" />
@@ -256,7 +257,7 @@ export function OverviewTab({ claim, now }: { claim: ClaimDetail; now: Date }) {
         ) : null}
       </section>
 
-      <Pane title="Immutable references" className="border-t-0" description="Frozen when the market was created">
+      <Pane title="Immutable references" className="border-t-0" description={claim.market ? "Frozen when the market was created" : "Recorded in the pinned manifest"}>
         <ImmutableRefs claim={claim} />
       </Pane>
     </div>

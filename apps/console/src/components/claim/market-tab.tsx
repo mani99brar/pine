@@ -99,7 +99,7 @@ export function MarketTab({ claim }: { claim: ClaimDetail }) {
         </div>
       </Pane>
 
-      <div className="grid lg:grid-cols-[1.25fr_1fr] lg:divide-x lg:divide-line">
+      <div className="grid lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:divide-x lg:divide-line">
         <Pane
           title="Executable depth"
           className="border-0"
@@ -131,7 +131,7 @@ export function MarketTab({ claim }: { claim: ClaimDetail }) {
         </Pane>
       </div>
 
-      <section className="grid gap-6 px-4 py-5 sm:px-6 lg:grid-cols-2" aria-label="Market details">
+      <section className="grid grid-cols-1 gap-6 px-4 py-5 sm:px-6 lg:grid-cols-2" aria-label="Market details">
         <div>
           <h3 className="mb-2 text-[15px] font-semibold">Activity</h3>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-[13px]">

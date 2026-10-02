@@ -19,8 +19,9 @@ export function Section({
   aside?: React.ReactNode
 }) {
   const { c, showAll, touched } = useComposerCtx()
-  const issues = c.validation.issues.filter((i) => sectionForPath(i.path) === id)
-  const engaged = showAll || [...touched].some((p) => sectionForPath(p) === id)
+  // Review gathers every problem; other sections count their own.
+  const issues = id === 'review' ? c.validation.issues : c.validation.issues.filter((i) => sectionForPath(i.path) === id)
+  const engaged = id === 'review' || showAll || [...touched].some((p) => sectionForPath(p) === id)
   return (
     <section id={`sec-${id}`} data-section={id} aria-labelledby={`sec-${id}-h`} className="scroll-mt-16 border-b border-line px-4 py-7 sm:px-8">
       <header className="mb-5 flex flex-wrap items-baseline gap-x-3 gap-y-1">

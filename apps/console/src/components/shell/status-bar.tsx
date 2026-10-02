@@ -1,6 +1,6 @@
 'use client'
 
-import * as React from 'react'
+import { useSecondClock } from '@/lib/hooks'
 import { Keyboard } from 'lucide-react'
 import { getChainOrDefault } from '@pine/core/chains'
 import { usePine, useWallet, useDemoWallet } from '@pine/react'
@@ -10,13 +10,8 @@ import { useWorkbench } from './workbench'
 const SOURCE_LABEL = { mock: 'Mock data', rest: 'REST indexer', envio: 'Envio indexer' } as const
 
 export function useUtcClock() {
-  const [now, setNow] = React.useState<Date | null>(null)
-  React.useEffect(() => {
-    setNow(new Date())
-    const t = window.setInterval(() => setNow(new Date()), 1000)
-    return () => window.clearInterval(t)
-  }, [])
-  return now
+  const ms = useSecondClock()
+  return ms === null ? null : new Date(ms)
 }
 
 export function UtcClock({ className }: { className?: string }) {

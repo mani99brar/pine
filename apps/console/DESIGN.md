@@ -64,15 +64,16 @@ Mobile (< 768): rail becomes a bottom bar (Dashboard · Claims · ＋New · ⌘K
 
 ### Explore
 ```
-┌ views ─────┬ filter: [status▾][policy▾][repo▾][search……]  sort: deadline ▾ ┐
-│ Open    12 │ St  Claim                repo@sha     Pol   YES ~~~  Liq  Due │ preview pane │
-│ Closing  3 │ ●   PINE-0042 Reporter…  kleros/…@3f9 BOT   14% ╱╲_  420  2d4h│ question     │
-│ Disputed 2 │ ●   PINE-0039 …                                         …     │ refs, gauge  │
-│ Resolved 5 │ j/k move · ↵ open · space preview                             │ [Open ↵]     │
-│ Mine     4 │                                                               │              │
-└────────────┴────────────────────────────────────────────────────────────┴──────────────┘
+┌ All 18 │ Open 8 │ Closing soon 2 │ Awaiting oracle 2 │ Disputed 2 │ Resolved 4 │ Recovery 2 │ Mine │ ★saved ┐
+│ [Filter claims /] [All policies▾] [All repositories▾]                     Save view  ◫  │ preview pane  │
+│ ●  Claim                                   YES ~~~~      Liquidity  Evid.  Evidence window│ PINE-0010     │
+│ ●  PINE-0010 Strict mode rejects dup…      31% ╱╲_ +10.1   120 sDAI   2    8h 34m left    │ question.txt  │
+│    acme-labs/fastparse@297d0ba #231 FUNC                                ┃┃┃┃┃┃┃┊┊┊┊┊    │ gauge 0─50─100│
+│ ▣  PINE-0002 fastparse strict mode…        99.5%            64 sDAI     2    Counterexample│ next step     │
+│ j/k move  ↵ open  Space preview                     YES = market-implied chance …         │ [Open ↵]      │
+└────────────────────────────────────────────────────────────────────────────────────────────┴───────────────┘
 ```
-Each row has a deadline **graduation bar**: the evidence window drawn as ticks, filled up to now, with a resin "now" tick.
+Revised during QA: a left views rail plus the preview pane starved the table, so views became tabs above it. Each row draws the evidence window as a **graduation bar**: filled up to now, resin when under 48h, solid slate once closed. After the deadline the column shows the exact status phrase instead of a countdown, so outcome wording is never truncated. Below `md` the table becomes a two-line list.
 
 ### Composer (signature)
 ```

@@ -37,7 +37,7 @@ export const NAV: NavItem[] = [
   { href: '/repos', label: 'Repositories', icon: GitPullRequest, keys: 'g r', group: 'source' },
   { href: '/policies', label: 'Policies', icon: BookOpen, keys: 'g p', group: 'reference' },
   { href: '/agents', label: 'Agents', icon: Bot, keys: 'g a', group: 'reference' },
-  { href: '/risks', label: 'Risks & launch gates', icon: TriangleAlert, keys: 'g x', group: 'reference' },
+  { href: '/risks', label: 'Risks & gates', icon: TriangleAlert, keys: 'g x', group: 'reference' },
   { href: '/activity', label: 'Activity', icon: Activity, keys: 'g h', group: 'account' },
   { href: '/settings', label: 'Settings', icon: Settings, keys: 'g s', group: 'account' },
 ]
@@ -77,6 +77,8 @@ export const SHORTCUTS: { keys: string; label: string; scope: string }[] = [
   { keys: '1–6', label: 'Switch claim tab', scope: 'Claim' },
   { keys: 'e', label: 'Submit evidence', scope: 'Claim' },
   { keys: 'b', label: 'Copy agent brief', scope: 'Claim' },
-  { keys: '⌘↵', label: 'Jump to review / publish', scope: 'Composer' },
+  { keys: '⌘↵', label: 'Jump to review and publish', scope: 'Composer' },
+  { keys: '[', label: 'Previous section', scope: 'Composer' },
+  { keys: ']', label: 'Next section', scope: 'Composer' },
   { keys: 'a', label: 'Toggle artifacts pane (mobile)', scope: 'Composer' },
 ]

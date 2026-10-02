@@ -15,10 +15,25 @@ import type { DepthSnapshot, PricePoint } from '@pine/core'
 
 const axisTick = { fill: 'var(--muted)', fontSize: 11, fontFamily: 'var(--font-archivo)' }
 
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
 function fmtTime(t: number, spanMs: number) {
   const d = new Date(t)
   if (spanMs <= 36 * 3600_000) return `${d.toISOString().slice(11, 16)}`
-  return `${d.toISOString().slice(5, 10).replace('-', '/')}`
+  return `${MONTHS[d.getUTCMonth()]} ${d.getUTCDate()}`
+}
+
+/** Evenly spaced UTC ticks: every 6h for short ranges, every N days at midnight otherwise. */
+function timeTicks(t0: number, t1: number): number[] {
+  const span = t1 - t0
+  if (span <= 0) return []
+  const H = 3600_000
+  const D = 24 * H
+  const step = span <= 36 * H ? 6 * H : span <= 8 * D ? D : span <= 32 * D ? 4 * D : 14 * D
+  const first = Math.ceil(t0 / step) * step
+  const out: number[] = []
+  for (let t = first; t <= t1; t += step) out.push(t)
+  return out
 }
 
 function TooltipBox({ children }: { children: React.ReactNode }) {
@@ -36,7 +51,7 @@ export function PriceChart({ points, deadline, height = 240 }: { points: PricePo
   return (
     <div style={{ height }} className="w-full" role="img" aria-label={`YES price history; latest ${last ? `${last.yes}%` : 'unknown'}`}>
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 12, right: 44, bottom: 0, left: -12 }}>
+        <AreaChart data={data} margin={{ top: 12, right: 44, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="yesWash" x1="0" x2="0" y1="0" y2="1">
               <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.14} />
@@ -49,6 +64,7 @@ export function PriceChart({ points, deadline, height = 240 }: { points: PricePo
             type="number"
             scale="time"
             domain={['dataMin', 'dataMax']}
+            ticks={timeTicks(t0, t1)}
             tickFormatter={(t: number) => fmtTime(t, span)}
             tick={axisTick}
             tickLine={false}
@@ -62,7 +78,7 @@ export function PriceChart({ points, deadline, height = 240 }: { points: PricePo
             tick={axisTick}
             tickLine={false}
             axisLine={false}
-            width={44}
+            width={42}
           />
           {dl && dl >= t0 && dl <= t1 ? (
             <ReferenceLine

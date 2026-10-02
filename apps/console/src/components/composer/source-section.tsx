@@ -79,6 +79,8 @@ export function SourceSection({ initialInput }: { initialInput?: string }) {
                     }
                   }}
                   placeholder="https://github.com/owner/repo/pull/12"
+                  // Keyboard-first: a fresh composer starts in the paste field.
+                  autoFocus={!c.draft.source && !initialInput}
                   className="h-9 pl-8"
                   autoComplete="off"
                   spellCheck={false}

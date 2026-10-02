@@ -251,9 +251,17 @@ export class TxMachine {
   }
 
   private countsTowardLimit(step: TxStep): boolean {
-    if (!step.estimatedCost) return false
+    return this.limitAmount(step) > 0n
+  }
+
+  /** What a step spends in the limit currency: its fee estimate and any collateral it deposits. */
+  private limitAmount(step: TxStep): bigint {
     const cur = this.opts.limitCurrency
-    return !cur || step.estimatedCost.currency === cur
+    let total = 0n
+    for (const c of [step.estimatedCost, step.collateralCost]) {
+      if (c && (!cur || c.currency === cur)) total += toUnits(c.amount) ?? 0n
+    }
+    return total
   }
 
   /** Collateral the plan requires (all non-skipped steps). */
@@ -261,7 +269,7 @@ export class TxMachine {
     let total = 0n
     for (const s of this.defs) {
       if (this.statusOf(s.id) === 'skipped') continue
-      if (this.countsTowardLimit(s)) total += toUnits(s.estimatedCost?.amount) ?? 0n
+      total += this.limitAmount(s)
     }
     return total
   }
@@ -270,7 +278,7 @@ export class TxMachine {
     let total = 0n
     for (const s of this.defs) {
       if (this.statusOf(s.id) !== 'confirmed') continue
-      if (this.countsTowardLimit(s)) total += toUnits(s.estimatedCost?.amount) ?? 0n
+      total += this.limitAmount(s)
     }
     return total
   }
@@ -613,11 +621,11 @@ export class TxMachine {
     const limitRaw = this.opts.spendingLimit
     if (limitRaw !== undefined && limitRaw !== '' && this.countsTowardLimit(step)) {
       const limit = toUnits(limitRaw) ?? 0n
-      const after = this.spentTotal() + (toUnits(step.estimatedCost?.amount) ?? 0n)
+      const after = this.spentTotal() + this.limitAmount(step)
       if (after > limit) {
         this.patchStep(def.id, {
           status: 'failed',
-          error: `Blocked: this step would bring spending to ${trimDecimal(fromUnits(after))} ${step.estimatedCost?.currency ?? ''}, above your limit of ${trimDecimal(limitRaw)}.`,
+          error: `Blocked: this step would bring spending to ${trimDecimal(fromUnits(after))} ${this.opts.limitCurrency ?? step.collateralCost?.currency ?? step.estimatedCost?.currency ?? ''}, above your limit of ${trimDecimal(limitRaw)}.`,
         })
         this.notifyFailed(def.id)
         return false

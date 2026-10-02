@@ -185,15 +185,13 @@ export function UtcDateTimeInput({
   min?: string
 }) {
   const local = value ? value.slice(0, 16) : ''
-  const [localTz, setLocalTz] = React.useState<string | null>(null)
-  React.useEffect(() => {
-    if (!value) return setLocalTz(null)
+  // Rendered client-side only (the composer is gated on hydration), so the local zone is safe to read here.
+  const localTz = React.useMemo(() => {
+    if (!value) return null
     try {
-      setLocalTz(
-        new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZoneName: 'short' }).format(new Date(value)),
-      )
+      return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZoneName: 'short' }).format(new Date(value))
     } catch {
-      setLocalTz(null)
+      return null
     }
   }, [value])
   return (

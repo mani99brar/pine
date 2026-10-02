@@ -73,9 +73,15 @@ export function LifecycleRuler({ claim, now }: { claim: ClaimDetail; now: Date }
   const max = rawMax + span * 0.04
   const pct = (t: number) => ((t - min) / (max - min)) * 100
   const milestones = marks.filter((m) => m.kind === 'milestone')
-  const events = marks.filter((m) => m.kind === 'event')
+  // Events closer than ~7% of the axis are clustered under one marker so labels never collide.
+  const events: (Mark & { more: Mark[] })[] = []
+  for (const e of marks.filter((m) => m.kind === 'event')) {
+    const last = events[events.length - 1]
+    if (last && pct(e.at) - pct(last.at) < 7) last.more.push(e)
+    else events.push({ ...e, more: [] })
+  }
   const mRows = assignRows(milestones.map((m) => pct(m.at)), 17, 3)
-  const eRows = assignRows(events.map((m) => pct(m.at)), 15, 3)
+  const eRows = assignRows(events.map((m) => pct(m.at)), 16, 2)
   const topRows = Math.max(1, ...mRows.map((r) => r + 1))
   const bottomRows = events.length ? Math.max(1, ...eRows.map((r) => r + 1)) : 0
   const nowPct = pct(n)
@@ -126,8 +132,11 @@ export function LifecycleRuler({ claim, now }: { claim: ClaimDetail; now: Date }
           <span className="absolute -bottom-1 -top-1 w-[3px] -translate-x-1/2 rounded-full bg-resin-fill" style={{ left: `${nowPct}%` }} />
         </div>
         <span
-          className="absolute -translate-x-1/2 rounded-chip bg-resin-fill px-1 text-[10px] font-semibold leading-[14px] text-[#16231f]"
-          style={{ left: `${Math.min(Math.max(nowPct, 3), 97)}%`, top: topRows * 34 + 6 + 22 }}
+          className={cn(
+            'absolute rounded-chip bg-resin-fill px-1 text-[10px] font-semibold leading-[14px] text-[#16231f]',
+            nowPct > 92 ? '-translate-x-[calc(100%+5px)]' : 'translate-x-[5px]',
+          )}
+          style={{ left: `${nowPct}%`, top: topRows * 34 + 6 + 1 }}
         >
           now
         </span>
@@ -140,15 +149,16 @@ export function LifecycleRuler({ claim, now }: { claim: ClaimDetail; now: Date }
               <span
                 className={cn(
                   'absolute -top-[5px] size-[9px] -translate-x-1/2 rounded-full border-2 border-surface',
-                  m.tone === 'flare' ? 'bg-flare' : m.scheduled ? 'bg-line-strong' : 'bg-needle',
+                  [m, ...m.more].some((x) => x.tone === 'flare') ? 'bg-flare' : m.scheduled ? 'bg-line-strong' : 'bg-needle',
                 )}
               />
               <div
                 className={cn('absolute whitespace-nowrap text-[11.5px] leading-tight text-muted', right ? 'right-0 text-right' : 'left-0')}
                 style={{ top: 10 + eRows[i]! * 30 }}
-                title={m.detail}
+                title={[m, ...m.more].map((x) => x.label).join('\n')}
               >
                 <span className="text-bark">{m.label}</span>
+                {m.more.length ? <span className="ml-1 text-muted">+{m.more.length} more</span> : null}
                 <br />
                 <span className="mono-cond tnum text-[10px]">{formatDate(new Date(m.at).toISOString(), 'short')}</span>
               </div>

@@ -35,11 +35,16 @@ const emptyShim = './src/lib/shims/x402.js'
 
 const nextConfig: NextConfig = {
   agentRules: false,
+  devIndicators: false,
   turbopack: { resolveAlias: Object.fromEntries(X402_OPTIONAL.map((m) => [m, emptyShim])) },
   transpilePackages: ['@pine/core', '@pine/data', '@pine/react', '@pine/server'],
   reactStrictMode: true,
   poweredByHeader: false,
   images: { remotePatterns: [{ protocol: 'https', hostname: 'avatars.githubusercontent.com' }] },
+  async redirects() {
+    // Agent briefs and llms.txt link to /claims/{id}/evidence as the submission URL.
+    return [{ source: '/claims/:id/evidence', destination: '/claims/:id/evidence/new', permanent: false }]
+  },
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }]
   },

@@ -267,8 +267,8 @@ export function FailedPanel({ claim }: { claim: ClaimDetail }) {
       <p className="mt-1 max-w-[80ch] text-[13.5px]">
         {claim.publication?.note ?? 'A required step failed in a way that cannot be retried.'}{' '}
         {confirmed.length
-          ? `Already on-chain: ${confirmed.map((s) => s.id).join(', ')}. Nothing else was spent.`
-          : 'Nothing reached the chain, so nothing was spent beyond any failed transaction gas.'}
+          ? `Completed before the failure: ${confirmed.map((s) => s.id).join(', ')}.`
+          : 'No step completed, so nothing was spent beyond any failed transaction gas.'}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button asChild variant="primary" size="sm">

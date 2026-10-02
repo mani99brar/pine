@@ -1,7 +1,7 @@
 import type { Metadata } from 'next'
 import { formatClaimNumber } from '@pine/core'
 import { buildClaimJsonLd } from '@pine/core/agent'
-import { getServerClaim, jsonLdString, siteUrl } from '@/lib/server/data'
+import { getOrigin, getServerClaim, jsonLdString } from '@/lib/server/data'
 import { CLAIM_TABS, type ClaimTab } from '@/lib/claim-tabs'
 import { ClaimWorkspace } from '@/components/claim/workspace'
 
@@ -29,7 +29,7 @@ export default async function ClaimPage({ params, searchParams }: Props) {
   const sp = await searchParams
   const tabParam = typeof sp.tab === 'string' ? sp.tab : ''
   const tab: ClaimTab = (CLAIM_TABS as readonly string[]).includes(tabParam) ? (tabParam as ClaimTab) : 'overview'
-  const claim = await getServerClaim(id)
+  const [claim, siteUrl] = await Promise.all([getServerClaim(id), getOrigin()])
   return (
     <>
       {claim ? (

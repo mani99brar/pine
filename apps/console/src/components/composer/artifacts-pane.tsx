@@ -50,18 +50,24 @@ function useSlots(): Slot[] {
 function QuestionPreview() {
   const { c } = useComposerCtx()
   const slots = useSlots()
-  const prev = React.useRef<Record<string, string | undefined>>({})
-  const [flashKeys, setFlashKeys] = React.useState<Record<string, number>>({})
+  const current = Object.fromEntries(slots.map((s) => [s.key, s.value])) as Record<string, string | undefined>
   const sig = slots.map((s) => `${s.key}=${s.value}`).join('|')
-  React.useEffect(() => {
+  const [prev, setPrev] = React.useState<{ sig: string; values: Record<string, string | undefined> }>({ sig, values: current })
+  const [flashKeys, setFlashKeys] = React.useState<Record<string, number>>({})
+  const [seq, setSeq] = React.useState(0)
+  // Compare with the previous render's slot values (render-time sync, no effect).
+  if (prev.sig !== sig) {
     const changed: Record<string, number> = {}
-    for (const s of slots) {
-      if (prev.current[s.key] !== undefined && prev.current[s.key] !== s.value) changed[s.key] = Date.now()
-      prev.current[s.key] = s.value
-    }
+    for (const s of slots) if (prev.values[s.key] !== undefined && prev.values[s.key] !== s.value) changed[s.key] = seq + 1
+    setSeq(seq + 1)
+    setPrev({ sig, values: current })
     if (Object.keys(changed).length) setFlashKeys((f) => ({ ...f, ...changed }))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig])
+  }
+  React.useEffect(() => {
+    if (!Object.keys(flashKeys).length) return
+    const t = window.setTimeout(() => setFlashKeys({}), 1200)
+    return () => window.clearTimeout(t)
+  }, [flashKeys])
 
   const text = c.question?.text
   if (!text) {
@@ -95,7 +101,7 @@ function QuestionPreview() {
         title={m.label}
         className={cn(
           'rounded-[2px] px-[1px] [box-decoration-break:clone]',
-          m.missing ? 'bg-flare-soft text-flare' : 'bg-needle-soft/70 text-bark',
+          m.missing ? 'bg-flare-soft text-flare shadow-[inset_0_-1px_0_var(--flare)]' : 'bg-needle-soft text-bark shadow-[inset_0_-1px_0_var(--needle)]',
           flashKeys[m.key] && 'animate-resin-flash resin-static',
         )}
       >
@@ -114,17 +120,14 @@ interface HashEvent {
 }
 
 function useHashLog(hashes: Record<string, string | undefined>) {
-  const prev = React.useRef<Record<string, string | undefined> | null>(null)
-  const [log, setLog] = React.useState<HashEvent[]>([])
   const sig = JSON.stringify(hashes)
-  React.useEffect(() => {
-    const before = prev.current
-    prev.current = hashes
-    if (!before) return
-    const labels = Object.keys(hashes).filter((k) => before[k] !== hashes[k] && hashes[k])
+  const [prev, setPrev] = React.useState<{ sig: string; hashes: Record<string, string | undefined> }>({ sig, hashes })
+  const [log, setLog] = React.useState<HashEvent[]>([])
+  if (prev.sig !== sig) {
+    const labels = Object.keys(hashes).filter((k) => prev.hashes[k] !== hashes[k] && hashes[k])
+    setPrev({ sig, hashes })
     if (labels.length) setLog((l) => [{ t: Date.now(), labels }, ...l].slice(0, 4))
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sig])
+  }
   return log
 }
 
@@ -146,12 +149,15 @@ export function ArtifactsPane({
     config: c.spec.environment.configHash,
   }
   const log = useHashLog(hashes)
+  const needs = !c.draft.source && !c.policy ? 'needs commit + policy' : !c.draft.source ? 'needs a commit' : !c.policy ? 'needs a policy' : 'building…'
   const issues = c.validation.issues
   const started = publish.steps.some((s) => s.status !== 'idle')
-  const [panel, setPanel] = React.useState<'problems' | 'publish'>('problems')
-  React.useEffect(() => {
+  const [panel, setPanel] = React.useState<'problems' | 'publish'>(started ? 'publish' : 'problems')
+  const [wasStarted, setWasStarted] = React.useState(started)
+  if (started !== wasStarted) {
+    setWasStarted(started)
     if (started) setPanel('publish')
-  }, [started])
+  }
   const frozen = c.frozen
   const manifestJson = c.manifest ? JSON.stringify(c.manifest, null, 2) : ''
 
@@ -168,8 +174,8 @@ export function ArtifactsPane({
       <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto">
         <section aria-label="Hashes" className="border-b border-line px-4 py-3">
           <div className="flex flex-wrap gap-1.5">
-            <HashChip label="manifest" value={hashes.manifest} pending="needs source + policy" tone={frozen ? 'frozen' : 'default'} />
-            <HashChip label="question" value={hashes.question} pending="needs source + policy" tone={frozen ? 'frozen' : 'default'} />
+            <HashChip label="manifest" value={hashes.manifest} pending={needs} tone={frozen ? 'frozen' : 'default'} />
+            <HashChip label="question" value={hashes.question} pending={needs} tone={frozen ? 'frozen' : 'default'} />
             <HashChip label="policy" value={hashes.policy} pending="choose a policy" tone={frozen ? 'frozen' : 'default'} />
             <HashChip label="env" value={hashes.env} tone={frozen ? 'frozen' : 'default'} />
             <HashChip label="config" value={hashes.config} tone={frozen ? 'frozen' : 'default'} />

@@ -21,11 +21,11 @@ export interface BuiltInView {
 const has = (s: ClaimStatus, list: ClaimStatus[]) => list.includes(s)
 
 export const BUILT_IN_VIEWS: BuiltInView[] = [
-  { id: 'all', label: 'All claims', description: 'Every published claim', match: () => true },
-  { id: 'open', label: 'Open for evidence', description: 'Evidence window open', match: (c) => c.status === 'open' },
+  { id: 'all', label: 'All', description: 'Every published claim', match: () => true },
+  { id: 'open', label: 'Open', description: 'Evidence window open', match: (c) => c.status === 'open' },
   {
     id: 'closing',
-    label: 'Closing within 48h',
+    label: 'Closing soon',
     description: 'Open claims whose evidence deadline is within 48 hours',
     match: (c, { now }) => c.status === 'open' && Date.parse(c.evidenceDeadline) - now < 48 * 3600_000,
   },
@@ -37,10 +37,10 @@ export const BUILT_IN_VIEWS: BuiltInView[] = [
   },
   { id: 'disputed', label: 'Disputed', description: 'Challenged answers and arbitration', match: (c) => has(c.status, ['disputed', 'arbitration']) },
   { id: 'resolved', label: 'Resolved', description: 'Final outcomes', match: (c) => has(c.status, ['resolved', 'settled']) },
-  { id: 'recovery', label: 'Needs recovery', description: 'Partially published or failed', match: (c) => has(c.status, ['publishing', 'failed']) },
+  { id: 'recovery', label: 'Recovery', description: 'Partially published or failed', match: (c) => has(c.status, ['publishing', 'failed']) },
   {
     id: 'mine',
-    label: 'Created by me',
+    label: 'Mine',
     description: 'Claims created by your wallet or GitHub account',
     match: (c, { me, login }) =>
       (!!me && c.creator.toLowerCase() === me.toLowerCase()) || (!!login && c.creatorGithub === login),

@@ -158,7 +158,7 @@ export function Segmented<T extends string>({
   size?: 'xs' | 'sm'
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="inline-flex rounded-ctl border border-line-strong bg-sunken p-0.5">
+    <div role="radiogroup" aria-label={label} className="inline-flex w-fit self-start rounded-ctl border border-line-strong bg-sunken p-0.5">
       {options.map((o) => (
         <button
           key={o.value}

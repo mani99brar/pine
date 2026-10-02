@@ -152,6 +152,25 @@ describe('TxMachine', () => {
     expect(m.getSnapshot().limit?.within).toBe(true)
   })
 
+  it('counts a collateral deposit toward the limit even when the fee is in the native token', async () => {
+    const storage = createMemoryStorage()
+    const execute = vi.fn()
+    const steps = plan().map((st) =>
+      st.id === 'split_position'
+        ? { ...st, estimatedCost: { amount: '0.0004', currency: 'xDAI' }, collateralCost: { amount: '25', currency: 'sDAI' } }
+        : st,
+    )
+    const m = new TxMachine('limit-collateral', steps, {
+      storage,
+      executor: { kind: 'demo', execute, checkPending: async () => ({ status: 'pending' }) },
+      spendingLimit: '20',
+      limitCurrency: 'sDAI',
+    })
+    await m.start()
+    expect(m.getSnapshot().limit).toEqual({ limit: '20', required: '25', currency: 'sDAI', within: false })
+    expect(execute).not.toHaveBeenCalled()
+  })
+
   it('skips an optional failed step and finishes', async () => {
     const storage = createMemoryStorage()
     const wallet = fakeWallet()

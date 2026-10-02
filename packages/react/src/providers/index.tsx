@@ -4,7 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { SessionProvider } from 'next-auth/react'
 import type { Session } from 'next-auth'
 import { WagmiProvider, type Config } from 'wagmi'
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query'
+import { QueryClient, QueryClientProvider, notifyManager, useQueryClient } from '@tanstack/react-query'
 import { RainbowKitProvider, type Theme } from '@rainbow-me/rainbowkit'
 import {
   createDataProvider,
@@ -16,6 +16,12 @@ import {
 import { PineContext, isDemoEnv, type PineContextValue } from './context'
 import { createPineWagmiConfig } from './wagmi-config'
 import { createApiTokenGetter } from '../internal/api-token'
+
+// The claim composer keeps its draft in the TanStack Query cache and binds it to controlled inputs.
+// TanStack's default notify scheduler defers cache notifications to a later tick, so React restores the
+// previous input value first and the caret jumps to the end while typing mid-text. Notifying synchronously
+// keeps edits in place for every app that uses PineProviders.
+if (typeof window !== 'undefined') notifyManager.setScheduler((cb) => cb())
 
 export { PineContext, usePine, isDemoEnv, type PineContextValue } from './context'
 export { createPineWagmiConfig, pineViemChains, pineWalletList, walletConnectProjectId } from './wagmi-config'

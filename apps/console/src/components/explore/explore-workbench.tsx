@@ -3,6 +3,7 @@
 import * as React from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { Popover } from 'radix-ui'
 import { ArrowDown, ArrowUp, Bookmark, PanelRightClose, PanelRightOpen, Search, X } from 'lucide-react'
 import type { ClaimSummary } from '@pine/core'
 import { POLICIES, formatAmount, formatClaimNumber, formatDate, formatPrice, shortSha, timeRemaining } from '@pine/core'
@@ -11,16 +12,16 @@ import { useAccount, useClaims, useWallet } from '@pine/react'
 import { cn } from '@/lib/cn'
 import { useKeys } from '@/lib/use-keys'
 import { useNowTick } from '@/lib/use-now'
-import { readLocal, writeLocal } from '@/lib/storage'
+import { useLocalStorageState } from '@/lib/hooks'
 import { BUILT_IN_VIEWS, sortClaims, type ExploreFilters, type SortKey } from '@/lib/views'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/field'
 import { Kbd } from '@/components/ui/kbd'
-import { DeadlineBar, PriceGauge } from '@/components/ui/instruments'
+import { DeadlineBar } from '@/components/ui/instruments'
 import { EmptyState } from '@/components/ui/empty-state'
 import { SkeletonRows } from '@/components/ui/skeleton'
 import { Tooltip } from '@/components/ui/tooltip'
-import { StatusDot, statusLabel } from '@/components/claim/status'
+import { StatusDot, statusColor, statusLabel } from '@/components/claim/status'
 import { RowSparkline } from './row-sparkline'
 import { ClaimPreview } from './claim-preview'
 
@@ -35,19 +36,14 @@ const PREVIEW_KEY = 'pine-console:preview-open'
 export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
   const router = useRouter()
   const [f, setF] = React.useState<ExploreFilters>(initial)
-  const [selected, setSelected] = React.useState(0)
-  const [previewOpen, setPreviewOpen] = React.useState(true)
-  const [saved, setSaved] = React.useState<SavedView[]>([])
+  const [selectedRaw, setSelected] = React.useState(0)
+  const [previewOpen, setPreviewOpen] = useLocalStorageState(PREVIEW_KEY, true)
+  const [saved, setSaved] = useLocalStorageState<SavedView[]>(SAVED_KEY, [])
   const searchRef = React.useRef<HTMLInputElement>(null)
   const tableRef = React.useRef<HTMLTableSectionElement>(null)
   const now = useNowTick(30_000)
   const wallet = useWallet()
   const { account } = useAccount()
-
-  React.useEffect(() => {
-    setSaved(readLocal<SavedView[]>(SAVED_KEY, []))
-    setPreviewOpen(readLocal(PREVIEW_KEY, true))
-  }, [])
 
   // Keep the URL shareable without a navigation.
   React.useEffect(() => {
@@ -105,9 +101,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
     [items, ctx],
   )
 
-  React.useEffect(() => {
-    setSelected((s) => Math.min(s, Math.max(rows.length - 1, 0)))
-  }, [rows.length])
+  const selected = Math.min(selectedRaw, Math.max(rows.length - 1, 0))
 
   const current: ClaimSummary | undefined = rows[selected]
 
@@ -148,10 +142,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
   })
 
   function togglePreview() {
-    setPreviewOpen((o) => {
-      writeLocal(PREVIEW_KEY, !o)
-      return !o
-    })
+    setPreviewOpen((o) => !o)
   }
 
   const set = (patch: Partial<ExploreFilters>) => {
@@ -161,19 +152,14 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
   const sortBy = (key: SortKey) =>
     setF((cur) => ({ ...cur, sort: key, dir: cur.sort === key ? (cur.dir === 'asc' ? 'desc' : 'asc') : key === 'deadline' ? 'asc' : 'desc' }))
 
-  const saveView = () => {
-    const name = window.prompt('Name this view', f.q || f.repo || f.policy || baseView.label)
-    if (!name) return
+  const saveView = (name: string) => {
+    if (!name.trim()) return
     const v: SavedView = { id: `saved-${Date.now()}`, name, filters: { q: f.q, policy: f.policy, repo: f.repo, sort: f.sort, dir: f.dir, base: baseView.id } }
-    const next = [...saved, v]
-    setSaved(next)
-    writeLocal(SAVED_KEY, next)
+    setSaved([...saved, v])
     setF((cur) => ({ ...cur, view: v.id }))
   }
   const removeView = (id: string) => {
-    const next = saved.filter((s) => s.id !== id)
-    setSaved(next)
-    writeLocal(SAVED_KEY, next)
+    setSaved(saved.filter((s) => s.id !== id))
     if (f.view === id) set({ view: 'all' })
   }
   const applySaved = (v: SavedView) => setF({ view: v.id, q: v.filters.q, policy: v.filters.policy, repo: v.filters.repo, sort: v.filters.sort, dir: v.filters.dir })
@@ -181,10 +167,10 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
   const filtersActive = !!(f.q || f.policy || f.repo)
 
   return (
-    <div className="flex min-h-[calc(100dvh-48px-28px)] flex-col lg:flex-row">
-      {/* Views rail */}
-      <aside className="shrink-0 border-b border-line bg-frost lg:w-[208px] lg:border-b-0 lg:border-r" aria-label="Views">
-        <div className="scrollbar-thin flex gap-1 overflow-x-auto px-3 py-2 lg:flex-col lg:gap-px lg:overflow-visible lg:px-2 lg:py-3">
+    <div className="flex min-h-[calc(100dvh-48px-28px)] flex-col xl:flex-row">
+      {/* Table */}
+      <section className="flex min-w-0 flex-1 flex-col" aria-label="Claims">
+        <div className="scrollbar-thin flex items-end gap-0 relative overflow-x-auto border-b border-line bg-frost px-2 pt-2 sm:px-3" role="toolbar" aria-label="Views">
           {BUILT_IN_VIEWS.map((v) => (
             <button
               key={v.id}
@@ -193,53 +179,47 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
               aria-pressed={f.view === v.id}
               title={v.description}
               className={cn(
-                'flex h-8 shrink-0 items-center gap-2 rounded-ctl px-2.5 text-[13px] text-muted transition-colors hover:bg-sunken hover:text-bark',
-                f.view === v.id && 'bg-surface font-medium text-bark shadow-[0_0_0_1px_var(--line)]',
+                'relative flex h-9 shrink-0 items-center gap-1.5 rounded-t-ctl px-3 text-[13px] text-muted transition-colors hover:text-bark',
+                f.view === v.id && 'border border-b-0 border-line bg-surface font-medium text-bark after:absolute after:inset-x-0 after:-bottom-px after:h-px after:bg-surface',
               )}
             >
-              <span className="truncate">{v.label}</span>
-              <span className="tnum ml-auto pl-2 text-xs text-faint">{all.isLoading ? '' : (counts[v.id] ?? 0)}</span>
+              {v.label}
+              <span className={cn('tnum text-[11.5px]', f.view === v.id ? 'text-needle' : 'text-faint')}>{all.isLoading ? '' : (counts[v.id] ?? 0)}</span>
             </button>
           ))}
-          {saved.length ? <div className="hidden px-2.5 pb-1 pt-3 text-xs text-muted lg:block">Saved views</div> : null}
           {saved.map((v) => (
-            <div key={v.id} className="group flex shrink-0 items-center">
+            <span key={v.id} className="group relative flex shrink-0 items-center">
               <button
                 type="button"
                 onClick={() => applySaved(v)}
                 aria-pressed={f.view === v.id}
                 className={cn(
-                  'flex h-8 min-w-0 flex-1 items-center gap-2 rounded-ctl px-2.5 text-[13px] text-muted hover:bg-sunken hover:text-bark',
-                  f.view === v.id && 'bg-surface font-medium text-bark shadow-[0_0_0_1px_var(--line)]',
+                  'flex h-9 items-center gap-1.5 rounded-t-ctl pl-3 pr-6 text-[13px] text-muted hover:text-bark',
+                  f.view === v.id && 'border border-b-0 border-line bg-surface font-medium text-bark',
                 )}
               >
-                <Bookmark size={13} aria-hidden className="shrink-0" />
-                <span className="truncate">{v.name}</span>
+                <Bookmark size={12} aria-hidden /> {v.name}
               </button>
               <button
                 type="button"
                 onClick={() => removeView(v.id)}
-                className="rounded-chip p-1 text-faint opacity-0 hover:text-flare focus-visible:opacity-100 group-hover:opacity-100"
+                className="absolute right-1 rounded-chip p-0.5 text-faint opacity-0 hover:text-flare focus-visible:opacity-100 group-hover:opacity-100"
                 aria-label={`Delete saved view ${v.name}`}
               >
-                <X size={12} aria-hidden />
+                <X size={11} aria-hidden />
               </button>
-            </div>
+            </span>
           ))}
         </div>
-      </aside>
-
-      {/* Table */}
-      <section className="flex min-w-0 flex-1 flex-col" aria-label="Claims">
         <div className="flex flex-wrap items-center gap-2 border-b border-line bg-surface px-3 py-2 sm:px-4">
-          <div className="relative min-w-[200px] flex-1 sm:max-w-[340px]">
+          <div className="relative min-w-[180px] flex-1 sm:max-w-[300px]">
             <Search size={14} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-faint" />
             <Input
               ref={searchRef}
               data-slash-focus
               value={f.q}
               onChange={(e) => set({ q: e.target.value })}
-              placeholder="Filter by title, repo, SHA, tag"
+              placeholder="Filter claims"
               aria-label="Filter claims"
               className="pl-8 pr-8"
             />
@@ -267,9 +247,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
             </Button>
           ) : null}
           <div className="ml-auto flex items-center gap-1.5">
-            <Button variant="ghost" size="sm" onClick={saveView} title="Save the current filters as a view">
-              <Bookmark size={13} aria-hidden /> Save view
-            </Button>
+            <SaveViewPopover suggested={f.q || f.repo || f.policy || baseView.label} onSave={saveView} />
             <Tooltip content={previewOpen ? 'Hide preview (Space)' : 'Show preview (Space)'}>
               <button
                 type="button"
@@ -284,7 +262,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
           </div>
         </div>
 
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-x-auto bg-surface" data-explore-table>
+        <div className="scrollbar-thin min-h-0 flex-1 relative overflow-x-auto bg-surface" data-explore-table>
           {all.isError ? (
             <EmptyState
               tone="error"
@@ -324,7 +302,13 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
                 : `${baseView.label} has nothing that matches${filtersActive ? ' the current filters' : ''}. Clear filters or switch views.`}
             </EmptyState>
           ) : (
-            <table className="w-full min-w-[880px] border-collapse text-left text-[13px]">
+            <>
+            <ul className="divide-y divide-line md:hidden" aria-label="Claims">
+              {rows.map((c, i) => (
+                <MobileClaimRow key={c.id} c={c} now={now} selected={i === selected} />
+              ))}
+            </ul>
+            <table className="hidden w-full min-w-[760px] table-fixed border-collapse text-left text-[13px] md:table">
               <caption className="sr-only">
                 Claims, {rows.length} shown. Use j and k to move, Enter to open, Space to toggle the preview.
               </caption>
@@ -334,20 +318,17 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
                     <span className="sr-only">Status</span>
                   </th>
                   <SortTh label="Claim" k="newest" f={f} onSort={sortBy} />
-                  <th scope="col" className="py-2 pr-3 font-medium">
-                    Policy
-                  </th>
                   <SortTh
                     label="YES"
                     k="yes"
                     f={f}
                     onSort={sortBy}
                     title={COPY.priceLabel}
-                    className="w-[210px]"
+                    className="w-[178px]"
                   />
-                  <SortTh label="Liquidity" k="liquidity" f={f} onSort={sortBy} align="right" />
-                  <SortTh label="Evidence" k="evidence" f={f} onSort={sortBy} align="right" />
-                  <SortTh label="Evidence deadline" k="deadline" f={f} onSort={sortBy} className="w-[190px] pr-4" />
+                  <SortTh label="Liquidity" k="liquidity" f={f} onSort={sortBy} align="right" className="w-[96px]" />
+                  <SortTh label="Evid." k="evidence" f={f} onSort={sortBy} align="right" className="w-[60px]" title="Evidence submissions" />
+                  <SortTh label="Evidence window" k="deadline" f={f} onSort={sortBy} className="w-[156px] pl-3 pr-4" title="Time left, or the claim status once the evidence deadline has passed" />
                 </tr>
               </thead>
               <tbody ref={tableRef}>
@@ -364,6 +345,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
                 ))}
               </tbody>
             </table>
+            </>
           )}
         </div>
         {rows.length ? (
@@ -389,11 +371,83 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
       </section>
 
       {previewOpen && current ? (
-        <aside className="hidden w-[380px] shrink-0 border-l border-line bg-frost xl:block" aria-label="Preview">
+        <aside className="hidden w-[360px] shrink-0 border-l border-line bg-frost xl:block" aria-label="Preview">
           <ClaimPreview id={current.id} summary={current} onClose={togglePreview} />
         </aside>
       ) : null}
     </div>
+  )
+}
+
+function SaveViewPopover({ suggested, onSave }: { suggested: string; onSave: (name: string) => void }) {
+  const [open, setOpen] = React.useState(false)
+  const [name, setName] = React.useState('')
+  return (
+    <Popover.Root
+      open={open}
+      onOpenChange={(o) => {
+        setOpen(o)
+        if (o) setName(suggested)
+      }}
+    >
+      <Popover.Trigger asChild>
+        <Button variant="ghost" size="sm" title="Save the current filters as a view">
+          <Bookmark size={13} aria-hidden /> Save view
+        </Button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content align="end" sideOffset={6} className="animate-fade-in z-50 w-72 rounded-float border border-line bg-raised p-3 shadow-float">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              onSave(name)
+              setOpen(false)
+            }}
+          >
+            <label htmlFor="view-name" className="stretch-cond text-[12.5px] font-medium">
+              Name this view
+            </label>
+            <Input id="view-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} className="mt-1" />
+            <p className="mt-1.5 text-[11.5px] text-muted">Saves the current view, filters and sort in this browser.</p>
+            <div className="mt-2 flex justify-end gap-2">
+              <Button variant="quiet" size="sm" onClick={() => setOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" size="sm" disabled={!name.trim()}>
+                Save view
+              </Button>
+            </div>
+          </form>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
+  )
+}
+
+function MobileClaimRow({ c, now, selected }: { c: ClaimSummary; now: Date; selected: boolean }) {
+  const rem = timeRemaining(c.evidenceDeadline, now)
+  return (
+    <li className={cn(selected && 'bg-needle-soft/50')}>
+      <Link href={`/claims/${c.id}`} className="grid grid-cols-[auto_minmax(0,1fr)_auto] gap-x-3 px-4 py-3">
+        <span className="pt-1">
+          <StatusDot status={c.status} outcome={c.outcome} />
+        </span>
+        <span className="min-w-0">
+          <span className="line-clamp-2 text-[14px] font-medium leading-snug">{c.title}</span>
+          <span className="mono-cond mt-0.5 block truncate text-[11px] text-muted">
+            {formatClaimNumber(c.number)} {c.source.owner}/{c.source.repo}@{shortSha(c.source.commitSha)}
+          </span>
+          <span className={cn('mt-0.5 block text-[12px]', c.status === 'open' ? (rem.ms < 48 * 3600_000 ? 'font-medium text-resin' : 'text-muted') : statusColor(c.status, c.outcome))}>
+            {c.status === 'open' ? `${rem.label} left` : statusLabel(c.status, c.outcome)}
+          </span>
+        </span>
+        <span className="flex flex-col items-end gap-1">
+          <span className="tnum text-[15px] font-semibold">{typeof c.yesPrice === 'number' ? formatPrice(c.yesPrice) : ''}</span>
+          {typeof c.yesPrice === 'number' ? <RowSparkline id={c.id} width={56} height={16} /> : <span className="text-[11.5px] text-faint">No market</span>}
+          <span className="tnum text-[11px] text-muted">{Number(c.liquidity) > 0 ? formatAmount(c.liquidity, { symbol: c.collateralSymbol, compact: true }) : ''}</span>
+        </span>
+      </Link>
+    </li>
   )
 }
 
@@ -460,7 +514,7 @@ function ClaimRow({
   return (
     <tr
       data-row={i}
-      aria-selected={selected}
+      data-selected={selected || undefined}
       onClick={onSelect}
       onDoubleClick={onOpen}
       className={cn(
@@ -474,47 +528,44 @@ function ClaimRow({
           <span className="sr-only">{statusLabel(c.status, c.outcome)}</span>
         </span>
       </td>
-      <td className="max-w-0 py-2 pr-3">
+      <td className="py-2 pr-3">
         <div className="flex min-w-0 items-baseline gap-2">
           <span className="mono-cond shrink-0 text-[11.5px] text-muted">{formatClaimNumber(c.number)}</span>
           <Link
             href={`/claims/${c.id}`}
-            className="truncate font-medium text-bark hover:text-needle hover:underline"
+            className="min-w-0 truncate font-medium text-bark hover:text-needle hover:underline"
             onFocus={onSelect}
+            title={c.title}
           >
             {c.title}
           </Link>
           {c.sponsored ? <span className="shrink-0 rounded-chip border border-line px-1 text-[10.5px] text-muted">sponsored</span> : null}
         </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-2 text-[11.5px] text-muted">
-          <span className="mono-cond truncate">
+        <div className="mt-0.5 flex min-w-0 items-center gap-2.5 text-[11.5px] text-muted">
+          <span className="mono-cond min-w-0 truncate">
             {c.source.owner}/{c.source.repo}
             <span className="text-faint">@</span>
             {shortSha(c.source.commitSha)}
           </span>
-          {c.source.prNumber ? <span className="shrink-0">PR #{c.source.prNumber}</span> : null}
-          <span className="shrink-0 text-faint">{statusLabel(c.status, c.outcome)}</span>
+          {c.source.prNumber ? <span className="shrink-0">#{c.source.prNumber}</span> : null}
+          <span className="mono-cond shrink-0 text-[11px]" title={c.policy.title}>
+            {c.policy.id}
+          </span>
         </div>
-      </td>
-      <td className="py-2 pr-3 align-top">
-        <span className="mono-cond mt-0.5 inline-block text-[11.5px]" title={c.policy.title}>
-          {c.policy.id}
-        </span>
       </td>
       <td className="py-2 pr-3">
         {typeof c.yesPrice === 'number' ? (
-          <div className="flex items-center gap-2.5">
-            <span className="tnum w-12 text-right font-semibold">{formatPrice(c.yesPrice)}</span>
-            <div className="flex flex-col gap-0.5">
-              <RowSparkline id={c.id} />
-              <PriceGauge value={c.yesPrice} previous={c.yesPrice24hAgo} width={72} />
-            </div>
+          <div className="flex items-center gap-2">
+            <span className="tnum w-11 shrink-0 text-right font-semibold">{formatPrice(c.yesPrice)}</span>
+            <RowSparkline id={c.id} width={64} height={18} />
             {typeof delta === 'number' && Math.abs(delta) >= 0.001 ? (
-              <span className={cn('tnum text-[11px]', delta > 0 ? 'text-flare' : 'text-muted')} title="Change in the last 24h">
+              <span className={cn('tnum w-9 shrink-0 text-[11px]', delta > 0 ? 'text-flare' : 'text-muted')} title="Change in YES price over 24h, in points">
                 {delta > 0 ? '+' : '−'}
                 {(Math.abs(delta) * 100).toFixed(1)}
               </span>
-            ) : null}
+            ) : (
+              <span className="w-9 shrink-0" />
+            )}
           </div>
         ) : (
           <span className="text-faint">No market</span>
@@ -524,12 +575,21 @@ function ClaimRow({
         {Number(c.liquidity) > 0 ? formatAmount(c.liquidity, { symbol: c.collateralSymbol, compact: true }) : <span className="text-faint">0</span>}
       </td>
       <td className="tnum py-2 pr-3 text-right">{c.evidenceCount || <span className="text-faint">0</span>}</td>
-      <td className="py-2 pr-4">
+      <td className="py-2 pl-3 pr-4">
         <div className="flex flex-col gap-1">
-          <span className={cn('tnum text-[12.5px]', !rem.past && rem.ms < 48 * 3600_000 && 'font-medium text-resin')} title={formatDate(c.evidenceDeadline, 'utc')}>
-            {rem.past ? `closed ${rem.label} ago` : `${rem.label} left`}
-          </span>
-          <DeadlineBar start={c.createdAt} end={c.evidenceDeadline} now={now} width={110} />
+          {c.status === 'open' ? (
+            <span className={cn('tnum text-[12.5px]', rem.ms < 48 * 3600_000 && 'font-medium text-resin')} title={`Evidence deadline ${formatDate(c.evidenceDeadline, 'utc')}`}>
+              {rem.label} left
+            </span>
+          ) : (
+            <span
+              className={cn('text-[12px] leading-tight', statusColor(c.status, c.outcome))}
+              title={`Evidence deadline ${formatDate(c.evidenceDeadline, 'utc')}${rem.past ? `, closed ${rem.label} ago` : ''}`}
+            >
+              {statusLabel(c.status, c.outcome)}
+            </span>
+          )}
+          <DeadlineBar start={c.createdAt} end={c.evidenceDeadline} now={now} width={112} />
         </div>
       </td>
     </tr>

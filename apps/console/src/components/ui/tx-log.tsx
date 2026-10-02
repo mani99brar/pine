@@ -41,7 +41,7 @@ function ManualStep({ step, runner }: { step: TxRunnerStep; runner: TxRunner }) 
         <Input
           value={hash}
           onChange={(e) => setHash(e.target.value)}
-          placeholder="Liquidity tx hash (optional)"
+          placeholder="Tx hash (optional)"
           aria-label="Liquidity transaction hash (optional)"
           mono
           className="h-7 w-[min(320px,100%)] flex-1"
@@ -81,7 +81,7 @@ export function TxLog({
   const frozenAt = runner.steps.find((s) => s.freezesTerms && s.status === 'confirmed')
   const started = runner.steps.some((s) => s.status !== 'idle')
   return (
-    <div className={cn('overflow-hidden rounded-ctl border border-line bg-sunken', className)} aria-live="polite">
+    <div className={cn('min-w-0 overflow-hidden rounded-ctl border border-line bg-sunken', className)} aria-live="polite">
       <div className="flex items-center gap-2 border-b border-line bg-surface px-3 py-1.5">
         <span className="stretch-cond text-[12.5px] font-semibold">{title}</span>
         <span
@@ -103,7 +103,7 @@ export function TxLog({
       </div>
       <ol className="mono-cond divide-y divide-line/60 text-[12px] leading-[1.5]">
         {runner.steps.map((s, i) => {
-          const g = GLYPH[s.status]
+          const g = s.manual && s.status === 'awaiting_signature' ? { ...GLYPH.awaiting_signature, word: 'waiting for you on the DEX' } : GLYPH[s.status]
           const chain = chainOf(s)
           return (
             <li key={s.id} className={cn('px-3 py-2', s.status === 'idle' && 'text-muted')}>
@@ -125,7 +125,7 @@ export function TxLog({
                       </span>
                     ) : null}
                   </div>
-                  {!compact ? <p className="font-sans text-[12px] text-muted">{s.description}</p> : null}
+                  {!compact ? <p className="wrap-anywhere font-sans text-[12px] text-muted">{s.description}</p> : null}
                   {s.txHash && chain ? (
                     <a
                       href={explorerTxUrl(chain, s.txHash)}

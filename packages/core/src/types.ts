@@ -699,6 +699,8 @@ export interface TxStep {
   request?: { chainId: ChainId; to: Address; data: Hex; value: string /* wei */ }
   /** Estimated cost shown before the wallet prompt */
   estimatedCost?: { amount: DecimalString; currency: string }
+  /** Collateral this step moves out of the wallet (e.g. the liquidity deposit); counts toward the spending limit */
+  collateralCost?: { amount: DecimalString; currency: string }
   /** After this step confirms, claim terms are frozen */
   freezesTerms?: boolean
   optional?: boolean

@@ -50,6 +50,8 @@ export function HashChip({
     const changed = Array.from(b).map((ch, i) => a[i] !== ch)
     setDiff({ key: Date.now(), changed })
     setChanges((c) => c + 1)
+    const t = window.setTimeout(() => setDiff(null), 1200)
+    return () => window.clearTimeout(t)
   }, [value, head, tail])
 
   return (
@@ -68,7 +70,7 @@ export function HashChip({
         <button
           type="button"
           onClick={() => value && void copy(value, label ? `${label} hash` : 'hash')}
-          className="mono-cond relative flex min-w-0 items-center gap-1 px-1.5 py-1 text-[11.5px] text-bark hover:bg-sunken"
+          className={cn('mono-cond relative flex min-w-0 items-center gap-1 px-1.5 py-1 text-[11.5px] text-bark hover:bg-sunken', diff && 'resin-static')}
           aria-label={`Copy ${label ?? 'hash'} ${value}`}
         >
           <span className="truncate" aria-hidden>
@@ -76,7 +78,7 @@ export function HashChip({
               ? Array.from(short).map((ch, i) => (
                   <span
                     key={`${diff.key}-${i}`}
-                    className={cn(diff.changed[i] && 'animate-resin-flash rounded-[2px] resin-static')}
+                    className={cn(diff.changed[i] && 'animate-resin-flash rounded-[2px]')}
                   >
                     {ch}
                   </span>

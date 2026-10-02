@@ -4,9 +4,11 @@ import * as React from 'react'
 import Link from 'next/link'
 import { PanelBottomOpen, Snowflake } from 'lucide-react'
 import { COPY } from '@pine/core/copy'
+import { getPolicy } from '@pine/core'
 import { useClaimComposer, usePublishClaim } from '@pine/react'
 import { cn } from '@/lib/cn'
 import { useKeys } from '@/lib/use-keys'
+import { useIsClient } from '@/lib/hooks'
 import { Callout } from '@/components/ui/callout'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Kbd } from '@/components/ui/kbd'
@@ -19,18 +21,34 @@ import { DeadlinesSection, EnvironmentSection } from './env-deadline-sections'
 import { FundingSection, ReviewSection } from './funding-review-sections'
 import { ArtifactsPane } from './artifacts-pane'
 
-export function Composer({ draftId, source }: { draftId?: string; source?: string }) {
+/** Drafts carry generated ids and time-based defaults, so the composer renders on the client only. */
+export function Composer(props: { draftId?: string; source?: string; policy?: string }) {
+  const isClient = useIsClient()
+  if (!isClient) return <ComposerSkeleton />
+  return <ComposerLoaded {...props} />
+}
+
+function ComposerLoaded({ draftId, source, policy }: { draftId?: string; source?: string; policy?: string }) {
   const c = useClaimComposer(draftId)
   if (c.isLoading) return <ComposerSkeleton />
   return (
     <ComposerProvider c={c}>
-      <ComposerBody urlDraftId={draftId} initialSource={source} />
+      <ComposerBody urlDraftId={draftId} initialSource={source} initialPolicy={policy} />
     </ComposerProvider>
   )
 }
 
-function ComposerBody({ urlDraftId, initialSource }: { urlDraftId?: string; initialSource?: string }) {
-  const { c, touch } = useComposerCtx()
+function ComposerBody({ urlDraftId, initialSource, initialPolicy }: { urlDraftId?: string; initialSource?: string; initialPolicy?: string }) {
+  const { c, touch, updateSpec } = useComposerCtx()
+
+  // ?policy=BOT-001 (from a policy page) preselects an enabled policy once.
+  const policyApplied = React.useRef(false)
+  React.useEffect(() => {
+    if (policyApplied.current || !initialPolicy || c.draft.spec.policyId) return
+    policyApplied.current = true
+    const p = getPolicy(initialPolicy.toUpperCase())
+    if (p && p.status === 'enabled') updateSpec((s) => ({ ...s, policyId: p.id, policyVersion: p.version }))
+  }, [initialPolicy, c.draft.spec.policyId, updateSpec])
   const publish = usePublishClaim(c.draft.id)
   const [active, setActive] = React.useState<SectionId>('source')
   const [sheet, setSheet] = React.useState(false)
@@ -115,7 +133,7 @@ function ComposerBody({ urlDraftId, initialSource }: { urlDraftId?: string; init
         <div className="border-b border-line px-4 pb-5 pt-6 sm:px-8">
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
             <h1 className="stretch-display text-[28px] font-[750] leading-none tracking-[-0.01em] sm:text-[34px]">
-              {c.spec.title ? 'Verify' : 'New verification'}
+              New verification
             </h1>
             <span className="mono-cond text-[11.5px] text-muted">draft {c.draft.id.slice(0, 12)}</span>
           </div>

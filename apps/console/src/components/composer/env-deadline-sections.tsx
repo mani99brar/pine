@@ -34,10 +34,10 @@ export function EnvironmentSection() {
     >
       <div className="grid gap-5 md:grid-cols-2">
         <Field label="Runtime" htmlFor={fieldId('spec.environment.runtime')} required error={err('spec.environment.runtime')}>
-          <Input id={fieldId('spec.environment.runtime')} mono value={env.runtime ?? ''} disabled={disabled} onBlur={() => touch('spec.environment.runtime')} onChange={(e) => set({ runtime: e.target.value })} placeholder="node 22.14.0" />
+          <Input id={fieldId('spec.environment.runtime')} mono value={env.runtime ?? ''} disabled={disabled} onBlur={() => touch('spec.environment.runtime')} onChange={(e) => set({ runtime: e.target.value })} placeholder="e.g. node 22.14.0" />
         </Field>
         <Field label="Package manager" htmlFor="env-pm">
-          <Input id="env-pm" mono value={env.packageManager ?? ''} disabled={disabled} onChange={(e) => set({ packageManager: e.target.value || undefined })} placeholder="pnpm 10.9.2" />
+          <Input id="env-pm" mono value={env.packageManager ?? ''} disabled={disabled} onChange={(e) => set({ packageManager: e.target.value || undefined })} placeholder="e.g. pnpm 10.9.2" />
         </Field>
         <Field label="Lockfile path" htmlFor="env-lock-path">
           <Input
@@ -48,7 +48,7 @@ export function EnvironmentSection() {
             onChange={(e) =>
               set({ dependencyLock: e.target.value || env.dependencyLock?.hash ? { path: e.target.value, hash: env.dependencyLock?.hash ?? ('' as `0x${string}`) } : undefined })
             }
-            placeholder="pnpm-lock.yaml"
+            placeholder="e.g. pnpm-lock.yaml"
           />
         </Field>
         <Field label="Lockfile hash" htmlFor={fieldId('spec.environment.dependencyLock')} error={err('spec.environment.dependencyLock')} hint="keccak256 or sha256 of the lockfile, 0x-prefixed.">
@@ -72,7 +72,7 @@ export function EnvironmentSection() {
         </Field>
       </div>
       <Field label="Reproduction command" htmlFor={fieldId('spec.environment.reproductionCommand')} required error={err('spec.environment.reproductionCommand')} hint="The command a counterexample must make fail. Runs in an isolated sandbox with no secrets.">
-        <Input id={fieldId('spec.environment.reproductionCommand')} mono value={env.reproductionCommand ?? ''} disabled={disabled} onBlur={() => touch('spec.environment.reproductionCommand')} onChange={(e) => set({ reproductionCommand: e.target.value })} placeholder="pnpm vitest run test/reporter-funding.spec.ts" />
+        <Input id={fieldId('spec.environment.reproductionCommand')} mono value={env.reproductionCommand ?? ''} disabled={disabled} onBlur={() => touch('spec.environment.reproductionCommand')} onChange={(e) => set({ reproductionCommand: e.target.value })} placeholder="e.g. pnpm vitest run test/reporter-funding.spec.ts" />
       </Field>
       <div className="grid gap-5 md:grid-cols-2">
         <Field label="Setup steps" htmlFor={fieldId('spec.environment.setupSteps')}>

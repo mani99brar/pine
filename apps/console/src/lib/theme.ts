@@ -1,28 +1,28 @@
 export type ThemePref = 'system' | 'light' | 'dark'
-export const THEME_KEY = 'pine-console:theme'
+export const THEME_COOKIE = 'pine-console-theme'
 
-/** Runs before paint (inlined in <head>) so the stored theme never flashes. */
-export const themeScript = `(function(){try{var t=localStorage.getItem('${THEME_KEY}');if(t==='light'||t==='dark'){document.documentElement.setAttribute('data-theme',t)}}catch(e){}})();`
-
-export function readTheme(): ThemePref {
-  try {
-    const t = localStorage.getItem(THEME_KEY)
-    return t === 'light' || t === 'dark' ? t : 'system'
-  } catch {
-    return 'system'
-  }
+/** Reads the explicit theme cookie value (server or client). */
+export function parseTheme(v: string | undefined | null): ThemePref {
+  return v === 'light' || v === 'dark' ? v : 'system'
 }
 
+export function readTheme(): ThemePref {
+  if (typeof document === 'undefined') return 'system'
+  const m = document.cookie.match(new RegExp(`(?:^|; )${THEME_COOKIE}=([^;]*)`))
+  return parseTheme(m?.[1])
+}
+
+/**
+ * Applies a theme immediately and persists it in a cookie, so the server layout can render
+ * <html data-theme> on the next request without any inline script or flash.
+ */
 export function applyTheme(t: ThemePref) {
-  try {
-    if (t === 'system') {
-      localStorage.removeItem(THEME_KEY)
-      document.documentElement.removeAttribute('data-theme')
-    } else {
-      localStorage.setItem(THEME_KEY, t)
-      document.documentElement.setAttribute('data-theme', t)
-    }
-  } catch {
-    /* storage unavailable: theme applies for this page only */
+  const root = document.documentElement
+  if (t === 'system') {
+    root.removeAttribute('data-theme')
+    document.cookie = `${THEME_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`
+  } else {
+    root.setAttribute('data-theme', t)
+    document.cookie = `${THEME_COOKIE}=${t}; Path=/; Max-Age=31536000; SameSite=Lax`
   }
 }

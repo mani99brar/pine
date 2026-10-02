@@ -23,7 +23,7 @@ export function CodeBlock({
       </div>
       <pre
         className={cn(
-          'mono-cond scrollbar-thin overflow-x-auto px-3 py-2.5 text-[12px] leading-[1.6] text-bark',
+          'mono-cond scrollbar-thin relative overflow-x-auto px-3 py-2.5 text-[12px] leading-[1.6] text-bark',
           wrap && 'wrap-anywhere whitespace-pre-wrap',
         )}
       >

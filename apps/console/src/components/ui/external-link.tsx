@@ -20,7 +20,7 @@ export function ExternalLink({
       href={safe}
       target="_blank"
       rel="noopener noreferrer nofollow"
-      className={cn('inline-flex items-center gap-1 text-needle underline-offset-2 hover:underline', className)}
+      className={cn('relative inline-flex items-center gap-1 text-needle underline-offset-2 hover:underline', className)}
     >
       {children}
       {icon ? <Icon size={12} aria-hidden className="shrink-0 opacity-70" /> : null}

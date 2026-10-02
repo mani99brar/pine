@@ -10,7 +10,7 @@ import { getChainOrDefault } from '@pine/core/chains'
 import type { PublishClaim } from '@pine/react'
 import { useWallet } from '@pine/react'
 import { cn } from '@/lib/cn'
-import { readLocal, writeLocal } from '@/lib/storage'
+import { useLocalStorageState } from '@/lib/hooks'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Checkbox, Field, Input } from '@/components/ui/field'
@@ -133,7 +133,26 @@ export function FundingSection() {
       {plan ? (
         <>
           <LimitMeter spend={Number(plan.totals.maxSpend)} limit={Number(plan.input.spendingLimit) || 0} symbol={sym} />
-          <div className="scrollbar-thin overflow-x-auto rounded-ctl border border-line">
+          <ul className="divide-y divide-line rounded-ctl border border-line sm:hidden" aria-label="Cost breakdown">
+            {plan.costs.map((cl) => (
+              <li key={cl.key} className="px-3 py-2.5 text-[13px]">
+                <div className="flex items-baseline justify-between gap-3">
+                  <span className="font-medium">{cl.label}</span>
+                  <span className="tnum whitespace-nowrap">
+                    {cl.estimate ? <span className="text-muted">~</span> : null}
+                    {formatAmount(cl.amount, { symbol: cl.currency, maxDecimals: 5 })}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-muted">
+                  <span className={cn('rounded-chip border px-1.5 text-[11.5px]', KIND[cl.kind].cls)}>{KIND[cl.kind].label}</span>
+                  <span>paid by {cl.payer === 'you' ? 'you' : cl.payer}</span>
+                  {!cl.countsTowardLimit ? <span>outside limit</span> : null}
+                </div>
+                <p className="mt-1 text-[12px] text-muted">{cl.note}</p>
+              </li>
+            ))}
+          </ul>
+          <div className="scrollbar-thin relative hidden overflow-x-auto rounded-ctl border border-line sm:block">
             <table className="w-full min-w-[640px] text-[13px]">
               <caption className="sr-only">Cost breakdown</caption>
               <thead>
@@ -201,8 +220,8 @@ export function ReviewSection({ publish, onFocusProblem }: { publish: PublishCla
   const { c, setShowAll } = useComposerCtx()
   const wallet = useWallet()
   const ackKey = `pine-console:ack:${c.draft.id}`
-  const [ack, setAck] = React.useState(false)
-  React.useEffect(() => setAck(readLocal(ackKey, false)), [ackKey])
+  const [ack, setAckState] = useLocalStorageState(ackKey, false)
+  const setAck = (v: boolean) => setAckState(v)
   const issues = c.validation.issues
   const started = publish.steps.some((s) => s.status !== 'idle')
   const canPublish = c.validation.ok && ack && publish.ready && wallet.isConnected
@@ -268,10 +287,7 @@ export function ReviewSection({ publish, onFocusProblem }: { publish: PublishCla
       <Checkbox
         id="ack"
         checked={ack}
-        onChange={(v) => {
-          setAck(v)
-          writeLocal(ackKey, v)
-        }}
+        onChange={(v) => setAck(v)}
         label="I have read these disclosures and understand that my liquidity is at risk, that No is not a correctness verdict, and that invalid is not a refund."
       />
 

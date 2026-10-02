@@ -255,6 +255,7 @@ function buildSplitStep(args: {
         }
       : undefined,
     estimatedCost: cost(chain, GAS_UNITS.split, args.gasPriceGwei),
+    collateralCost: { amount: fromScaled(amount, chain.collateral.decimals), currency: chain.collateral.symbol },
   }
 }
 

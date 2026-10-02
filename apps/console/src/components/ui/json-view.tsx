@@ -45,22 +45,28 @@ export function JsonView({
   collapsedPaths?: string[]
 }) {
   const json = React.useMemo(() => toJson(value), [value])
-  const prev = React.useRef<Map<string, string> | null>(null)
-  const [changed, setChanged] = React.useState<{ key: number; paths: Set<string> }>({ key: 0, paths: new Set() })
-
-  React.useEffect(() => {
-    const leaves = new Map<string, string>()
-    collectLeaves(json, '', leaves)
-    const before = prev.current
-    prev.current = leaves
-    if (!before) return
-    const paths = new Set<string>()
-    for (const [k, v] of leaves) if (before.get(k) !== v) paths.add(k)
-    if (paths.size) setChanged({ key: Date.now(), paths })
+  const leaves = React.useMemo(() => {
+    const m = new Map<string, string>()
+    collectLeaves(json, '', m)
+    return m
   }, [json])
+  const [prevLeaves, setPrevLeaves] = React.useState(leaves)
+  const [changed, setChanged] = React.useState<{ key: number; paths: Set<string> }>({ key: 0, paths: new Set() })
+  // Diff against the previous render's leaves (render-time sync, no effect).
+  if (prevLeaves !== leaves) {
+    setPrevLeaves(leaves)
+    const paths = new Set<string>()
+    for (const [k, v] of leaves) if (prevLeaves.get(k) !== v) paths.add(k)
+    if (paths.size) setChanged({ key: changed.key + 1, paths })
+  }
+  React.useEffect(() => {
+    if (!changed.paths.size) return
+    const t = window.setTimeout(() => setChanged((c) => ({ key: c.key, paths: new Set() })), 1200)
+    return () => window.clearTimeout(t)
+  }, [changed])
 
   return (
-    <div className={cn('mono-cond overflow-x-auto text-[11.5px] leading-[1.6]', className)} role="tree" aria-label="JSON document">
+    <div className={cn('mono-cond relative overflow-x-auto text-[11.5px] leading-[1.6]', className)} aria-label="JSON document">
       <Node
         value={json}
         path=""
@@ -115,7 +121,7 @@ function Node({
   if (!isObj) {
     const flash = changed.paths.has(path)
     return (
-      <div className="pl-[14px]" role="treeitem" aria-selected={false}>
+      <div className="pl-[14px]">
         <span key={flash ? changed.key : undefined} className={cn('rounded-[2px]', flash && 'animate-resin-flash resin-static')}>
           {key}
           <Scalar v={value as Exclude<Json, object>} />
@@ -133,7 +139,7 @@ function Node({
 
   if (entries.length === 0) {
     return (
-      <div className="pl-[14px]" role="treeitem" aria-selected={false}>
+      <div className="pl-[14px]">
         {key}
         <span className="text-[var(--code-punct)]">
           {o}
@@ -145,12 +151,13 @@ function Node({
   }
 
   return (
-    <div role="treeitem" aria-expanded={open} aria-selected={false}>
+    <div>
       <div className="flex items-start">
         <button
           type="button"
           onClick={() => setOpen((x) => !x)}
           className="mt-[3px] flex size-[14px] shrink-0 items-center justify-center rounded-[2px] text-faint hover:bg-sunken hover:text-bark"
+          aria-expanded={open}
           aria-label={open ? `Collapse ${name ?? 'root'}` : `Expand ${name ?? 'root'}`}
         >
           <ChevronRight size={11} className={cn('transition-transform', open && 'rotate-90')} aria-hidden />
@@ -178,7 +185,7 @@ function Node({
       </div>
       {open ? (
         <>
-          <div className="ml-[6px] border-l border-line pl-[8px]" role="group">
+          <div className="ml-[6px] border-l border-line pl-[8px]">
             {entries.map(([k, v], i) => (
               <Node
                 key={k ?? i}

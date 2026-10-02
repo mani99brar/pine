@@ -12,6 +12,7 @@ import { cn } from '@/lib/cn'
 import { useKeys } from '@/lib/use-keys'
 import { useNowTick } from '@/lib/use-now'
 import { Button } from '@/components/ui/button'
+import { Kbd } from '@/components/ui/kbd'
 import { useClipboard } from '@/components/ui/copy-button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ExternalLink } from '@/components/ui/external-link'
@@ -170,13 +171,18 @@ function Loaded({
           <TabsList
             className="-mx-4 border-b-0 px-2 sm:-mx-6 sm:px-4"
             tabs={[
-              { value: 'overview', label: 'Overview', kbd: '1' },
-              { value: 'market', label: 'Market', kbd: '2' },
-              { value: 'evidence', label: 'Evidence', kbd: '3', count: claim.evidence.length },
-              { value: 'oracle', label: 'Oracle', kbd: '4', alert: claim.status === 'answer_proposed' || claim.status === 'disputed' || claim.status === 'arbitration' },
-              { value: 'agent', label: 'Agent', kbd: '5' },
-              { value: 'activity', label: 'Activity', kbd: '6' },
+              { value: 'overview', label: 'Overview' },
+              { value: 'market', label: 'Market' },
+              { value: 'evidence', label: 'Evidence', count: claim.evidence.length },
+              { value: 'oracle', label: 'Oracle', alert: claim.status === 'answer_proposed' || claim.status === 'disputed' || claim.status === 'arbitration' },
+              { value: 'agent', label: 'Agent' },
+              { value: 'activity', label: 'Activity' },
             ]}
+            trailing={
+              <span className="ml-auto hidden shrink-0 items-center gap-1 self-center pr-2 text-[11.5px] text-muted lg:flex">
+                <Kbd>1</Kbd>–<Kbd>6</Kbd> tabs <Kbd className="ml-2">e</Kbd> evidence <Kbd className="ml-2">b</Kbd> brief
+              </span>
+            }
           />
         </div>
       </header>

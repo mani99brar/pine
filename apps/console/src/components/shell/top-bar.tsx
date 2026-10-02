@@ -31,11 +31,14 @@ export function crumbsFor(pathname: string): { href: string; label: string }[] {
   parts.forEach((p, i) => {
     href += `/${p}`
     const prev = parts[i - 1]
-    if (p === 'pull') return
+    // Segments without their own page are folded into the next crumb.
+    if (p === 'pull' || p === 'evidence') return
+    if (parts[0] === 'repos' && i === 1) return
     let label = LABELS[p] ?? decodeURIComponent(p)
     if (prev === 'claims' && /^pine-\d+/i.test(p)) label = p.toUpperCase()
+    if (parts[0] === 'repos' && i === 2) label = `${decodeURIComponent(parts[1] ?? '')}/${decodeURIComponent(p)}`
     if (prev === 'pull') label = `#${p}`
-    if (prev === 'evidence' && p === 'new') label = 'Submit'
+    if (prev === 'evidence' && p === 'new') label = 'Submit evidence'
     if (prev === 'policies') label = decodeURIComponent(p).toUpperCase()
     out.push({ href, label })
   })

@@ -102,7 +102,7 @@ export function OracleTab({ claim, now }: { claim: ClaimDetail; now: Date }) {
             {opening.past ? 'No answer posted yet. Anyone can post one with the minimum bond.' : `Answers open in ${opening.label}.`}
           </p>
         ) : (
-          <div className="scrollbar-thin mt-2 overflow-x-auto">
+          <div className="scrollbar-thin mt-2 relative overflow-x-auto">
             <table className="w-full min-w-[560px] text-[13px]">
               <thead>
                 <tr className="stretch-cond border-b border-line text-left text-[12px] text-muted">

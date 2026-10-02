@@ -92,7 +92,7 @@ export function PolicySection() {
           )}
           <div className="flex flex-col gap-1.5 md:items-end">
             <HashChip label="policy" value={policy.contentHash} />
-            <Link href={`/policies/${policy.id}?version=${policy.version}`} target="_blank" className="text-[12.5px] text-needle hover:underline">
+            <Link href={`/policies/${policy.id}?version=${policy.version}`} target="_blank" rel="noopener noreferrer" className="text-[12.5px] text-needle hover:underline">
               Read the full policy text
             </Link>
           </div>
@@ -134,7 +134,8 @@ function ParamInput({ p }: { p: PolicyParameterSpec }) {
   const id = fieldId(path)
   const v = c.draft.spec.parameters?.[p.key]
   const set = (val: string | string[] | boolean) => updateSpec((s) => ({ ...s, parameters: { ...(s.parameters ?? {}), [p.key]: val } }))
-  const placeholder = p.placeholder ?? (typeof p.example === 'string' ? p.example : undefined)
+  const sample = p.placeholder ?? (typeof p.example === 'string' ? p.example : undefined)
+  const placeholder = sample ? `e.g. ${sample}` : undefined
   let control: React.ReactNode
   switch (p.kind) {
     case 'longtext':
@@ -213,10 +214,10 @@ export function ClaimSection() {
       description={COPY.boundedClaim}
     >
       <Field label="Title" htmlFor={fieldId('spec.title')} required error={err('spec.title')} aside={<span className="tnum">{title.length}/90</span>} hint="A short human label. The question text below is what resolves.">
-        <Input id={fieldId('spec.title')} value={title} maxLength={90} disabled={disabled} onBlur={() => touch('spec.title')} onChange={(e) => updateSpec((x) => ({ ...x, title: e.target.value }))} placeholder="Reporter deposits never draw on protected funds" />
+        <Input id={fieldId('spec.title')} value={title} maxLength={90} disabled={disabled} onBlur={() => touch('spec.title')} onChange={(e) => updateSpec((x) => ({ ...x, title: e.target.value }))} placeholder="e.g. Reporter deposits never draw on protected funds" />
       </Field>
       <Field label="Requirement" htmlFor={fieldId('spec.requirement')} required error={err('spec.requirement')} hint="One exact behavioral requirement or invariant, in the terms of the source specification.">
-        <Textarea id={fieldId('spec.requirement')} rows={4} value={s.requirement ?? ''} disabled={disabled} onBlur={() => touch('spec.requirement')} onChange={(e) => updateSpec((x) => ({ ...x, requirement: e.target.value }))} placeholder="For the frozen configuration and allowed states, each reporter-funding deposit's principal is allocated only from eligible bridging funds…" />
+        <Textarea id={fieldId('spec.requirement')} rows={4} value={s.requirement ?? ''} disabled={disabled} onBlur={() => touch('spec.requirement')} onChange={(e) => updateSpec((x) => ({ ...x, requirement: e.target.value }))} placeholder="e.g. For the frozen configuration and allowed states, each reporter-funding deposit's principal is allocated only from eligible bridging funds…" />
       </Field>
       <Field
         label="Violation that resolves YES"
@@ -225,7 +226,7 @@ export function ClaimSection() {
         error={err('spec.violation')}
         hint="Inserted verbatim into the question after “demonstrating”. Describe the failure, not a quality judgement."
       >
-        <Textarea id={fieldId('spec.violation')} rows={2} value={s.violation ?? ''} disabled={disabled} onBlur={() => touch('spec.violation')} onChange={(e) => updateSpec((x) => ({ ...x, violation: e.target.value }))} placeholder="reporter-deposit principal can consume arbitration funds or the operator transaction-gas reserve" />
+        <Textarea id={fieldId('spec.violation')} rows={2} value={s.violation ?? ''} disabled={disabled} onBlur={() => touch('spec.violation')} onChange={(e) => updateSpec((x) => ({ ...x, violation: e.target.value }))} placeholder="e.g. reporter-deposit principal can consume arbitration funds or the operator transaction-gas reserve" />
       </Field>
 
       {policy?.parameters.length ? (
@@ -243,10 +244,10 @@ export function ClaimSection() {
 
       <div className="grid gap-5 md:grid-cols-2">
         <Field label="In scope" htmlFor={fieldId('spec.scope.inScope')} error={err('spec.scope')} hint="Components, entry points or files the claim covers.">
-          <ListEditor id={fieldId('spec.scope.inScope')} value={s.scope?.inScope ?? []} disabled={disabled} onBlur={() => touch('spec.scope')} onChange={(v) => updateSpec((x) => ({ ...x, scope: { inScope: v, outOfScope: x.scope?.outOfScope ?? [] } }))} placeholder="src/planner/reporter-funding.ts" addLabel="Add in-scope item" />
+          <ListEditor id={fieldId('spec.scope.inScope')} value={s.scope?.inScope ?? []} disabled={disabled} onBlur={() => touch('spec.scope')} onChange={(v) => updateSpec((x) => ({ ...x, scope: { inScope: v, outOfScope: x.scope?.outOfScope ?? [] } }))} placeholder="e.g. src/planner/reporter-funding.ts" addLabel="Add in-scope item" />
         </Field>
         <Field label="Out of scope" htmlFor={fieldId('spec.scope.outOfScope')} hint="Explicitly excluded so investigators do not waste effort.">
-          <ListEditor id={fieldId('spec.scope.outOfScope')} value={s.scope?.outOfScope ?? []} disabled={disabled} onChange={(v) => updateSpec((x) => ({ ...x, scope: { inScope: x.scope?.inScope ?? [], outOfScope: v } }))} placeholder="Live LI.FI route execution" addLabel="Add out-of-scope item" />
+          <ListEditor id={fieldId('spec.scope.outOfScope')} value={s.scope?.outOfScope ?? []} disabled={disabled} onChange={(v) => updateSpec((x) => ({ ...x, scope: { inScope: x.scope?.inScope ?? [], outOfScope: v } }))} placeholder="e.g. Live LI.FI route execution" addLabel="Add out-of-scope item" />
         </Field>
       </div>
       <div className="grid gap-5 md:grid-cols-2">
@@ -259,15 +260,15 @@ export function ClaimSection() {
       </div>
       <div className="grid gap-5 md:grid-cols-2">
         <Field label="Assumptions" htmlFor={fieldId('spec.assumptions')} error={err('spec.assumptions')}>
-          <ListEditor id={fieldId('spec.assumptions')} value={s.assumptions ?? []} disabled={disabled} onBlur={() => touch('spec.assumptions')} onChange={(v) => updateSpec((x) => ({ ...x, assumptions: v }))} placeholder="Operator EOA holds both reserves" addLabel="Add assumption" />
+          <ListEditor id={fieldId('spec.assumptions')} value={s.assumptions ?? []} disabled={disabled} onBlur={() => touch('spec.assumptions')} onChange={(v) => updateSpec((x) => ({ ...x, assumptions: v }))} placeholder="e.g. Operator EOA holds both reserves" addLabel="Add assumption" />
         </Field>
         <Field label="Exclusions" htmlFor={fieldId('spec.exclusions')} hint="In addition to the policy exclusions.">
-          <ListEditor id={fieldId('spec.exclusions')} value={s.exclusions ?? []} disabled={disabled} onChange={(v) => updateSpec((x) => ({ ...x, exclusions: v }))} placeholder="Legitimate gas paid from the operator reserve" addLabel="Add exclusion" />
+          <ListEditor id={fieldId('spec.exclusions')} value={s.exclusions ?? []} disabled={disabled} onChange={(v) => updateSpec((x) => ({ ...x, exclusions: v }))} placeholder="e.g. Legitimate gas paid from the operator reserve" addLabel="Add exclusion" />
         </Field>
       </div>
       <div className="grid gap-5 md:grid-cols-[1fr_1.4fr]">
         <Field label="Source requirement label" htmlFor="spec-ref-label" hint="Optional pointer to the spec this claim comes from.">
-          <Input id="spec-ref-label" value={s.specReference?.label ?? ''} disabled={disabled} onChange={(e) => updateSpec((x) => ({ ...x, specReference: e.target.value || x.specReference?.url ? { label: e.target.value, url: x.specReference?.url ?? '' } : undefined }))} placeholder="Gateway balancer bot spec §4.2" />
+          <Input id="spec-ref-label" value={s.specReference?.label ?? ''} disabled={disabled} onChange={(e) => updateSpec((x) => ({ ...x, specReference: e.target.value || x.specReference?.url ? { label: e.target.value, url: x.specReference?.url ?? '' } : undefined }))} placeholder="e.g. Gateway balancer bot spec §4.2" />
         </Field>
         <Field label="Source requirement URL" htmlFor={fieldId('spec.specReference')} error={err('spec.specReference')}>
           <Input id={fieldId('spec.specReference')} type="url" mono value={s.specReference?.url ?? ''} disabled={disabled} onBlur={() => touch('spec.specReference')} onChange={(e) => updateSpec((x) => ({ ...x, specReference: e.target.value || x.specReference?.label ? { label: x.specReference?.label ?? '', url: e.target.value } : undefined }))} placeholder="https://github.com/…/spec.md#4-2" />

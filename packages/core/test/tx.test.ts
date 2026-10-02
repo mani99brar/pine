@@ -49,6 +49,12 @@ describe('buildPublishSteps', () => {
     }
   })
 
+  it('split_position carries the liquidity deposit as a collateral cost for the spending limit', () => {
+    const split = steps.find((s) => s.id === 'split_position')!
+    expect(split.collateralCost).toEqual({ amount: '12.345678901234567891', currency: gnosis.collateral.symbol })
+    expect(split.estimatedCost?.currency).toBe(gnosis.nativeSymbol)
+  })
+
   it('approves exactly the liquidity amount to the router (never unlimited)', () => {
     const approve = steps.find((s) => s.id === 'approve_collateral')!
     expect(approve.request?.to).toBe(gnosis.collateral.address)

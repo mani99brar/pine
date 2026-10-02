@@ -10,13 +10,15 @@ export const TabsContent = RTabs.Content
 export function TabsList({
   tabs,
   className,
+  trailing,
 }: {
   tabs: { value: string; label: React.ReactNode; count?: number; kbd?: string; alert?: boolean }[]
   className?: string
+  trailing?: React.ReactNode
 }) {
   return (
     <RTabs.List
-      className={cn('scrollbar-thin flex items-stretch gap-0 overflow-x-auto border-b border-line', className)}
+      className={cn('scrollbar-thin relative flex items-stretch gap-0 overflow-x-auto border-b border-line', className)}
       aria-label="Sections"
     >
       {tabs.map((t) => (
@@ -38,6 +40,7 @@ export function TabsList({
           {t.kbd ? <Kbd className="hidden lg:inline-flex">{t.kbd}</Kbd> : null}
         </RTabs.Trigger>
       ))}
+      {trailing}
     </RTabs.List>
   )
 }
