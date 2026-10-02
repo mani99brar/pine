@@ -1,0 +1,34 @@
+{
+  "blockTimestamp": "1790943245",
+  "chainId": 100,
+  "claimRegistry": "0xc97da2295ed3f7b4778a57c0f8e52c6af7ba6b2a",
+  "creator": "0x2d1667356a649a7064e673ed90c3e7c80aec95da",
+  "deployer": "0xdbebaf9452a97eb3359e32cf0a0b3168c9e36bf9",
+  "deployerNonce": "0",
+  "evidenceRegistry": "0xb1102a859926210cfc40ef8d319607ed76d04aea",
+  "forkBlock": "48550000",
+  "funder": "0x0a08e57ab74c12a2d8569137936251aae2832a36",
+  "scenarios": {
+    "a": {
+      "conditionId": "0x4be5e1447228e8b2deec6e6e545830ea8db2967549bca02c34578405f6069630",
+      "invalidToken": "0x2c9788675b734b6f4bf9da841b34b6a3c31d13b7",
+      "market": "0xf05ea256afb56baefb51dda5691b56034f3a0f5e",
+      "noToken": "0xc303a7c6b8d433f7e73a4d8e47b8f8d15fcb5f37",
+      "questionId": "0xa2f97ccdd442c191c41d4d9228d91a748a1da25037079daf8e6ea9a86b1b6ae8",
+      "sdaiShares": "7937585225163629232",
+      "yesPoolBefore": "0x0000000000000000000000000000000000000000",
+      "yesToken": "0xd81993066c0c8b8b069e7805755cc81f9cc88024"
+    },
+    "b": {
+      "conditionId": "0xa244543d72ee6d4e6ce4f34f9d6fd5b7e768541f2ecedc0d8f8b93e5592d5f6c",
+      "invalidToken": "0x56b238da3809bca2bb9a2910d41eb785b735c07b",
+      "market": "0xf05ea256afb56baefb51dda5691b56034f3a0f5e",
+      "noToken": "0x68835994a369144b6babb8573cafa110d2d02841",
+      "questionId": "0x60360efe514d16d53837e5cb0a2d6b5de250d858242da48a1bc2f90205939c8c",
+      "sdaiShares": "7937585225163629232",
+      "yesPoolBefore": "0x0000000000000000000000000000000000000000",
+      "yesToken": "0x685054be5a73c1d111675e79ca0f37226c8b148f"
+    }
+  },
+  "submitter": "0xf8fc361279fe38cb453eaca833f120ba6b8eb9ae"
+}

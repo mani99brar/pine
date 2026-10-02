@@ -1,0 +1,343 @@
+{
+  "deploymentHash": "0x5e8b5c399076044441f6be65cd456db7345605eb19531e7168fd0f238bce43be",
+  "evidenceCommitment": "0x517e76e2746c398573aed11d5ba7ba584040b2c0e676b9f8bd6effaf13054f86",
+  "generator": "scripts/fixtures/export-plan-vectors.mts",
+  "inputs": {
+    "evidence": {
+      "contentSha256": "0xf85eddd562d2cb0b9880fa43c7ca922f7f59d6a7b91e2c39e746b4ed68714f9b",
+      "salt": "0xdd57e3a1c46f718cf5196ed020c15cadf12604574edc78e12bc8a411f0bf6143",
+      "submissionId": "1"
+    },
+    "funding": {
+      "budgetWei": "10000000000000000000",
+      "mintDeadlineOffset": "1200",
+      "mintSlippageBps": "50",
+      "shareMarginBps": "10"
+    },
+    "labels": {
+      "creator": "pine-e2e-creator",
+      "deployer": "pine-e2e-deployer",
+      "funder": "pine-e2e-funder",
+      "submitter": "pine-e2e-submitter"
+    },
+    "planIds": {
+      "commitA": "vector-commit-a",
+      "createClaimA": "vector-create-claim-a",
+      "createClaimB": "vector-create-claim-b",
+      "fundingA": "vector-funding-a",
+      "fundingB": "vector-funding-b",
+      "revealA": "vector-reveal-a"
+    }
+  },
+  "manifest": {
+    "amm": {
+      "factory": "0xa0864cca6e114013ab0e27cbd5b6f4c8947da766",
+      "poolDeployer": "0xc1b576ac6ec749d5ace1787bf9ec6340908ddb47",
+      "poolInitCodeHash": "0xbce37a54eab2fcd71913a0d40723e04238970e7fc1159bfd58ad5b79531697e7",
+      "positionManager": "0x91fd594c46d8b01e62dbdebed2401dde01817834",
+      "quoter": "0xcbad9fdf0d2814659eb26f600efdeaf005eda0f7",
+      "swapRouter": "0xffb643e73f280b97809a8b41f7232ab401a04ee1"
+    },
+    "chainId": 100,
+    "kleros": {
+      "foreignChainId": 1,
+      "foreignProxy": "0xfe0eb5fc686f929eb26d541d75bb59f816c0aa68",
+      "homeProxy": "0x68154ea682f95bf582b80dd6453fa401737491dc"
+    },
+    "pine": {
+      "claimRegistry": "0xc97da2295ed3f7b4778a57c0f8e52c6af7ba6b2a",
+      "deploymentBlock": 48550000,
+      "evidenceRegistry": "0xb1102a859926210cfc40ef8d319607ed76d04aea"
+    },
+    "seer": {
+      "arbitrator": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+      "collateralToken": "0xaf204776c7245bf4147c2612bf6e5972ee483701",
+      "conditionalTokens": "0xceafdd6bc0bef976fdcd1112955828e00543c0ce",
+      "gnosisRouter": "0xec9048b59b3467415b1a38f63416407ea0c70fb8",
+      "marketFactory": "0x83183da839ce8228e31ae41222ead9edbb5cdcf1",
+      "marketImplementation": "0x8f76bc35f8c72e5e2ec55ebed785da5efaa9636a",
+      "questionTimeoutSeconds": 302400,
+      "realitio": "0xe78996a233895be74a66f451f1019ca9734205cc",
+      "realityProxy": "0xc260adfac11f97c001dc143d2a4f45b98e0f2d6c",
+      "savingsXDaiAdapter": "0xd499b51fcfc66bd31248ef4b28d656d67e591a94",
+      "wrapped1155Factory": "0xd194319d1804c1051dd21ba1dc931ca72410b79f"
+    },
+    "version": 1
+  },
+  "observations": {
+    "blockTimestamp": "1790943245",
+    "chainId": 100,
+    "claimRegistry": "0xc97da2295ed3f7b4778a57c0f8e52c6af7ba6b2a",
+    "creator": "0x2d1667356a649a7064e673ed90c3e7c80aec95da",
+    "deployer": "0xdbebaf9452a97eb3359e32cf0a0b3168c9e36bf9",
+    "deployerNonce": "0",
+    "evidenceRegistry": "0xb1102a859926210cfc40ef8d319607ed76d04aea",
+    "forkBlock": "48550000",
+    "funder": "0x0a08e57ab74c12a2d8569137936251aae2832a36",
+    "scenarios": {
+      "a": {
+        "conditionId": "0x4be5e1447228e8b2deec6e6e545830ea8db2967549bca02c34578405f6069630",
+        "invalidToken": "0x2c9788675b734b6f4bf9da841b34b6a3c31d13b7",
+        "market": "0xf05ea256afb56baefb51dda5691b56034f3a0f5e",
+        "noToken": "0xc303a7c6b8d433f7e73a4d8e47b8f8d15fcb5f37",
+        "questionId": "0xa2f97ccdd442c191c41d4d9228d91a748a1da25037079daf8e6ea9a86b1b6ae8",
+        "sdaiShares": "7937585225163629232",
+        "yesPoolBefore": "0x0000000000000000000000000000000000000000",
+        "yesToken": "0xd81993066c0c8b8b069e7805755cc81f9cc88024"
+      },
+      "b": {
+        "conditionId": "0xa244543d72ee6d4e6ce4f34f9d6fd5b7e768541f2ecedc0d8f8b93e5592d5f6c",
+        "invalidToken": "0x56b238da3809bca2bb9a2910d41eb785b735c07b",
+        "market": "0xf05ea256afb56baefb51dda5691b56034f3a0f5e",
+        "noToken": "0x68835994a369144b6babb8573cafa110d2d02841",
+        "questionId": "0x60360efe514d16d53837e5cb0a2d6b5de250d858242da48a1bc2f90205939c8c",
+        "sdaiShares": "7937585225163629232",
+        "yesPoolBefore": "0x0000000000000000000000000000000000000000",
+        "yesToken": "0x685054be5a73c1d111675e79ca0f37226c8b148f"
+      }
+    },
+    "submitter": "0xf8fc361279fe38cb453eaca833f120ba6b8eb9ae"
+  },
+  "plans": {
+    "vector-commit-a": {
+      "account": "0xf8fc361279fe38cb453eaca833f120ba6b8eb9ae",
+      "chainId": 100,
+      "deploymentHash": "0x5e8b5c399076044441f6be65cd456db7345605eb19531e7168fd0f238bce43be",
+      "planId": "vector-commit-a",
+      "steps": [
+        {
+          "allowlistId": "evidenceRegistry.commitEvidence",
+          "chainId": 100,
+          "data": "0xb22852a4000000000000000000000000f05ea256afb56baefb51dda5691b56034f3a0f5e517e76e2746c398573aed11d5ba7ba584040b2c0e676b9f8bd6effaf13054f86",
+          "dependsOn": [],
+          "id": "commit",
+          "to": "0xb1102a859926210cfc40ef8d319607ed76d04aea",
+          "value": "0"
+        }
+      ],
+      "version": 1
+    },
+    "vector-create-claim-a": {
+      "account": "0x2d1667356a649a7064e673ed90c3e7c80aec95da",
+      "chainId": 100,
+      "deploymentHash": "0x5e8b5c399076044441f6be65cd456db7345605eb19531e7168fd0f238bce43be",
+      "planId": "vector-create-claim-a",
+      "steps": [
+        {
+          "allowlistId": "claimRegistry.createClaim",
+          "chainId": 100,
+          "data": "0xc75d6ad10000000000000000000000000000000000000000000000000000000000000020790c52bcf7a68dbb692b3c091c9e110766c50872140556817757c466f322b75756c1226b0dd7b069be2cac453513b9f53176431417fda5140ee2c0126ddacabe000000000000000000000000000000000000000000000000000000001973c2d23f2a9c41d07e5b86a1c4e2f09b7d3a5c8e1f6b20000000000000000000000000000000000000000000000000000000000000000000000000000000006ac8da8d000000000000000000000000000000000000000000000000000000006acb7d8d0000000000000000000000000000000000000000000000008ac7230489e800000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000004350696e65206532653a2065766964656e636520726567697374727920616363657074732072657665616c73206f6e6c792066726f6d20746865207375626d69747465720000000000000000000000000000000000000000000000000000000000",
+          "dependsOn": [],
+          "id": "create",
+          "to": "0xc97da2295ed3f7b4778a57c0f8e52c6af7ba6b2a",
+          "value": "0"
+        }
+      ],
+      "version": 1
+    },
+    "vector-create-claim-b": {
+      "account": "0x2d1667356a649a7064e673ed90c3e7c80aec95da",
+      "chainId": 100,
+      "deploymentHash": "0x5e8b5c399076044441f6be65cd456db7345605eb19531e7168fd0f238bce43be",
+      "planId": "vector-create-claim-b",
+      "steps": [
+        {
+          "allowlistId": "claimRegistry.createClaim",
+          "chainId": 100,
+          "data": "0xc75d6ad100000000000000000000000000000000000000000000000000000000000000203c3f7030cabd18dd26a8f6a440f2d3b18f87f3c80d19d743ce35ec482d97807756c1226b0dd7b069be2cac453513b9f53176431417fda5140ee2c0126ddacabe000000000000000000000000000000000000000000000000000000001973c2d23f2a9c41d07e5b86a1c4e2f09b7d3a5c8e1f6b20000000000000000000000000000000000000000000000000000000000000000000000000000000006ac8da8d000000000000000000000000000000000000000000000000000000006acb7d8d0000000000000000000000000000000000000000000000008ac7230489e800000000000000000000000000000000000000000000000000000000000000000100000000000000000000000000000000000000000000000000000000000000002e50696e65206532653a207365636f6e64206f7269656e746174696f6e206f662074686520594553206c6164646572000000000000000000000000000000000000",
+          "dependsOn": [],
+          "id": "create",
+          "to": "0xc97da2295ed3f7b4778a57c0f8e52c6af7ba6b2a",
+          "value": "0"
+        }
+      ],
+      "version": 1
+    },
+    "vector-funding-a": {
+      "account": "0x0a08e57ab74c12a2d8569137936251aae2832a36",
+      "chainId": 100,
+      "deploymentHash": "0x5e8b5c399076044441f6be65cd456db7345605eb19531e7168fd0f238bce43be",
+      "planId": "vector-funding-a",
+      "steps": [
+        {
+          "allowlistId": "gnosisRouter.splitFromBase",
+          "chainId": 100,
+          "data": "0x50d9991c000000000000000000000000f05ea256afb56baefb51dda5691b56034f3a0f5e",
+          "dependsOn": [],
+          "id": "split",
+          "to": "0xec9048b59b3467415b1a38f63416407ea0c70fb8",
+          "value": "10000000000000000000"
+        },
+        {
+          "allowlistId": "outcomeToken.approve",
+          "chainId": 100,
+          "data": "0x095ea7b300000000000000000000000091fd594c46d8b01e62dbdebed2401dde018178340000000000000000000000000000000000000000000000006e0bc483f48bff42",
+          "dependsOn": [
+            "split"
+          ],
+          "id": "approve-yes",
+          "to": "0xd81993066c0c8b8b069e7805755cc81f9cc88024",
+          "value": "0"
+        },
+        {
+          "allowlistId": "positionManager.createAndInitializePoolIfNecessary",
+          "chainId": 100,
+          "data": "0x51246d6e000000000000000000000000af204776c7245bf4147c2612bf6e5972ee483701000000000000000000000000d81993066c0c8b8b069e7805755cc81f9cc8802400000000000000000000000000000000000000023bffbe9d7c402d6d021a6b51",
+          "dependsOn": [],
+          "id": "create-pool",
+          "to": "0x91fd594c46d8b01e62dbdebed2401dde01817834",
+          "value": "0"
+        },
+        {
+          "allowlistId": "positionManager.mint",
+          "chainId": 100,
+          "data": "0x9cc1a283000000000000000000000000af204776c7245bf4147c2612bf6e5972ee483701000000000000000000000000d81993066c0c8b8b069e7805755cc81f9cc8802400000000000000000000000000000000000000000000000000000000000004380000000000000000000000000000000000000000000000000000000000003ed000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006e0bc483f48bff4200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006d7ee8a722af231a0000000000000000000000000a08e57ab74c12a2d8569137936251aae2832a36000000000000000000000000000000000000000000000000000000006abfa4bd",
+          "dependsOn": [
+            "approve-yes",
+            "create-pool"
+          ],
+          "id": "mint-yes",
+          "to": "0x91fd594c46d8b01e62dbdebed2401dde01817834",
+          "value": "0"
+        }
+      ],
+      "version": 1
+    },
+    "vector-funding-b": {
+      "account": "0x0a08e57ab74c12a2d8569137936251aae2832a36",
+      "chainId": 100,
+      "deploymentHash": "0x5e8b5c399076044441f6be65cd456db7345605eb19531e7168fd0f238bce43be",
+      "planId": "vector-funding-b",
+      "steps": [
+        {
+          "allowlistId": "gnosisRouter.splitFromBase",
+          "chainId": 100,
+          "data": "0x50d9991c000000000000000000000000f05ea256afb56baefb51dda5691b56034f3a0f5e",
+          "dependsOn": [],
+          "id": "split",
+          "to": "0xec9048b59b3467415b1a38f63416407ea0c70fb8",
+          "value": "10000000000000000000"
+        },
+        {
+          "allowlistId": "outcomeToken.approve",
+          "chainId": 100,
+          "data": "0x095ea7b300000000000000000000000091fd594c46d8b01e62dbdebed2401dde018178340000000000000000000000000000000000000000000000006e0bc483f48bff42",
+          "dependsOn": [
+            "split"
+          ],
+          "id": "approve-yes",
+          "to": "0x685054be5a73c1d111675e79ca0f37226c8b148f",
+          "value": "0"
+        },
+        {
+          "allowlistId": "positionManager.createAndInitializePoolIfNecessary",
+          "chainId": 100,
+          "data": "0x51246d6e000000000000000000000000685054be5a73c1d111675e79ca0f37226c8b148f000000000000000000000000af204776c7245bf4147c2612bf6e5972ee48370100000000000000000000000000000000000000007292d92e442c4153606f297d",
+          "dependsOn": [],
+          "id": "create-pool",
+          "to": "0x91fd594c46d8b01e62dbdebed2401dde01817834",
+          "value": "0"
+        },
+        {
+          "allowlistId": "positionManager.mint",
+          "chainId": 100,
+          "data": "0x9cc1a283000000000000000000000000685054be5a73c1d111675e79ca0f37226c8b148f000000000000000000000000af204776c7245bf4147c2612bf6e5972ee483701ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffc130fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffbc80000000000000000000000000000000000000000000000006e0bc483f48bff4200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006d7ee8a722af231a00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a08e57ab74c12a2d8569137936251aae2832a36000000000000000000000000000000000000000000000000000000006abfa4bd",
+          "dependsOn": [
+            "approve-yes",
+            "create-pool"
+          ],
+          "id": "mint-yes",
+          "to": "0x91fd594c46d8b01e62dbdebed2401dde01817834",
+          "value": "0"
+        }
+      ],
+      "version": 1
+    },
+    "vector-reveal-a": {
+      "account": "0xf8fc361279fe38cb453eaca833f120ba6b8eb9ae",
+      "chainId": 100,
+      "deploymentHash": "0x5e8b5c399076044441f6be65cd456db7345605eb19531e7168fd0f238bce43be",
+      "planId": "vector-reveal-a",
+      "steps": [
+        {
+          "allowlistId": "evidenceRegistry.revealEvidence",
+          "chainId": 100,
+          "data": "0x1daaa2870000000000000000000000000000000000000000000000000000000000000001f85eddd562d2cb0b9880fa43c7ca922f7f59d6a7b91e2c39e746b4ed68714f9bdd57e3a1c46f718cf5196ed020c15cadf12604574edc78e12bc8a411f0bf6143",
+          "dependsOn": [],
+          "id": "reveal",
+          "to": "0xb1102a859926210cfc40ef8d319607ed76d04aea",
+          "value": "0"
+        }
+      ],
+      "version": 1
+    }
+  },
+  "scenarios": {
+    "a": {
+      "claim": {
+        "claimDocumentPreimage": "pine e2e claim document A",
+        "claimDocumentSha256": "0x790c52bcf7a68dbb692b3c091c9e110766c50872140556817757c466f322b757",
+        "commit": "3f2a9c41d07e5b86a1c4e2f09b7d3a5c8e1f6b20",
+        "evidenceDeadline": "1791548045",
+        "evidenceWindow": "604800",
+        "minBond": "10000000000000000000",
+        "policyDocumentSha256": "0x56c1226b0dd7b069be2cac453513b9f53176431417fda5140ee2c0126ddacabe",
+        "question": "Pine claim [Pine e2e: evidence registry accepts reveals only from the submitter]: was a reproducible counterexample submitted to evidence registry 0xb1102a859926210cfc40ef8d319607ed76d04aea on Gnosis, recorded before 2026-10-09 12:14:05 UTC and disclosed before 2026-10-11 12:14:05 UTC, for GitHub repository id 427016914 at commit 3f2a9c41d07e5b86a1c4e2f09b7d3a5c8e1f6b20? Terms: claim document ipfs://bafkreidzbrjlz55grw5wskz4beoj4eihm3cqq4quavlic52xyrtpgivxk4 (sha256 0x790c52bcf7a68dbb692b3c091c9e110766c50872140556817757c466f322b757), policy ipfs://bafkreicwyergwdoxwbu34lfmiu2rhopvgf3egfax7wsridxcyajg3wwkxy (sha256 0x56c1226b0dd7b069be2cac453513b9f53176431417fda5140ee2c0126ddacabe). Yes = at least one timely admissible counterexample; No = none; admissibility per the policy.",
+        "repositoryId": "427016914",
+        "revealDeadline": "1791720845",
+        "revealWindow": "172800",
+        "title": "Pine e2e: evidence registry accepts reveals only from the submitter"
+      },
+      "ladder": {
+        "initSqrtPriceX96": "177025116846713535491812780881",
+        "maxLossIfYesShares": "4567259430887840183",
+        "mintAmount": "7929647639938465602",
+        "mintAmountMin": "7889999401738773274",
+        "mintDeadline": "1790944445",
+        "tickLower": "1080",
+        "tickSpacing": "60",
+        "tickUpper": "16080",
+        "token0": "0xaf204776c7245bf4147c2612bf6e5972ee483701",
+        "token1": "0xd81993066c0c8b8b069e7805755cc81f9cc88024",
+        "yesIsToken0": false,
+        "yesLowerPriceWad": "200303892057251584",
+        "yesPriceTickLower": "-16080",
+        "yesPriceTickUpper": "-1080",
+        "yesUpperPriceWad": "897632443309419588"
+      }
+    },
+    "b": {
+      "claim": {
+        "claimDocumentPreimage": "pine e2e claim document B 0",
+        "claimDocumentSha256": "0x3c3f7030cabd18dd26a8f6a440f2d3b18f87f3c80d19d743ce35ec482d978077",
+        "commit": "3f2a9c41d07e5b86a1c4e2f09b7d3a5c8e1f6b20",
+        "evidenceDeadline": "1791548045",
+        "evidenceWindow": "604800",
+        "minBond": "10000000000000000000",
+        "policyDocumentSha256": "0x56c1226b0dd7b069be2cac453513b9f53176431417fda5140ee2c0126ddacabe",
+        "question": "Pine claim [Pine e2e: second orientation of the YES ladder]: was a reproducible counterexample submitted to evidence registry 0xb1102a859926210cfc40ef8d319607ed76d04aea on Gnosis, recorded before 2026-10-09 12:14:05 UTC and disclosed before 2026-10-11 12:14:05 UTC, for GitHub repository id 427016914 at commit 3f2a9c41d07e5b86a1c4e2f09b7d3a5c8e1f6b20? Terms: claim document ipfs://bafkreib4h5ydbsv5ddosnkhwurapfu5rr6d7hsandhluhtrv5rec3f4ao4 (sha256 0x3c3f7030cabd18dd26a8f6a440f2d3b18f87f3c80d19d743ce35ec482d978077), policy ipfs://bafkreicwyergwdoxwbu34lfmiu2rhopvgf3egfax7wsridxcyajg3wwkxy (sha256 0x56c1226b0dd7b069be2cac453513b9f53176431417fda5140ee2c0126ddacabe). Yes = at least one timely admissible counterexample; No = none; admissibility per the policy.",
+        "repositoryId": "427016914",
+        "revealDeadline": "1791720845",
+        "revealWindow": "172800",
+        "title": "Pine e2e: second orientation of the YES ladder"
+      },
+      "ladder": {
+        "initSqrtPriceX96": "35458819896286456917693245821",
+        "maxLossIfYesShares": "4567259430887840183",
+        "mintAmount": "7929647639938465602",
+        "mintAmountMin": "7889999401738773274",
+        "mintDeadline": "1790944445",
+        "tickLower": "-16080",
+        "tickSpacing": "60",
+        "tickUpper": "-1080",
+        "token0": "0x685054be5a73c1d111675e79ca0f37226c8b148f",
+        "token1": "0xaf204776c7245bf4147c2612bf6e5972ee483701",
+        "yesIsToken0": true,
+        "yesLowerPriceWad": "200303892057251584",
+        "yesPriceTickLower": "-16080",
+        "yesPriceTickUpper": "-1080",
+        "yesUpperPriceWad": "897632443309419588"
+      }
+    }
+  }
+}
