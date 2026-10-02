@@ -11,7 +11,12 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
 - Publication is one plan step (`claimRegistry.createClaim`), idempotent per (user, digest), bound to `{previewId, documentSha256}` (409 on mismatch or a draft edited after preview). Confirmation comes from the finalized read model (claim found by creator and digest) plus the receipt of its indexed creation transaction with the expected `ClaimCreated` log; user-reported hashes are hints that cover speed-ups, replacements and double sends; `expired`/`failed` only once chain time makes createClaim impossible.
 - `SC-001` is refused at draft create/update, preview and publication.
 - Use `tokenNames()` and `buildDeploymentManifest()` from `@pine/shared`; `commit` is passed as `bytes20` (`0x${commit}`); JSON Schemas use `z.toJSONSchema(schema, { io: "input" })`; frozen schemas are not used as response schemas.
-- Listings and feeds come from a module-owned `claims_index` table written by the integrity job (keyset cursors), never by filtering read-model pages in memory.
+- Listings and feeds come from a module-owned `claims_index` table written by the integrity job (keyset cursors, no moderation data); moderation is applied per page at read time (pages may be shorter than `limit`); the `phase` filter accepts only `evidence_open`, `reveal_open`, `closed`.
+- Expiry of publications is decided from read-model coverage (not halted, indexed block time past evidenceDeadline − 1 day), never from the chain head alone.
+- Plans go over HTTP with `planToWire`; tests decode with `planFromWire` before `verifyPlan`.
+- Time comes from `ctx.clock` as a bound parameter everywhere (never SQL `now()` for business logic).
+- Drafts have a `revision` counter; previews/publications never cascade from drafts (409 on deleting a draft with a publication).
+- Integrity also checks the document's constant fields against the manifest and Seer's `NewMarket` in the creation receipt.
 - The module is `createClaimsModule({ catalogDir })` with `claimsModule` as the default instance; tests use a temporary catalog copy.
 - Only claims whose document is retrievable and matches every on-chain field are `verified` and listed; others stay visible by exact id with their integrity status.
 - Agent endpoints are public, cookie-free and label user-supplied content `contentTrust: "untrusted"`.

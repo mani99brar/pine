@@ -12,9 +12,17 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - Chain gateway: two RPC providers; `finalizedBlock()` requires both to agree on the hash at the finalized number.
 - Runtime uses `node --import tsx` (pinned); migrations run only via `src/migrate.ts` with a separate migrator URL; the API verifies migrations at startup and refuses to start otherwise.
 
-- Jobs: cross-process exclusion through lease rows in a core table (one atomic upsert with TTL, renewal and release; database time
-  only), provable on PGlite with two holder ids. This replaces the advisory-lock wording in the frozen JobDefinition comment while
-  keeping its guarantee (at most one execution of a job at a time across processes).
+- Jobs: cross-process exclusion through lease rows in a core table (NOT NULL `expires_at`; atomic acquire only when expired;
+  renewal; release sets `expires_at = started_at + interval`; database time only), provable on PGlite with two holder ids. This
+  replaces the advisory-lock wording in the frozen JobDefinition comment while keeping its guarantee.
+- Audit ownership: core audits every gateway-backed security event at its call sites (GitHub link start/success/failure incl. scope
+  rejection, unlink, webhook results, revocations reported by gateways); gateways never write `audit_log` directly but surface those
+  events as distinguishable errors/results, metrics and redacted logs (accepted deviation from the "gateway audits" reading of
+  SEC-GH-04/06/10).
+- PGlite serialises queries, so race-freedom of quota/nonce/rate-limit/refresh statements is guaranteed by their single-statement or
+  `FOR UPDATE` shape, not by tests (accepted).
+- Clock: `ctx.clock.now()` as a bound parameter everywhere except job leases and IP retention (database `now()`).
+- Per-IP flood guard is in-memory per process (`@fastify/rate-limit` default store); per-user limits and quotas are in Postgres.
 - Roles and grants live in platform migrations (`pine_api` created idempotently as NOLOGIN, default privileges for later tables,
   INSERT/SELECT-only on `audit_log`, a hardened SECURITY DEFINER IP-retention function), proven with `SET ROLE pine_api` on PGlite.
 - Inside transactions, helpers use the transaction handle only (PGlite serialises queries; nested `ctx.db` calls deadlock).

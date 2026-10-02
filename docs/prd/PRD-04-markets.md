@@ -10,7 +10,9 @@ and SEC-EVID, SEC-TX, SEC-IDX-07. Both lanes are `RouteModule`s using only `AppC
 | `markets` | `packages/api/src/modules/markets`, `packages/api/migrations/markets` |
 | `funding` | `packages/api/src/modules/funding`, `packages/api/migrations/funding` |
 
-Shared rules: build every plan with `@pine/shared/tx-plan` `buildStep`/`newPlan` and run `verifyPlan` (with a `PlanContext` built
+Shared rules: responses carrying plans use `planToWire` and tests decode them with `planFromWire` before `verifyPlan`; time comes
+from `ctx.clock` as a bound parameter; inside transactions helpers use the transaction handle only. Build every plan with
+`@pine/shared/tx-plan` `buildStep`/`newPlan` and run `verifyPlan` (with a `PlanContext` built
 from the read model: market → `[yesToken, noToken, invalidToken]`, question ids including reopened replacements) before returning
 it; refuse plans with `NOT_READY` when the read model is stale or halted; call `ctx.compliance.assertAllowed` with the matching
 action (`submit_evidence`, `answer_oracle`, `fund_market`, `redeem`); consume `plans_per_day`; persist each plan with an

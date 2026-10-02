@@ -64,7 +64,9 @@ Another user's draft id returns NOT_FOUND (no existence oracle). Drafts are muta
    texts of policy C7 (No is not certification, price is not a probability, liquidity is not a bounty, invalid is not a refund,
    deadlines are not trading cutoffs) plus the min-bond and liveness notes of ADR D7.
 6. Token names come from `tokenNames()` and the deployment manifest from `buildDeploymentManifest(config.contracts)`
-   (`@pine/shared`); `CreateClaimParams.commit` is the `bytes20` `0x${commit}`. The preview records the draft's `updatedAt`.
+   (`@pine/shared`); `CreateClaimParams.commit` is the `bytes20` `0x${commit}`. Drafts carry a monotonically increasing
+   `revision`; the preview records it. Previews and publications never cascade from drafts: deleting a draft that has a
+   publication returns 409 CONFLICT.
 
 ## 6. Publication (transaction plan, crash-safe state machine; SEC-TX-01..11)
 - `POST /api/v1/publications {previewId, documentSha256}` (session; `compliance.assertAllowed(publish_claim)`; read model not
@@ -85,24 +87,34 @@ Another user's draft id returns NOT_FOUND (no existence oracle). Drafts are muta
      replaced transactions, double sends and crashes before `/submitted`.
   2. Otherwise, for recorded hashes: a successful receipt with the matching log → `mined` (fast feedback; still not final); a
      reverted receipt → keep looking (another hash or an unreported transaction may still succeed) and record the redacted reason.
-  3. Only when the chain's latest block timestamp has passed `evidenceDeadline − 1 day` (createClaim can no longer succeed) and
-     step 1 found nothing: → `expired` if no recorded hash reverted, else `failed`.
+  3. Only when the read model is not halted and its `indexedBlockTimestamp` has passed `evidenceDeadline − 1 day` (so any successful
+     createClaim would already be indexed) and step 1 found nothing and no recorded hash has a successful receipt: → `expired` if no
+     recorded hash reverted, else `failed`.
+- Responses carrying plans use `planToWire` (`@pine/shared/tx-plan`); tests decode the HTTP response body with `planFromWire` and then
+  run `verifyPlan` on the decoded plan (never on the in-memory plan).
 - Every transition is audited.
 
 ## 7. Integrity of on-chain claims (SEC-CLAIM-03..08, SEC-IDX-08)
 Job `claims.verify-integrity` (every 60 s) processes claims from the read model that have no final integrity record:
 retrieve the document with `contentStore.retrieve(claimDocumentSha256, 262144)`; `parseClaimDocumentBytes(bytes, digest)`; and
 require `document.creator == claim.creator`, repository id, commit, policy sha256 (and the policy exists in the catalog with that
-digest, any status), deadlines, min bond, evidence registry, claim registry, title, `marketName == renderQuestion(...)`. Record
+digest, any status), deadlines, min bond, evidence registry, claim registry, title, `marketName == renderQuestion(...)`, and the
+document's constant fields equal the deployment manifest (`market.seerMarketFactory`, `collateralToken`, `realitio`, `arbitrator`,
+`questionTimeoutSeconds`, both chain ids). Cross-check the creation receipt (`createdTxHash`): it contains Seer's `NewMarket` event
+from the configured factory for the same market (SEC-IDX-08). Record
 `verified` or `mismatch` (field list) or `document_unavailable` (retry with backoff for 7 days, then final). Only `verified` claims
 appear in listings and agent feeds; detail endpoints show every claim with its integrity status.
 
 ## 7a. Listing index
 A table owned by this module (`claims_index`: market, integrity status, creator, claim digest, repository id, policy id, deadlines,
-created block and log index, moderation snapshot) is written by `claims.verify-integrity` and is the only source for public
-listings, agent feeds and the integrity backlog, with keyset cursors over (created block, log index). The time-based phases
-(`evidence_open`, `reveal_open`, `closed`) are computed from deadlines in SQL; oracle details are fetched per item of a page from the
-read model (bounded fan-out: at most `limit` items).
+created block and log index; NO moderation data) is written by `claims.verify-integrity` and is the only source for public
+listings, agent feeds and the integrity backlog, with keyset cursors over (created block, log index). Moderation is applied to each
+page at read time with `ctx.moderation.states(pageIds)` (hidden items are dropped from lists, so a page may hold fewer than `limit`
+items; detail endpoints annotate them), so a hide applied at any time takes effect immediately. The `phase` filter accepts only the
+time-based phases `evidence_open`, `reveal_open` and `closed`, computed in SQL from deadlines with `ctx.clock.now()` as a bound
+parameter; each item reports its finer phase from the read model (bounded fan-out: at most `limit` items). The integrity job pages
+`listClaims(created_desc)` from the head until it reaches a claim already in `claims_index`, and drives `document_unavailable` retries
+from `claims_index` with `getClaim`.
 
 ## 8. Public claim and agent endpoints (`config.pine.public`; no cookies; ETag; responses include indexer staleness)
 - `GET /api/v1/claims?phase&repositoryId&creator&cursor&limit` and `GET /api/v1/claims/:market`: platform facts from the read model,
@@ -118,7 +130,9 @@ read model (bounded fan-out: at most `limit` items).
   evidence submission instructions (registry address, `computeCommitment` formula, salt rules, manifest schema id, size limits),
   and the warning "Reproduce only in an isolated sandbox without secrets, keys or network access to production systems."
 - `GET /api/v1/schemas/claim-document.json` and `/evidence-manifest.json` (from the frozen zod schemas via
-  `z.toJSONSchema(schema, { io: "input" })`; the frozen schemas contain transforms, so never use them as Fastify response schemas).
+  `z.toJSONSchema(schema, { io: "input", target: "draft-7" })`; the frozen schemas contain transforms, so never use them as Fastify
+  response schemas). The schema test registers a separate `Fastify()` instance whose body schema is the served JSON Schema (with
+  `$schema` removed) and injects the fixtures (valid ones pass, tampered ones fail).
 
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;

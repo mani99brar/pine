@@ -49,9 +49,10 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
   `gateways.githubAuth.identityOf`, set `request.session`; touch the idle expiry at most once per 5 minutes.
 - `app.requireSession`, `app.requireAdmin` (admin + session authenticated within 300 s, else `STEP_UP_REQUIRED`).
 - Error handler: `toErrorResponse(error, request.id, ctx.redact)`, `Retry-After` when present; 5xx logged with the redacted message.
-- Rate limiting in two stages: a per-IP limit in `onRequest` BEFORE any session lookup (unauthenticated floods with random cookies
-  cost one statement each), then the per-user limit after authentication; Postgres-backed fixed windows; default 120/min;
-  `config.pine.rateLimitPerMinute` overrides per route. A cookie that matches no session skips `identityOf`. Test that an
+- Rate limiting in two stages: a per-IP flood guard in `onRequest` BEFORE any session lookup using `@fastify/rate-limit`'s
+  in-memory store (no database write for anonymous traffic; N processes allow N× the limit, acceptable for a flood guard; fleet-wide
+  per-IP limits belong to the edge proxy), then the per-user limit after authentication in Postgres fixed windows; default
+  120/min; `config.pine.rateLimitPerMinute` overrides per route. A cookie that matches no session skips `identityOf`. Test that an
   authenticated request is keyed by user id.
 - Multipart: core registers `@fastify/multipart` once with `limits: { fileSize: config.evidence.maxUploadBytes, files: 1, fields: 10,
   parts: 11 }`; only routes with `config.pine.multipart` accept that content type (CSRF rules), everything else is JSON-only.
@@ -81,7 +82,9 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 
 ### 2.4 Platform services in AppContext
 - `quotas` (Postgres fixed windows per user and quota name; limits from config; atomic consume; `QUOTA_EXCEEDED` with Retry-After).
-- `audit` (INSERT-only table; `redactDeep` on details; 8 KiB cap; IP stored, documented 30-day truncation job).
+- `audit` (INSERT-only table; `redactDeep` on details; 8 KiB cap; IP stored, 30-day truncation through the retention function).
+  Core records audit entries at its own call sites for every gateway-backed security event: GitHub link start, link success and
+  failure (including scope rejection and identity conflicts), unlink, webhook results, and token revocations reported by gateways.
 - `moderation`: table of `(subject, id) -> {action hide|block, reason, actor, at}`; admin routes
   `GET/POST/DELETE /api/v1/admin/moderation` (requireAdmin, audit every change). Moderation never edits documents or chain data.
 - `compliance.assertAllowed(request, session, action)`: blocked wallet list (static denylist file or env), geofence from the
@@ -92,20 +95,30 @@ imports `createGateways` from `./platform/gateways/index.js` and `createReadMode
 
 ### 2.5 Jobs runner
 Runs `[...gateways.jobs, ...modules.flatMap(m => m.jobs ?? [])]`: one loop per job, never overlapping itself; `AbortSignal` on
-shutdown; errors logged redacted, counted, retried next interval. Cross-process exclusion uses **lease rows** (this settles the
-JobDefinition guarantee "at most one execution at a time across all API processes" without holding a connection): table
-`job_leases(name pk, holder text, expires_at timestamptz)`; acquire with ONE statement
-`INSERT ... ON CONFLICT (name) DO UPDATE SET holder = $holder, expires_at = now() + $ttl WHERE job_leases.expires_at < now()
-OR job_leases.holder = $holder RETURNING holder` (holder = random per-process id); renew every ttl/3 while running (abort the job's
-signal if a renewal fails); release by clearing `expires_at` on finish. TTL = max(60 s, 2 × the job's interval). Database time
-(`now()`) is the only clock used. This is provable on PGlite with two holder ids (test it), so no launch gate is needed.
+shutdown; errors logged redacted, counted, retried next interval. Cross-process exclusion uses **lease rows** (this keeps the
+JobDefinition guarantee "at most one execution of a job at a time across all API processes" without holding a connection):
+table `job_leases(name text pk, holder text not null, started_at timestamptz not null, expires_at timestamptz NOT NULL)`.
+- Acquire (one statement, database time only): `INSERT INTO job_leases (name, holder, started_at, expires_at) VALUES ($1, $2, now(),
+  now() + $ttl) ON CONFLICT (name) DO UPDATE SET holder = $2, started_at = now(), expires_at = now() + $ttl WHERE
+  job_leases.expires_at <= now() RETURNING holder` — acquired iff a row is returned (holder = random per-process id).
+- Renew every ttl/3 while running: `UPDATE ... SET expires_at = now() + $ttl WHERE name = $1 AND holder = $2` (abort the job when
+  zero rows are updated). TTL = max(60 s, 2 × the job's interval).
+- Release on finish: `UPDATE ... SET expires_at = started_at + $interval WHERE name = $1 AND holder = $2`, so no process (including
+  this one) starts the job again before one interval has passed since this run started; `expires_at` is never NULL.
+- Required tests on PGlite with two holder ids: B cannot acquire while A holds; A releases; B cannot acquire before the interval;
+  B acquires after it; an expired (crashed) holder is taken over; a holder that lost its lease aborts.
 
 ### 2.5a Concurrency-safe statements and housekeeping
 - Inside a transaction every helper uses the transaction handle (`tx`), never `ctx.db`: PGlite serialises all queries through one
   mutex, so a nested `ctx.db` query inside an open transaction deadlocks the tests (and would break atomicity in production).
-- Every concurrency-sensitive operation is ONE atomic SQL statement so PGlite's serialisation cannot hide a race: quota consume
-  (`INSERT ... ON CONFLICT DO UPDATE ... WHERE used + $n <= limit RETURNING`), nonce consume (`DELETE ... RETURNING`), rate-limit
-  increment (`INSERT ... ON CONFLICT DO UPDATE SET count = count + 1 RETURNING`), session lookup/touch.
+- Every concurrency-sensitive operation is ONE atomic SQL statement: quota consume (`INSERT ... ON CONFLICT DO UPDATE ... WHERE
+  used + $n <= limit RETURNING`), nonce consume (`DELETE ... RETURNING`), per-user rate-limit increment, session lookup/touch; the
+  GitHub token refresh takes `SELECT ... FOR UPDATE` inside its transaction. PGlite serialises all queries, so tests cannot prove
+  these races: the statement shapes are the control and are reviewed (accepted in decisions.md).
+- Clock rule: every timestamp written or compared for sessions, nonces, pre-sessions, OAuth states, quotas, rate limits, previews
+  and plans uses `ctx.clock.now()` passed as a bound parameter; only job leases and the IP-retention function use database `now()`.
+- Keys: tables use uuid or `GENERATED ALWAYS AS IDENTITY` keys; migrations also grant `USAGE, SELECT` on existing sequences and set
+  `ALTER DEFAULT PRIVILEGES ... GRANT USAGE, SELECT ON SEQUENCES TO pine_api`.
 - Cleanup job (core): purge expired nonces, pre-sessions, sessions, OAuth states (via gateways only through its own job) and
   rate-limit windows older than one hour; bounded batches.
 - Roles and grants are owned by platform migrations so tests and production behave the same: `0002_` (or later) creates the role
@@ -119,10 +132,12 @@ signal if a renewal fails); release by clearing `expires_at` on finish. TTL = ma
   (SEC-OPS-07/10).
 - Session rotation copies `authenticatedAt` (the time of the last wallet signature) from the old session: linking GitHub never
   refreshes the admin step-up window (test it).
-- CSRF details: the checks run in `onRequest` (before body parsing) so failures are always `CSRF_REJECTED`; requests without a
-  body (no content-length or 0, no transfer-encoding) need no content type; the custom header and Origin rules always apply.
+- CSRF details: the checks run in `onRequest` (before body parsing) so failures are always `CSRF_REJECTED`; the content type is
+  compared as a parsed media type (`application/json; charset=utf-8` is JSON); requests without a body (no content-length or 0, no
+  transfer-encoding) need no content type; the custom header and Origin rules always apply.
 - `termsDigest` and all digests in config are `0x`-prefixed lowercase 32-byte hex (the redactor keeps 0x-prefixed hashes).
-- Production config requires an explicit `PINE_TRUST_PROXY_HOPS` (0 allowed) and Seer/AMM addresses equal to `GNOSIS_EXTERNAL`
+- Production config requires an explicit `PINE_TRUST_PROXY_HOPS` (0 is refused when a compliance country header is configured,
+  because behind the same-origin proxy every request would share the proxy's IP and every publish/fund would fail closed) and Seer/AMM addresses equal to `GNOSIS_EXTERNAL`
   (refuse to start otherwise); the deployment manifest is always `buildDeploymentManifest(config.contracts)`.
 
 ### 2.6 Processes
@@ -147,6 +162,10 @@ signal if a renewal fails); release by clearing `expires_at` on finish. TTL = ma
   `secrets.tokenEncryptionKeys` (decrypt with any listed key, re-encrypt with `current` on refresh). Refresh is single-flight per
   user (row lock) and rotates the refresh token. `handleWebhook` verifies `X-Hub-Signature-256` (HMAC-SHA256, constant-time compare)
   and deletes the user's tokens for `github_app_authorization` revocations.
+- Token lifecycle duties (SEC-GH-07/10): a gateways job re-encrypts stored tokens under the `current` key and reports how many
+  remain under retired keys; `unlink` first revokes the token at GitHub (`DELETE /applications/{client_id}/token` with client
+  credentials) and then deletes it; any GitHub 401 for a user token deletes the stored token and marks the link revoked. These
+  events are surfaced to core as distinguishable `ApiError`s or return values and as metrics plus redacted logs (core audits them).
 - `GitHubGateway`: `fetch` only to `https://api.github.com` (injectable for tests), `Accept: application/vnd.github+json`,
   `X-GitHub-Api-Version`, 10 s timeout, `redirect: "error"`, zod-validated responses, size cap 2 MiB. Public repositories only:
   refuse `private !== false` or `visibility !== "public"` with `REPO_NOT_PUBLIC`. Map 404→NOT_FOUND, 403/429 with rate-limit headers →
@@ -181,10 +200,11 @@ viem public clients for both RPC URLs (http transport, 10 s timeout, limited ret
 
 ## 4. Required tests (each lane, vitest on PGlite; name the SEC id in negative tests)
 - core: config refusal cases per production rule; CSRF (missing/wrong Origin, cross-site fetch metadata, missing header, wrong
-  content type, multipart only where allowed); SIWE (replayed nonce, nonce from another pre-session, expired, altered message
-  byte, wrong chain id/domain/uri, signature by another key, contract wallet impossible); session expiry (idle/absolute), rotation
-  on link, logout; admin step-up; public routes ignore cookies and get CORS *; quotas atomic under concurrency; rate limit;
-  audit redaction; moderation routes; compliance (451, TERMS_REQUIRED); jobs never overlap and respect the advisory lock;
+  content type, charset parameter accepted, multipart only where allowed); SIWE (replayed nonce, nonce from another pre-session,
+  expired, altered message byte, wrong chain id/domain/uri, signature by another key, contract wallet impossible); session expiry
+  (idle/absolute), rotation on link keeps authenticatedAt, logout; admin step-up; public routes ignore cookies and get CORS *; quotas;
+  rate limit keys; audit redaction and `SET ROLE pine_api` (INSERT works, UPDATE/DELETE fail); moderation routes; compliance (451,
+  TERMS_REQUIRED); jobs never overlap and the lease tests of section 2.5;
   error responses never contain secrets (inject a secret-bearing error); `/readyz` stale/halted handling; log lines contain no query
   strings or cookies.
 - gateways: OAuth state single-use/expiry/session binding; PKCE parameters; token AAD binding (ciphertext swapped between users
