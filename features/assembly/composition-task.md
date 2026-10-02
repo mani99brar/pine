@@ -13,6 +13,7 @@ Wire and document the whole backend per `docs/prd/PRD-06-assembly.md` section 3:
 
 - Only touch your owned paths; fix nothing in other lanes' code (report divergences as findings in your completion instead). No new dependencies; no network in tests.
 - The e2e suite asserts no secret appears in any response or captured log line, and that every plan in a response verifies after `planFromWire`.
+- The e2e suite supports real PostgreSQL 16 through `PINE_E2E_DATABASE_URL` (and fails without it when `PINE_E2E_REQUIRE_PG=1`), as PRD-06 section 3 describes; the operator runs your checks with both set; when you run them yourself, use the operator's local PostgreSQL 16 at `PINE_E2E_DATABASE_URL=postgres://postgres@127.0.0.1:55432/postgres` (trust auth, disposable) with `PINE_E2E_REQUIRE_PG=1`, and also once without the URL (PGlite).
 
 ## Acceptance
 
@@ -21,4 +22,4 @@ Wire and document the whole backend per `docs/prd/PRD-06-assembly.md` section 3:
 
 ## Stop
 
-Stop and report `blocked` when merged code from another feature prevents the journey (describe the exact divergence and the file), or after three failed attempts at the same check failure.
+Stop and report `blocked` when merged code from another feature prevents the journey (describe the exact divergence and the file), or after three failed attempts at the same check failure with the same root cause (failures in different areas while you build area by area are normal progress).

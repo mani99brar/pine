@@ -25,4 +25,4 @@ Replace the stub `packages/api/src/modules/markets/index.ts` with the markets `R
 
 ## Stop
 
-Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure. Ask a `question` before choosing a behaviour PRD-04 leaves open that changes what a plan does.
+Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure with the same root cause (failures in different areas while you build area by area are normal progress; run the narrower test path while iterating and commit after each area passes). Ask a `question` before choosing a behaviour PRD-04 leaves open that changes what a plan does.

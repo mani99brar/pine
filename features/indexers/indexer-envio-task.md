@@ -23,4 +23,4 @@ Implement the Envio option per `docs/prd/PRD-05-indexers.md` section 3: the Envi
 
 ## Stop
 
-Stop and report `blocked` if Envio 3.12.1 cannot express a required behaviour (describe it), or after three failed attempts at the same check failure. Ask a `question` before deviating from the reference semantics.
+Stop and report `blocked` if Envio 3.12.1 cannot express a required behaviour (describe it), or after three failed attempts at the same check failure with the same root cause (failures in different areas while you build area by area are normal progress; run the narrower test path while iterating and commit after each area passes). Ask a `question` before deviating from the reference semantics.

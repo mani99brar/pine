@@ -25,4 +25,4 @@ Implement `@pine/indexer-native` per `docs/prd/PRD-05-indexers.md` section 2: th
 
 ## Stop
 
-Stop and report `blocked` when the frozen read-model semantics cannot be reproduced in SQL as specified, or after three failed attempts at the same check failure. Ask a `question` before deviating from the reference semantics.
+Stop and report `blocked` when the frozen read-model semantics cannot be reproduced in SQL as specified, or after three failed attempts at the same check failure with the same root cause (failures in different areas while you build area by area are normal progress; run the narrower test path while iterating and commit after each area passes). Ask a `question` before deviating from the reference semantics.

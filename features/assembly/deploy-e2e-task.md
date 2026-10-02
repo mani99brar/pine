@@ -7,7 +7,7 @@ Write the deployment script and the real-pair Gnosis fork lifecycle tests of `do
 ## Context
 
 - The merged contracts (`contracts/src/ClaimRegistry.sol`, `EvidenceRegistry.sol`, libraries) and their tests; PRD-01 for their behaviour; verified addresses in `packages/shared/src/deployment.ts`; Reality/Seer/Algebra facts in `docs/research/*`.
-- The merged TypeScript plan builders: `@pine/shared/tx-plan` and the funding module's pure planner in `packages/api/src/modules/funding`.
+- The TypeScript plan builders of `@pine/shared/tx-plan` (`buildStep`, `newPlan`, `verifyPlan`, `planToWire`); the funding module is NOT merged when this lane runs, so ladder ticks and sqrt prices are computed in the vector script with documented integer math (PRD-06 section 2).
 
 ## Constraints
 
@@ -21,4 +21,4 @@ Write the deployment script and the real-pair Gnosis fork lifecycle tests of `do
 
 ## Stop
 
-Stop and report `blocked` if merged code contradicts PRD-01/PRD-04 in a way the e2e test exposes (report the exact divergence), or after three failed attempts at the same check failure.
+Stop and report `blocked` if merged code contradicts PRD-01/PRD-04 in a way the e2e test exposes (report the exact divergence), or after three failed attempts at the same check failure with the same root cause (failures in different tests while you build them one by one are normal progress).

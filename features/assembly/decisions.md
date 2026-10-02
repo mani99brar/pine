@@ -8,10 +8,17 @@ Settled by the operator from ADR-0001 on 2026-10-02.
 - The real contract pair is exercised only on a Gnosis fork (pinned block, archive RPC, no broadcast); production deployment is an operator action with a hardware wallet after the launch gates.
 - The read model is selected by `secrets.readModel.kind` (`native` default); the Envio option is wired but its live conformance run is a launch gate.
 - CI runs every controller check plus `pnpm audit --prod` and the forbidden-pattern gate, with pinned action SHAs and read-only permissions.
+- Two runs of this feature: `deploy-e2e` right after `chain` merges (plan vectors from `@pine/shared/tx-plan` only), `composition`
+  after every other feature merges.
+- The e2e suite runs on real PostgreSQL 16 with the production driver when `PINE_E2E_DATABASE_URL` is set (required in the
+  operator's verification and in CI via `PINE_E2E_REQUIRE_PG=1`), else on PGlite.
+- Residual allowance after a mint: at most 10 wei, only toward the position manager (Algebra rounding).
+- CI adds gitleaks secret scanning; the release checklist lists every launch gate of PRD-06 section 3.
 
 ## Assumptions
 
-- Features chain, platform, claims, markets and indexers are merged into the base of this run.
+- deploy-e2e: feature chain is merged into the base of its run. composition: features chain, platform, claims, markets and
+  indexers are merged into the base of its run.
 
 ## Deferred
 

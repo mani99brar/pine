@@ -20,6 +20,14 @@ idempotency key and a compare-and-set state machine `planned → submitted → c
 receipts (logs must come from the expected contracts with the expected arguments). Values are `bigint` base units; API strings are
 decimal. All text from chain or uploads is returned as data and labelled untrusted where it originates from users.
 
+Idempotency (SEC-TX-08): every plan-creating POST requires the header `Idempotency-Key` (1–64 characters of `[A-Za-z0-9_-]`,
+otherwise 400). The key is scoped to (user, route); the first request stores the plan with the key and a SHA-256 of the
+canonical request body in one `INSERT ... ON CONFLICT DO NOTHING RETURNING`; a retry with the same key and body returns the
+stored plan unchanged (same plan id, same calldata) and consumes `plans_per_day` only once; the same key with a different body is
+409 CONFLICT. Database portability: tests run on PGlite but production uses node-postgres, so compare-and-set success is read
+only from drizzle `.returning()` rows (never `rowCount`/`affectedRows`) and raw SQL casts int8 and counts explicitly; inside a
+transaction every query uses the transaction handle.
+
 ## 2. markets lane
 ### 2.1 Evidence content (SEC-EVID)
 - `POST /api/v1/evidence/manifests` (session, JSON): body is the manifest object; validate with `evidenceManifestSchema`, require
@@ -28,8 +36,11 @@ decimal. All text from chain or uploads is returned as data and labelled untrust
   (`encodeEvidenceManifest`), `contentStore.put` (≤ 256 KiB); return `{ sha256, cid }`. Quotas `evidence_uploads_per_day`,
   `evidence_bytes_per_day`. Idempotent by digest.
 - `POST /api/v1/evidence/artifacts` (session, `config.pine.multipart`, single file ≤ `config.evidence.maxUploadBytes` ≤ 262144):
-  stream with a hard byte limit (abort beyond it), media type checked against the allowlist by the declared type only (never
-  sniffed/executed/extracted), store, return `{ sha256, cid, size }`. File names are never used for storage.
+  stream with a hard byte limit (abort beyond it: 413, nothing stored, no quota consumed — quotas are consumed only after the
+  stream completed within limits), media type checked against the allowlist by the declared type only (never
+  sniffed/executed/extracted), store, return `{ sha256, cid, size }`. An optional form field `expectedSha256` is only compared with
+  the server-computed digest (mismatch: 422, nothing stored; SEC-EVID-03). File names are never used for storage or returned
+  (SEC-EVID-08).
 - Pine never accepts a salt. Commitments are computed client-side; the API documents the formula and returns plan steps that take
   the commitment (commit) or the preimage parts (reveal) as client-supplied arguments.
 ### 2.2 Evidence plans and browsing
@@ -55,7 +66,9 @@ decimal. All text from chain or uploads is returned as data and labelled untrust
 - Plans (session; `answer_oracle`): `submitAnswer {market, outcome: yes|no|invalid, bond}` with `maxPrevious = current bond` and
   `bond >= max(minBond, 2 × current bond)`; `fundAnswerBounty {market, amount}`; `resolve`, `reopen`, `handleNotifiedRequest`,
   `handleRejectedRequest`, `reportArbitrationAnswer`, `claimWinnings` (arguments reconstructed from the answer history in reverse
-  order exactly as Reality requires), `withdraw`. Each plan is verified and its arguments re-derived from the read model at request
+  order exactly as Reality requires), `withdraw`. `reopenQuestion` uses nonce = the number of questions already in this market's
+  reopen chain (from the read model), because the reopened question id includes the sender and the nonce and a second reopen by
+  the same account with nonce 0 would collide with the first and revert. Each plan is verified and its arguments re-derived from the read model at request
   time (never from client-supplied history).
 ### 2.4 Notifications and history
 - Job `markets.watch` (60 s): for each open claim compute due actions and deadline proximity (evidence closes in 24 h, reveal
@@ -82,8 +95,9 @@ in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
    range above the current price, ticks `[ceilTick(lowerPrice), floorTick(upperPrice)]`; else price = YES per sDAI: a token1-only
    range below the current price, ticks `[ceilTick(1/upperPrice), floorTick(1/lowerPrice)]`. Ticks are aligned to the pool's tick
    spacing (60 for new pools; read `tickSpacing()` for existing ones) inward so the range never exceeds the requested prices.
-4. Pool state: if the pool does not exist, include `createAndInitializePoolIfNecessary(token0, token1, sqrtPriceX96 at lowerPrice
-   in the pool's orientation)`. If it exists, its current price must lie outside the range on the correct side (YES cheaper than
+4. Pool state: if the pool does not exist, or exists but is not initialised (`globalState().price == 0`), include
+   `createAndInitializePoolIfNecessary(token0, token1, sqrtPriceX96 at lowerPrice in the pool's orientation)` (it initialises an
+   existing uninitialised pool at that price). If it exists, its current price must lie outside the range on the correct side (YES cheaper than
    `lowerPrice`) so the position is single-sided; otherwise refuse with an explanation (no re-pricing swaps in v1).
 5. Steps: `gnosisRouter.splitFromBase{value: budgetWei}(market)`; `outcomeToken.approve(positionManager, S)` on the YES token;
    (optional pool creation); `positionManager.mint({token0, token1, tickLower, tickUpper, amount(YES side) = S, other side 0,
@@ -102,13 +116,16 @@ in sDAI per YES with `0.01 <= lowerPrice < upperPrice <= 0.95`):
 
 ## 4. Required tests (vitest with the frozen harness, scripted chain responses; name SEC ids in negative tests)
 - markets: manifest validation (wrong submitter, wrong claim, missing artifact, non-canonical), artifact size limit enforced while
-  streaming, multipart only on that route, no salt persisted or logged (inspect DB rows and captured logs), deadline margins, every
+  streaming (413, nothing stored, no quota consumed; SEC-EVID-01), `expectedSha256` mismatch 422 (SEC-EVID-03), a filename like
+  `../../etc/passwd` with bidi characters never reaching storage or responses (SEC-EVID-08), idempotent plan retries (same key and
+  body → identical plan, one quota unit; different body → 409; SEC-TX-08), reopen nonce for a second reopen, multipart only on that route, no salt persisted or logged (inspect DB rows and captured logs), deadline margins, every
   plan passes `verifyPlan` and binds to the registered market/question, reveal with unavailable content requires acknowledgement,
   evidence listing timeliness at the exact deadline second, ERC-1497 output, `dueActions` for every oracle state including
   answered-too-soon/reopen, arbitration stages and finalization, `claimWinnings` argument reconstruction against a hand-computed
   history, notification idempotency, NOT_READY when stale, compliance refusals.
 - funding: tick/price conversion and orientation for both token orders (property tests: the range never exceeds the requested
-  prices; single-sidedness), share margin, pool missing vs existing correctly priced vs mispriced (refused), exact approval equals
+  prices; single-sidedness), share margin, pool missing vs existing-uninitialised (initialised in the plan) vs existing correctly
+  priced vs mispriced (refused), idempotent plan retries (SEC-TX-08), exact approval equals
   the mint amount, recipient = account, max-loss formula against hand-computed values, withdraw/merge/redeem plans verified, quoter
   depth parsing, cache, NOT_READY and compliance refusals, reconciliation transitions.
 

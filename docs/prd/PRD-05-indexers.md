@@ -26,6 +26,13 @@ Dependencies are frozen in each `package.json`; do not add any. Neither lane edi
 ### 2.2 Storage
 Own Postgres schema `pine_index` with its own ordered, checksummed SQL migrations and a tiny runner (same rules as the API
 runner: append-only, advisory lock, refuse modified/out-of-order/orphan files); a `migrate` script; runtime role needs DML only.
+Roles (SEC-IDX-11), created idempotently by the migrations (`DO $$ ... IF NOT EXISTS (SELECT FROM pg_roles ...) THEN CREATE ROLE
+... NOLOGIN`; production pre-creates them with LOGIN): `pine_indexer` gets USAGE on `pine_index` and SELECT/INSERT/UPDATE/DELETE on
+its tables and sequences (by name plus `ALTER DEFAULT PRIVILEGES IN SCHEMA pine_index`), never DDL; `pine_readonly` (the API's
+read-model connection) gets USAGE and SELECT only. Tests use `SET ROLE` on PGlite (verified to enforce grants): an INSERT as
+`pine_readonly` fails with 42501, DML as `pine_indexer` works, `CREATE TABLE pine_index.x` as `pine_indexer` fails. Database
+portability: tests run on PGlite, production on node-postgres, so code never reads `rowCount`/`affectedRows` and raw SQL casts
+int8 and counts explicitly.
 ### 2.3 Ingestion (finalized only; SEC-IDX-01/02/04/05/06)
 - Each cycle: read `finalized` block (number and hash) from both RPC providers; `target = min(numbers)`; both providers must
   report the same hash for `target`, else record a halt (`rpc_disagreement`) and stop advancing (alert via metrics and logs).
@@ -35,8 +42,13 @@ runner: append-only, advisory lock, refuse modified/out-of-order/orphan files); 
   provider supports them). Decode strictly with viem `decodeEventLog` (`strict: true`) and validate with zod; a log that does not
   decode under its topic0 is an integrity error (halt), never silently skipped.
 - Verify every log's `blockHash` against the canonical header hash for its block number (fetched once per block in the range); for
-  ranges containing Pine registry logs, re-query those logs from the secondary provider and require identical
-  `(blockHash, logIndex, topics, data)`; mismatch → halt (`log_disagreement`).
+  ranges containing Pine registry logs or logs of tracked Reality/CTF/Kleros ids, re-query those logs (same addresses and topics)
+  from the secondary provider and require the identical set of `(blockHash, logIndex, topics, data)`; mismatch → halt
+  (`log_disagreement`). A faulty primary could otherwise hide a tracked oracle answer.
+- Logs are requested only for the exact configured addresses; a log with a known topic0 from any other address is ignored
+  (SEC-IDX-05). Decoded values must lie in the domain the frozen `ChainEvent` types allow; the ClaimRegistry guarantees that domain
+  for Pine events (e.g. `1 <= repositoryId <= 2^53 - 1`, enforced on-chain by the chain hardening run), so a violation is a
+  contract or provider fault and halts.
 - Apply the range and advance the cursor (block number and hash) in **one** transaction; record per-block hashes for blocks
   that contained events. On startup, re-verify the stored cursor hash against both providers (mismatch → halt `finalized_conflict`).
 - Back off on RPC errors (exponential, capped), redact every error string (RPC URLs embed keys), expose Prometheus metrics
@@ -49,7 +61,9 @@ runner: append-only, advisory lock, refuse modified/out-of-order/orphan files); 
   through `applyEvents` (the same function the poller uses).
 - Poller with a scripted RPC: both-provider agreement, disagreement halt, finalized lag, two-phase tracked ids within one range,
   range chunking, idempotent re-run of a range, crash between apply and cursor impossible (single transaction; simulate a throw),
-  log/header hash mismatch halt, strict decoding failure halt, startup cursor re-verification.
+  log/header hash mismatch halt, strict decoding failure halt, startup cursor re-verification, startup `eth_chainId` mismatch on
+  either provider refused (SEC-IDX-06), a look-alike contract emitting an identical event ignored (SEC-IDX-05), the secondary
+  omitting a tracked Reality answer → halt, and the role grants above (SEC-IDX-11).
 - Decoding fixtures: real Gnosis logs (raw topics/data captured with `cast logs` during development and committed as JSON) for
   Reality `LogNewAnswer`, `LogNotifyOfArbitrationRequest`, `LogFinalize`, CTF `ConditionResolution` and a Kleros home-proxy event,
   decoded into the expected `ChainEvent`s (proves topic0 and field order against real chain data).

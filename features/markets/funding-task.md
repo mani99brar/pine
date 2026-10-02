@@ -25,4 +25,4 @@ Replace the stub `packages/api/src/modules/funding/index.ts` with the funding `R
 
 ## Stop
 
-Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure. Ask a `question` before changing the economic parameters (margin, slippage, price bounds) of PRD-04.
+Stop and report `blocked` when a frozen contract prevents a required behaviour, or after three failed attempts at the same check failure with the same root cause (failures in different areas while you build area by area are normal progress; run the narrower test path while iterating and commit after each area passes). Ask a `question` before changing the economic parameters (margin, slippage, price bounds) of PRD-04.

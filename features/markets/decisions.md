@@ -10,6 +10,13 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
 - Oracle: Pine never answers or bonds; it exposes `dueActions` and verified helper plans for permissionless steps; Kleros mainnet steps (requestArbitration, submitEvidence) are instructions plus ERC-1497 JSON only.
 - Every plan is verified with `verifyPlan`, persisted with an idempotency key, and reconciled from receipts whose logs come from the expected contracts; plans are refused (NOT_READY) when the read model is stale or halted.
 - Concurrency-sensitive writes are single atomic SQL statements; jobs are idempotent and compare-and-set.
+- Plan idempotency is a client-supplied `Idempotency-Key` header scoped to (user, route) with a body hash: same key and body →
+  the stored plan; different body → 409; one quota unit per key.
+- Driver portability: compare-and-set success only from drizzle `.returning()` rows; explicit int8/count casts in raw SQL; inside a
+  transaction only the transaction handle (PGlite deadlocks on nested `ctx.db` calls).
+- An existing but uninitialised Algebra pool (price 0) is initialised by the plan like a missing pool.
+- `reopenQuestion` nonce = number of questions already in the market's reopen chain.
+- Artifact uploads: 413 before any store or quota consumption; optional `expectedSha256` is only compared (422 on mismatch).
 
 ## Assumptions
 
