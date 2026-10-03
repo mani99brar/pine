@@ -73,3 +73,29 @@ export async function caption(page: Page, text: string, holdMs = Number(process.
   }, text)
   if (holdMs > 0) await page.waitForTimeout(holdMs)
 }
+
+/** A full-screen title card for the recorded walkthrough (test-only page content; nothing of the app is touched). */
+export async function titleCard(page: Page, title: string, lines: string[], holdMs: number): Promise<void> {
+  const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+    html,body{margin:0;height:100%;background:#16110f;color:#f5ede4;font-family:system-ui,-apple-system,sans-serif}
+    .wrap{height:100%;display:flex;flex-direction:column;justify-content:center;padding:0 9vw}
+    .bar{height:3px;width:220px;background:linear-gradient(90deg,#ff6b6b,#ffd166,#5ad8ff,#b79aff);margin-bottom:28px}
+    h1{font-size:64px;font-weight:650;letter-spacing:-0.02em;margin:0 0 22px}
+    p{font-size:26px;line-height:1.45;color:#cdbfb3;margin:6px 0;max-width:62ch}
+  </style></head><body><div class="wrap"><div class="bar"></div><h1></h1></div></body></html>`
+  await page.setContent(html)
+  await page.evaluate(
+    ({ t, ls }) => {
+      const h1 = document.querySelector('h1')
+      if (h1) h1.textContent = t
+      const wrap = document.querySelector('.wrap')
+      for (const l of ls) {
+        const p = document.createElement('p')
+        p.textContent = l
+        wrap?.appendChild(p)
+      }
+    },
+    { t: title, ls: lines },
+  )
+  await page.waitForTimeout(holdMs)
+}
