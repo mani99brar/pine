@@ -63,7 +63,7 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
         <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="cut-sm border border-edge bg-void px-3 py-2.5">
             <dt className="text-[0.75rem] text-lumen-3">Opens</dt>
-            <dd className="mt-0.5 text-[0.875rem] text-lumen">{formatDate(o?.openingTime ?? spec.openingTime, 'short')}</dd>
+            <dd className="mt-0.5 text-[0.875rem] text-lumen">{formatDate(o?.openingTime ?? spec.openingTime, api ? 'utc' : 'short')}</dd>
           </div>
           <div className="cut-sm border border-edge bg-void px-3 py-2.5">
             <dt className="text-[0.75rem] text-lumen-3">Timeout per answer</dt>

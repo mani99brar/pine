@@ -4,7 +4,7 @@ import { statusColor, statusLabel, isResolved } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 
 /** Status with a light glyph. The label always carries the meaning; color only reinforces it. */
-export function StatusBadge({ status, outcome, className, size = 'md' }: { status: ClaimStatus; outcome?: Outcome; className?: string; size?: 'sm' | 'md' }) {
+export function StatusBadge({ status, outcome, className, size = 'md', label }: { status: ClaimStatus; outcome?: Outcome; className?: string; size?: 'sm' | 'md'; label?: string }) {
   const color = statusColor(status, outcome)
   const resolved = isResolved(status) && outcome
   return (
@@ -21,7 +21,7 @@ export function StatusBadge({ status, outcome, className, size = 'md' }: { statu
           <span className="relative h-2 w-2 rounded-full" style={{ background: color, boxShadow: status === 'failed' ? undefined : `0 0 8px ${color}` }} />
         </span>
       )}
-      {statusLabel(status, outcome)}
+      {label ?? statusLabel(status, outcome)}
       {status === 'settled' && <span className="text-lumen-3">settled</span>}
     </span>
   )

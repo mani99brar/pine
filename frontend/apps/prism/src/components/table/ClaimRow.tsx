@@ -8,7 +8,7 @@ import { PrismMini, pricesFrom } from '@/components/prism/PrismBeam'
 import { StatusBadge } from '@/components/claim/StatusBadge'
 import { FamilyIcon } from '@/components/icons'
 import { FAMILY_VAR } from '@/lib/crystal'
-import { apiFactsOf, apiOutcomePrices, claimLabel, isResolved, pulseSeconds, repoLabel, timeLeft } from '@/lib/claims'
+import { apiFactsOf, apiOutcomePrices, apiStatusLabel, claimLabel, isResolved, pulseSeconds, repoLabel, timeLeft } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 
 export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; nowMs: number | null; className?: string }) {
@@ -29,8 +29,7 @@ export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; now
             <span className={cn('tnum text-[0.8125rem] font-semibold text-lumen-3', api && 't-code font-normal')} title={api ? `Market ${claim.marketAddress ?? claim.id}` : undefined}>
               {claimLabel(claim)}
             </span>
-            <StatusBadge status={claim.status} outcome={claim.outcome} size="sm" />
-            {api?.phase === 'reveal_open' && <span className="tag text-[0.75rem]">Reveal window</span>}
+            <StatusBadge status={claim.status} outcome={claim.outcome} size="sm" label={apiStatusLabel(claim)} />
             {claim.sponsored && <span className="tag text-[0.75rem]">Sponsored</span>}
           </div>
           <Link href={`/claims/${claim.id}`} className="mt-1 block text-[1.02rem] font-semibold leading-snug text-lumen after:absolute after:inset-0 after:content-[''] hover:underline hover:decoration-[rgba(90,216,255,0.6)] hover:underline-offset-4 focus-visible:outline-none">

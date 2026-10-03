@@ -65,7 +65,7 @@ function fileProblem(f: File): string | null {
 
 const SEAL_STATE: Record<SealedEvidenceView['state'], string> = {
   sealed: 'Sealed in this browser, not committed',
-  committing: 'Commit sent, waiting for confirmation',
+  committing: 'Commit started, not confirmed on chain yet',
   committed: 'Committed on chain',
   revealing: 'Reveal sent, waiting for confirmation',
   revealed: 'Revealed',
@@ -193,6 +193,7 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
   const badFiles = files.some((f) => fileProblem(f) !== null)
   const action = ev.action
   const done = runState === 'done' && action !== null && action.kind !== 'reveal'
+  const stopped = runState === 'failed' || ev.runner.phase === 'error'
 
   const submit = async () => {
     const composition: EvidenceComposition = {
@@ -331,7 +332,7 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                   Summary
                 </label>
                 <Segmented
-                  label="Summary view"
+                  label="Write or preview"
                   size="sm"
                   value={preview ? 'preview' : 'write'}
                   onChange={(v) => setPreview(v === 'preview')}
@@ -469,14 +470,21 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
               </fieldset>
             )}
 
-            <WriteErrorNotice error={ev.error} />
-            <PlanProgress runner={ev.runner} chainId={claim.chainId} />
+            {action?.kind !== 'reveal' && (
+              <>
+                <WriteErrorNotice error={ev.error} />
+                <PlanProgress runner={ev.runner} chainId={claim.chainId} />
+              </>
+            )}
             <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-5">
               {ready ? (
                 <>
-                  <Button type="submit" loading={busy} disabled={busy || badFiles} icon={mode === 'sealed' ? <Lock size={15} aria-hidden /> : undefined}>
-                    {mode === 'sealed' ? 'Commit sealed evidence' : 'Publish evidence'}
-                  </Button>
+                  {/* After a failed step the plan is resumed (Try again) or dropped (Start over), not sent twice. */}
+                  {!(stopped && action?.kind !== 'reveal') && (
+                    <Button type="submit" loading={busy} disabled={busy || badFiles} icon={mode === 'sealed' ? <Lock size={15} aria-hidden /> : undefined}>
+                      {mode === 'sealed' ? 'Commit sealed evidence' : 'Publish evidence'}
+                    </Button>
+                  )}
                   <PlanControls runner={ev.runner} busy={busy} onRetry={() => void ev.runner.run()} onAbandon={ev.abandon} />
                   {badFiles && <p className="text-[0.8125rem] text-ha">Remove the files Pine does not accept.</p>}
                 </>

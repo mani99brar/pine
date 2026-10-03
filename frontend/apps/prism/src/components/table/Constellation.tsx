@@ -12,7 +12,7 @@ import { StatusBadge } from '@/components/claim/StatusBadge'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { FamilyIcon } from '@/components/icons'
 import { FAMILY_HEX, FAMILY_NAME, FAMILY_VAR, type FacetId } from '@/lib/crystal'
-import { apiFactsOf, apiOutcomePrices, claimLabel, isResolved, pulseSeconds, repoLabel, statusLabel, timeLeft } from '@/lib/claims'
+import { apiFactsOf, apiOutcomePrices, apiStatusLabel, claimLabel, isResolved, pulseSeconds, repoLabel, statusLabel, timeLeft } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 import { useElementWidth, useReduceMotion } from '@/lib/hooks'
 
@@ -52,9 +52,9 @@ function yesOf(c: ClaimSummary): number | undefined {
   return c.status === 'publishing' || c.status === 'failed' ? undefined : c.yesPrice
 }
 
-/** True when no crystal can be placed by price or outcome: the table only shows time. */
+/** Backend listings without any price: no crystal can be placed by price or outcome, so the table shows time only. */
 export function nothingPriced(claims: ClaimSummary[]): boolean {
-  return claims.every((c) => yesOf(c) === undefined && !isResolved(c.status))
+  return claims.length > 0 && claims.every((c) => apiFactsOf(c) !== null && yesOf(c) === undefined && !isResolved(c.status))
 }
 
 interface Placed {
@@ -132,7 +132,7 @@ function Card({ p, nowMs }: { p: Placed; nowMs: number }) {
     <div className="glass-float cut-lg w-[19rem] max-w-[calc(100vw-3rem)] !bg-[rgba(26,20,18,0.97)] p-4">
       <div className="flex flex-wrap items-center gap-2">
         <span className={cn('tnum text-[0.8125rem] font-semibold text-lumen-3', api && 't-code font-normal')}>{claimLabel(c)}</span>
-        <StatusBadge status={c.status} outcome={c.outcome} size="sm" />
+        <StatusBadge status={c.status} outcome={c.outcome} size="sm" label={apiStatusLabel(c)} />
       </div>
       <p className="mt-2 text-[0.96875rem] font-semibold leading-snug text-lumen">{c.title}</p>
       <p className="mt-1 text-[0.8125rem] text-lumen-3">
@@ -252,7 +252,7 @@ export function Constellation({ claims, nowMs, compact = false, className }: { c
             const c = p.claim
             const resolved = isResolved(c.status)
             const yes = yesOf(c)
-            const label = `${claimLabel(c)}: ${c.title}. ${statusLabel(c.status, c.outcome)}. ${c.policy.id}, ${FAMILY_NAME[c.policy.family].toLowerCase()}. ${
+            const label = `${claimLabel(c)}: ${c.title}. ${apiStatusLabel(c) ?? statusLabel(c.status, c.outcome)}. ${c.policy.id}, ${FAMILY_NAME[c.policy.family].toLowerCase()}. ${
               p.priced && !resolved && yes !== undefined ? `Yes price ${formatPrice(yes)}.` : ''
             } ${c.status === 'open' ? `Evidence window: ${timeLeft(c.evidenceDeadline, nowMs).label}.` : ''}`.trim()
             return (

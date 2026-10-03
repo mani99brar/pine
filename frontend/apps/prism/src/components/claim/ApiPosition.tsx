@@ -259,7 +259,7 @@ function Ladder({ claim }: { claim: ClaimDetail }) {
               <Figure label="Budget">{units(quote.budgetWei)} xDAI</Figure>
               <Figure label="Full sets">{units(quote.sets)}</Figure>
               <Figure label="Yes price range">
-                {quote.finalLowerPrice} to {quote.finalUpperPrice} sDAI
+                {formatAmount(quote.finalLowerPrice, { maxDecimals: 4 })} to {formatAmount(quote.finalUpperPrice, { maxDecimals: 4 })} sDAI
               </Figure>
               <Figure label="Most you lose if Yes resolves">
                 {units(quote.maxLossIfYesXdaiWei)} xDAI

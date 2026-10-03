@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/Button'
 import { HashChip } from '@/components/ui/interactive'
 import { apiDetailFactsOf, isoOfUnix } from '@/lib/claims'
 import { cn } from '@/lib/cn'
-import { ApiSessionGate, PlanControls, PlanProgress, WriteErrorNotice, parseAmountWei } from './ApiActionKit'
+import { ApiSessionGate, PlanControls, PlanProgress, WriteErrorNotice, parseAmountWei, useSessionReady } from './ApiActionKit'
 
 type DueAction = OracleActionStatus['dueActions'][number]
 
@@ -126,6 +126,7 @@ export function ApiOracleActions({ claim }: { claim: ClaimDetail }) {
   const market = (claim.marketAddress ?? claim.id) as Address
   const oracle = useApiOracle(market)
   const facts = apiDetailFactsOf(claim)
+  const ready = useSessionReady()
   const [bounty, setBounty] = useState('')
   // The account-aware status once loaded, else the claim page's anonymous view; unknown action names are not shown.
   const due: DueAction[] = oracle.status
@@ -154,7 +155,7 @@ export function ApiOracleActions({ claim }: { claim: ClaimDetail }) {
       {oracle.loading && !facts ? null : unique.length === 0 ? (
         <p className="mt-3 text-[0.9rem] text-lumen-2">{facts?.phase === 'evidence_open' || facts?.phase === 'reveal_open' ? 'Nothing yet: Reality.eth accepts answers from the reveal deadline.' : 'Nothing is due right now.'}</p>
       ) : (
-        <ApiSessionGate purpose="act on the oracle" className="mt-4">
+        <>
           <ul className="mt-4 grid gap-4">
             {unique.map((d) => {
               const text = ACTION_TEXT[d.action]
@@ -163,8 +164,8 @@ export function ApiOracleActions({ claim }: { claim: ClaimDetail }) {
                 <li key={d.action} className="cut-md border border-edge bg-void p-4">
                   <p className="font-semibold text-lumen">{text.title}</p>
                   <p className="mt-1 text-[0.84375rem] text-lumen-2">{text.detail}</p>
-                  {d.action === 'answer' && <AnswerForm minimumBondWei={oracle.minimumBondWei} busy={busy} onAnswer={(o, w) => void oracle.submitAnswer(o, w)} />}
-                  {d.action === 'fund_bounty' && (
+                  {ready && d.action === 'answer' && <AnswerForm minimumBondWei={oracle.minimumBondWei} busy={busy} onAnswer={(o, w) => void oracle.submitAnswer(o, w)} />}
+                  {ready && d.action === 'fund_bounty' && (
                     <form
                       className="mt-3 flex flex-wrap items-end gap-2"
                       onSubmit={(e) => {
@@ -185,7 +186,7 @@ export function ApiOracleActions({ claim }: { claim: ClaimDetail }) {
                   )}
                   {d.action === 'request_arbitration_on_ethereum' && <MainnetArbitration action={d} questionId={facts?.currentQuestionId ?? null} />}
                   {d.action === 'withdraw' && typeof d.details.balance === 'string' && <p className="tnum mt-1 text-[0.84375rem] text-lumen">Balance: {xdai(d.details.balance)} xDAI</p>}
-                  {handler && text.button && (
+                  {ready && handler && text.button && (
                     <Button size="sm" variant="glass" className="mt-3" disabled={busy} onClick={run(handler)}>
                       {text.button}
                     </Button>
@@ -194,6 +195,7 @@ export function ApiOracleActions({ claim }: { claim: ClaimDetail }) {
               )
             })}
           </ul>
+          {!ready && unique.some((d) => d.planRoute !== null) && <ApiSessionGate purpose="act on the oracle" className="mt-4" />}
           <WriteErrorNotice error={oracle.error} className="mt-4" />
           <PlanProgress runner={oracle.runner} chainId={claim.chainId} className="mt-5" />
           <div className="mt-3">
@@ -204,7 +206,7 @@ export function ApiOracleActions({ claim }: { claim: ClaimDetail }) {
               Pine sees this plan as {oracle.planState.state}.
             </p>
           )}
-        </ApiSessionGate>
+        </>
       )}
     </section>
   )

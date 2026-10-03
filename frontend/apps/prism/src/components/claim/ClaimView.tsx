@@ -26,7 +26,7 @@ import { ApiMarketPanel } from './ApiMarket'
 import { ButtonLink } from '@/components/ui/Button'
 import { Container, EmptyState, ErrorState, Skeleton } from '@/components/ui/primitives'
 import { FAMILY_VAR, OUTCOME_HEX } from '@/lib/crystal'
-import { apiDetailFactsOf, claimLabel, isResolved, repoLabel, shortRepo } from '@/lib/claims'
+import { apiDetailFactsOf, apiStatusLabel, claimLabel, isResolved, repoLabel, shortRepo } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 
 const SECTIONS = [
@@ -186,8 +186,7 @@ export function ClaimView({ id }: { id: string }) {
               {claim.policy.id}
               {claim.policy.version ? `@${claim.policy.version}` : ''}
             </Link>
-            <StatusBadge status={claim.status} outcome={claim.outcome} />
-            {api?.phase === 'reveal_open' && <span className="tag">Reveal window</span>}
+            <StatusBadge status={claim.status} outcome={claim.outcome} label={apiStatusLabel(claim)} />
             {claim.sponsored && <span className="tag">Sponsored</span>}
           </div>
           <h1 className="t-h1 chroma mt-3 max-w-[26ch] [overflow-wrap:anywhere]">{claim.title}</h1>

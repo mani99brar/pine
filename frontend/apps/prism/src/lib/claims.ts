@@ -131,6 +131,14 @@ export function claimLabel(c: { number: number; id: string; marketAddress?: stri
   return ADDRESS.test(address) ? shortHash(address.toLowerCase(), 4) : formatClaimNumber(c.number)
 }
 
+/**
+ * The status text where the backend knows more than the domain status: its reveal window (status "open", but no new
+ * evidence) is named as such. Undefined keeps the default label.
+ */
+export function apiStatusLabel(c: ClaimSummary): string | undefined {
+  return apiFactsOf(c)?.phase === 'reveal_open' ? 'Reveal window open' : undefined
+}
+
 export function isoOfUnix(sec: number): string {
   return new Date(sec * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z')
 }
