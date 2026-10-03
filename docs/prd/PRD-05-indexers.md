@@ -171,10 +171,15 @@ indexer-envio and read-model-envio:
 indexer-native:
 - The ACTIVE filter set is pruned: questions that are finalized, not pending arbitration and not settled too soon, and conditions
   already resolved, are excluded from every log request (they stay in the database), so the per-cycle request count tracks only
-  live claims; test that a finalized question is no longer requested and a reopened or arbitrated one still is.
+  live claims. "Finalized" is judged against CHAIN time: the timestamp of the first block of the range being requested
+  (`finalizeTs <= that timestamp`), never wall-clock time (the indexer lags the chain, and a question can still receive a
+  last-minute bond escalation, reveal or arbitration request in blocks not yet ingested). Tests: a question whose finalizeTs is past
+  in wall-clock time but not at the range's first block is still requested; one finalized at that block is not; a reopened or
+  arbitrated one still is.
 - Single-response anomalies from one provider (a log outside the requested range, a duplicate log, a `removed` log, a wrong-shape
   result, or a strict-decode failure of a log not yet cross-checked) are treated like a provider disagreement: re-fetch the same
-  plan from BOTH providers (up to 3 times, 10 s apart) and halt only if the anomaly persists. The JSON-RPC envelope parser accepts
+  plan from BOTH providers (up to 3 times, 10 s apart; the delay is an injectable option and tests use 0) and halt only if the
+  anomaly persists. The JSON-RPC envelope parser accepts
   extra fields (no `.strict()`); only the fields used are validated.
 - `RPC_ALLOW_INSECURE_HTTP` is honoured only together with an explicit `PINE_INDEXER_ENV=development` (never inferred from a
   missing NODE_ENV); test the refusal without it.
@@ -185,8 +190,9 @@ indexer-native:
   halving sequence (e.g. 64 → 32 → … → 1, and a sub-range that succeeds is not split further) is asserted step by step.
 indexer-envio:
 - `scripts/start.mjs` forwards SIGTERM/SIGINT to the `envio start` child and exits with its code; test it with a stub child.
-Both lanes: an operator file `operator-coverage-gaps-<lane>.md` in the run directory lists further gaps found by an exhaustive
-pre-check; close every one.
+Both lanes: the operator file `/home/agentops/dev/pine-runs/indexers/indexers-004/operator-coverage-gaps-<lane>.md` lists further
+gaps found by an exhaustive pre-check; close every one. If it has not appeared when your work is otherwise done, check once more
+after 2 minutes, then complete without it.
 
 ## 4. Checks (per lane)
 - indexer-native: `pnpm --filter @pine/indexer-native typecheck` (typecheck), `pnpm exec eslint packages/indexer-native/src`
