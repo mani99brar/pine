@@ -213,6 +213,14 @@ export function apiNextStep(c: ClaimDetail, api: ApiClaimDetailFacts): NextStep 
   const status = api.oracle.status
   switch (api.phase) {
     case 'evidence_open':
+      if (api.hidden) {
+        return {
+          title: 'Evidence window open',
+          detail: `Pine withholds this claim after a moderation decision and offers no evidence actions for it. The window closes at ${formatDate(evidence, 'utc')}.`,
+          at: evidence,
+          actor: 'investigators',
+        }
+      }
       return {
         title: 'Evidence window open',
         detail: `Investigators can commit sealed evidence or publish evidence until ${formatDate(evidence, 'utc')}. Sealed evidence counts only if it is revealed before ${formatDate(reveal, 'utc')}. ${COPY.deadlineIsNotTradingCutoff}`,

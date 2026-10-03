@@ -119,7 +119,6 @@ function EvidenceItem({ e, claim }: { e: Evidence; claim: ClaimDetail }) {
         {api && e.kind === 'commitment' && e.commitment ? (
           <div className="mt-4 flex flex-wrap items-center gap-3 text-[0.875rem] text-lumen-2">
             <Lock size={15} aria-hidden className="text-ca" />
-            Only the commitment hash is on chain until the submitter reveals the content.
             <HashChip value={e.commitment.hash} label="Commitment" />
           </div>
         ) : e.kind === 'commitment' && e.commitment ? (
@@ -130,7 +129,10 @@ function EvidenceItem({ e, claim }: { e: Evidence; claim: ClaimDetail }) {
           </div>
         ) : null}
 
-        {e.summary && (
+        {api && api.manifest !== 'shown' ? (
+          // Pine's own explanation of why there is no content to show (not the submitter's text).
+          e.summary && <p className="mt-3 max-w-[82ch] text-[0.9375rem] text-lumen-2">{e.summary}</p>
+        ) : e.summary && (
           <div className="mt-4 max-w-[82ch]">
             <Expandable collapsedHeight={150} label="Show the full submission">
               {raw ? <pre className="t-code untrusted cut-sm border border-edge bg-void p-3 text-lumen-2">{e.summary}</pre> : <SafeMarkdown>{e.summary}</SafeMarkdown>}
