@@ -12,7 +12,6 @@ import { ArrowLeft, Eye, Lock, X } from 'lucide-react'
 import { Button, ButtonLink } from '@/components/ui/Button'
 import { HashChip, Segmented } from '@/components/ui/interactive'
 import { FormField, Notice } from '@/components/ui/primitives'
-import { SafeMarkdown } from '@/components/ui/SafeMarkdown'
 import { ApiClaimNotices } from '@/components/claim/ApiNotices'
 import { ApiSessionGate, PlanControls, PlanProgress, WriteErrorNotice, useSessionReady } from '@/components/claim/ApiActionKit'
 import { API_DEADLINE_RULES, claimLabel, countdown, isoOfUnix } from '@/lib/claims'
@@ -367,7 +366,14 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                 />
               </div>
               {preview ? (
-                <div className="cut-md well min-h-[9rem] p-4">{fields.summary.trim() ? <SafeMarkdown>{fields.summary}</SafeMarkdown> : <p className="text-lumen-3">Nothing to preview.</p>}</div>
+                // As the evidence feed shows it (SEC-EVID-10): plain text, line breaks kept, nothing clickable.
+                <div className="cut-md well min-h-[9rem] p-4">
+                  {fields.summary.trim() ? (
+                    <p className="untrusted whitespace-pre-wrap text-[0.9375rem] leading-[1.6] text-lumen-2 [overflow-wrap:anywhere]">{fields.summary}</p>
+                  ) : (
+                    <p className="text-lumen-3">Nothing to preview.</p>
+                  )}
+                </div>
               ) : (
                 <textarea
                   id="ev-summary"
@@ -378,7 +384,7 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                   maxLength={10000}
                   aria-invalid={Boolean(errorOf('summary'))}
                   aria-describedby="ev-summary-help"
-                  placeholder="What you ran, what happened, and why it is the stated violation. Markdown is shown sanitized."
+                  placeholder="What you ran, what happened, and why it is the stated violation. Everyone sees it as plain text: links are not clickable."
                 />
               )}
               <p id="ev-summary-help" className="help mt-1">
