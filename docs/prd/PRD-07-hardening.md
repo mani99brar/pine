@@ -93,6 +93,10 @@ Contracts are immutable once deployed, so every contract change here lands befor
 - Request path: audited writes trigger the flush without awaiting it (fire-and-forget, errors caught and logged through the
   redactor), so an audit backlog or a slow audit store never delays or fails the user's request; the outbox row is already
   committed with the write. Test: an audit store that never resolves does not delay the plan response.
+  Test-harness rule (operator decision after the design challenge): the module test helpers inside the owned paths
+  (markets `test/helpers.ts`, funding `test/harness.ts` and their inject wrappers) await the module's single-flight flush
+  after each response, so the existing exact-match audit tests keep passing unchanged; the "never resolves" test uses a raw
+  inject. Single-flight is one in-flight promise plus a coalesced "rerun requested" flag, cleared in `finally`.
 - Cooperative abort tests go through the registered jobs (`job.run(ctx, signal)`) for markets watch and funding reconcile too.
 - Record in the coverage matrix: outbox rows hold the request IP until flushed (bounded by the flush cadence) and are
   deletable by pine_api until flushed (inherent in the outbox design; accepted); the evidence listing's per-request cost
