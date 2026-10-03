@@ -6,6 +6,9 @@ Wire and document the whole backend per `docs/prd/PRD-06-assembly.md` section 3:
 
 ## Context
 
+- Rerun: run assembly-002 built this lane on a pre-merge base (claims-008 and markets-002 candidates) and stopped at verification only because `eslint packages` fails on 13 errors in two merged indexer-envio files. Its snapshot is commit `6e93b1288f9a9c42ce6a62c84eef07bd930c7348` (ref `keep/assembly-002-work`). Start from it with one `git checkout 6e93b1288f9a9c42ce6a62c84eef07bd930c7348 -- <path>` per owned path of this lane that exists there, then adapt to main, where claims-010, markets-004 and the contract hardening are merged (their code is final; report divergences instead of working around them). Fix the lint errors in `packages/indexer-envio/envio-env.d.ts` (triple-slash reference) and `packages/indexer-envio/scripts/start.mjs` (Node globals: import `process`, `Buffer` from `node:*` or declare the globals; no behaviour change), which this run adds to your owned paths. Keep the operator-settled choices and list them again.
+- The host is memory-constrained: run vitest with VITEST_MAX_WORKERS=1, one test command at a time, and the full e2e and api-unit suites at most twice each.
+
 - Everything merged from features `platform`, `claims`, `markets`, `indexers`; ADR-0001 (decisions and launch gates); PRD-02..05; `docs/security/requirements.md`.
 - The real `buildApp`, `createGateways` (with injected fake fetch/RPC transports), `routeModules`, `@pine/indexer-native` (`applyEvents`, `createNativeReadModel` on PGlite) and the scenario events of `@pine/shared/testing`.
 
