@@ -29,7 +29,7 @@ test('walkthrough: Pine Prism on the Pine backend', async ({ page, context }, in
     5000,
   )
 
-  await page.goto('/claims')
+  await page.goto('/claims?view=list')
   await caption(page, 'The light table lists the claims indexed from the chain, served by the backend')
   await page.waitForTimeout(1500)
   await page.goto('/policies/FUNC-001')
