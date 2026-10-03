@@ -77,7 +77,7 @@ export function ApiSessionGate({ children, purpose, className }: { children?: Re
         onClick={() => void siwe.signIn().catch(() => undefined)}
         icon={<ShieldCheck size={14} aria-hidden />}
       >
-        Sign in with your wallet
+        Sign in with Ethereum
       </Button>
       {siwe.error && (
         <p className="untrusted mt-2 text-[0.84375rem] text-ha" role="alert">
