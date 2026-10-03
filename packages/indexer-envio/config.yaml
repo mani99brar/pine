@@ -1,0 +1,67 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+# Pine read model on Envio HyperIndex v3 (envio 3.12.1, pinned). Semantics: packages/shared/src/testing/memory-read-model.ts.
+# Event signatures are pinned to @pine/shared/abi/{generated,external} by test/config.test.ts.
+# PRODUCTION MUST SET ENVIO_CLAIM_REGISTRY_ADDRESS, ENVIO_EVIDENCE_REGISTRY_ADDRESS and ENVIO_PINE_START_BLOCK: the defaults
+# are the conformance-scenario placeholders (no code at these addresses on Gnosis), so a run with them indexes nothing.
+# Start ONLY with `pnpm start` (scripts/start.mjs refuses placeholders and ENVIO_BLOCK_LAG < 40); never `envio start`.
+name: pine-indexer-envio
+description: Pine claims, evidence, Reality.eth v3, Conditional Tokens and Kleros home-proxy facts on Gnosis Chain
+address_format: lowercase
+rollback_on_reorg: true
+field_selection:
+  transaction_fields:
+    - hash
+contracts:
+  - name: ClaimRegistry
+    events:
+      - event: "ClaimCreated(address indexed market, address indexed creator, bytes32 indexed claimDocumentSha256, (address creator, uint64 createdAt, uint64 evidenceDeadline, uint64 revealDeadline, uint64 repositoryId, bytes20 commit, bytes32 claimDocumentSha256, bytes32 policyDocumentSha256, bytes32 questionId, bytes32 conditionId, bytes32 marketNameHash, uint256 minBond, address yesToken, address noToken, address invalidToken) claim, string title, string marketName)"
+  - name: EvidenceRegistry
+    events:
+      - event: "EvidenceCommitted(uint256 indexed submissionId, address indexed market, address indexed submitter, bytes32 commitment, uint64 committedAt)"
+      - event: "EvidenceRevealed(uint256 indexed submissionId, address indexed market, address indexed submitter, bytes32 contentSha256, uint64 committedAt, uint64 revealedAt)"
+      - event: "EvidencePublished(uint256 indexed submissionId, address indexed market, address indexed submitter, bytes32 contentSha256, uint64 publishedAt)"
+  - name: RealityETH
+    events:
+      - event: "LogNewAnswer(bytes32 answer, bytes32 indexed question_id, bytes32 history_hash, address indexed user, uint256 bond, uint256 ts, bool is_commitment)"
+      - event: "LogAnswerReveal(bytes32 indexed question_id, address indexed user, bytes32 indexed answer_hash, bytes32 answer, uint256 nonce, uint256 bond)"
+      - event: "LogNotifyOfArbitrationRequest(bytes32 indexed question_id, address indexed user)"
+      - event: "LogCancelArbitration(bytes32 indexed question_id)"
+      - event: "LogFinalize(bytes32 indexed question_id, bytes32 indexed answer)"
+      - event: "LogReopenQuestion(bytes32 indexed question_id, bytes32 indexed reopened_question_id)"
+      - event: "LogFundAnswerBounty(bytes32 indexed question_id, uint256 bounty_added, uint256 bounty, address indexed user)"
+  - name: ConditionalTokens
+    events:
+      - event: "ConditionResolution(bytes32 indexed conditionId, address indexed oracle, bytes32 indexed questionId, uint256 outcomeSlotCount, uint256[] payoutNumerators)"
+  - name: KlerosHomeProxy
+    events:
+      - event: "RequestNotified(bytes32 indexed _questionID, address indexed _requester, uint256 _maxPrevious)"
+      - event: "RequestRejected(bytes32 indexed _questionID, address indexed _requester, uint256 _maxPrevious, string _reason)"
+      - event: "RequestAcknowledged(bytes32 indexed _questionID, address indexed _requester)"
+      - event: "RequestCanceled(bytes32 indexed _questionID, address indexed _requester)"
+      - event: "ArbitrationFailed(bytes32 indexed _questionID, address indexed _requester)"
+      - event: "ArbitratorAnswered(bytes32 indexed _questionID, bytes32 _answer)"
+      - event: "ArbitrationFinished(bytes32 indexed _questionID)"
+chains:
+  - id: 100 # Gnosis Chain
+    start_block: ${ENVIO_PINE_START_BLOCK:-0}
+    # Served rows trail the head by about 40 blocks (~3.5 min) so they are effectively final; reorgs inside the
+    # reorg window are rolled back (rollback_on_reorg above).
+    block_lag: ${ENVIO_BLOCK_LAG:-40}
+    max_reorg_depth: 200
+    # HyperSync is the primary source when ENVIO_API_TOKEN is set; this RPC is the fallback (ENVIO_GNOSIS_RPC_FOR=sync
+    # makes it the only source when no token is available).
+    rpc:
+      - url: ${ENVIO_GNOSIS_RPC_URL:-https://rpc.gnosischain.com}
+        for: ${ENVIO_GNOSIS_RPC_FOR:-fallback}
+    contracts:
+      - name: ClaimRegistry
+        address: "${ENVIO_CLAIM_REGISTRY_ADDRESS:-0x00000000000000000000000000000000000c1a10}"
+      - name: EvidenceRegistry
+        address: "${ENVIO_EVIDENCE_REGISTRY_ADDRESS:-0x00000000000000000000000000000000000e01de}"
+      # GNOSIS_EXTERNAL (packages/shared/src/deployment.ts); pinned by test/config.test.ts.
+      - name: RealityETH
+        address: "0xe78996a233895be74a66f451f1019ca9734205cc"
+      - name: ConditionalTokens
+        address: "0xceafdd6bc0bef976fdcd1112955828e00543c0ce"
+      - name: KlerosHomeProxy
+        address: "0x68154ea682f95bf582b80dd6453fa401737491dc"

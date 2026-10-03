@@ -17,5 +17,5 @@
     "lib": ["es2023"],
     "types": ["node"]
   },
-  "include": ["envio-env.d.ts", "src", "test", "vitest.config.ts"]
+  "include": ["envio-env.d.ts", "src", "test", "scripts", "vitest.config.ts"]
 }

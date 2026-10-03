@@ -7,7 +7,7 @@
     "codegen": "envio codegen",
     "typecheck": "envio codegen && tsc --noEmit -p tsconfig.json",
     "test": "envio codegen && vitest run",
-    "start": "envio start"
+    "start": "node scripts/start.mjs"
   },
   "dependencies": {
     "envio": "3.12.1",

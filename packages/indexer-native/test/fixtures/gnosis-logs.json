@@ -1,0 +1,455 @@
+{
+  "description": "Real Gnosis Chain (100) logs captured with cast on 2026-10-02 from https://rpc.gnosischain.com (archive). 'expected' was derived independently of the indexer decoder: indexed fields read from the raw topics, non-indexed fields decoded by `cast decode-abi` (castDecodedData). bigint fields are decimal strings. No synthetic logs.",
+  "fixtures": [
+    {
+      "name": "reality-LogNewAnswer",
+      "signature": "LogNewAnswer(bytes32,bytes32,bytes32,address,uint256,uint256,bool)",
+      "topic0": "0xe47ca4ebbbc2990134d1168821f38c5e177f3d5ee564bffeadeaa351905e6221",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0xe78996a233895be74a66f451f1019ca9734205cc --from-block 40985145 --to-block 40985145 --json '' '0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305'",
+      "header": {
+        "number": "40985145",
+        "hash": "0xc6026f4c320798c03bdeb27fc1716f2ef5ece61dd6a76b1915a2814309913133",
+        "timestamp": 1751985640
+      },
+      "log": {
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "topics": [
+          "0xe47ca4ebbbc2990134d1168821f38c5e177f3d5ee564bffeadeaa351905e6221",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+          "0x0000000000000000000000009eb6d10f75b364662313ee3099173dc3ac4048c9"
+        ],
+        "data": "0x0000000000000000000000000000000000000000000000000000000000000001663a0d6d77fd2e6ace0bd94cba046ff2b46411e2a0aceeb3127c237b86af78390000000000000000000000000000000000000000000000008ac7230489e8000000000000000000000000000000000000000000000000000000000000686d2de80000000000000000000000000000000000000000000000000000000000000000",
+        "blockNumber": "0x2716239",
+        "blockHash": "0xc6026f4c320798c03bdeb27fc1716f2ef5ece61dd6a76b1915a2814309913133",
+        "transactionHash": "0xfac349aa3e7a059e9e40ec85e3186e4fcc52bc39566f34fa300672af6878d804",
+        "transactionIndex": "0x4",
+        "logIndex": "0xf",
+        "removed": false
+      },
+      "castDecodedData": [
+        "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "0x663a0d6d77fd2e6ace0bd94cba046ff2b46411e2a0aceeb3127c237b86af7839",
+        "10000000000000000000 [1e19]",
+        "1751985640 [1.751e9]",
+        "false"
+      ],
+      "expected": {
+        "chainId": 100,
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "blockNumber": "40985145",
+        "blockHash": "0xc6026f4c320798c03bdeb27fc1716f2ef5ece61dd6a76b1915a2814309913133",
+        "blockTimestamp": 1751985640,
+        "transactionHash": "0xfac349aa3e7a059e9e40ec85e3186e4fcc52bc39566f34fa300672af6878d804",
+        "logIndex": 15,
+        "kind": "RealityNewAnswer",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "historyHash": "0x663a0d6d77fd2e6ace0bd94cba046ff2b46411e2a0aceeb3127c237b86af7839",
+        "user": "0x9eb6d10f75b364662313ee3099173dc3ac4048c9",
+        "bond": "10000000000000000000",
+        "ts": 1751985640,
+        "isCommitment": false
+      }
+    },
+    {
+      "name": "reality-LogNotifyOfArbitrationRequest",
+      "signature": "LogNotifyOfArbitrationRequest(bytes32,address)",
+      "topic0": "0x75d7939999bc902187c4aed400872883e445145f1983539166f783fa040b4762",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0xe78996a233895be74a66f451f1019ca9734205cc --from-block 40985567 --to-block 40985567 --json '' '0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305'",
+      "header": {
+        "number": "40985567",
+        "hash": "0x5dd8ab8f14ab7547101d464c015649ce45ae4b2b1b32e6ac122fda6601055c25",
+        "timestamp": 1751987805
+      },
+      "log": {
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "topics": [
+          "0x75d7939999bc902187c4aed400872883e445145f1983539166f783fa040b4762",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+          "0x000000000000000000000000136bbec3b1b182ae3136423448e3d5b111a8a7da"
+        ],
+        "data": "0x",
+        "blockNumber": "0x27163df",
+        "blockHash": "0x5dd8ab8f14ab7547101d464c015649ce45ae4b2b1b32e6ac122fda6601055c25",
+        "transactionHash": "0x79a0d7b950b1af94ccfc933dcacf4f4d421752a40c98694de510ecf7b93ce71e",
+        "transactionIndex": "0x1",
+        "logIndex": "0x2",
+        "removed": false
+      },
+      "castDecodedData": [],
+      "expected": {
+        "chainId": 100,
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "blockNumber": "40985567",
+        "blockHash": "0x5dd8ab8f14ab7547101d464c015649ce45ae4b2b1b32e6ac122fda6601055c25",
+        "blockTimestamp": 1751987805,
+        "transactionHash": "0x79a0d7b950b1af94ccfc933dcacf4f4d421752a40c98694de510ecf7b93ce71e",
+        "logIndex": 2,
+        "kind": "RealityArbitrationRequested",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "user": "0x136bbec3b1b182ae3136423448e3d5b111a8a7da"
+      }
+    },
+    {
+      "name": "reality-LogFinalize",
+      "signature": "LogFinalize(bytes32,bytes32)",
+      "topic0": "0x18d760beffe3717270cd90d9d920ec1a48c194e9ad7bba23eb1c92d3eb974f97",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0xe78996a233895be74a66f451f1019ca9734205cc --from-block 41272207 --to-block 41272207 --json '' '0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305'",
+      "header": {
+        "number": "41272207",
+        "hash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "timestamp": 1753472145
+      },
+      "log": {
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "topics": [
+          "0x18d760beffe3717270cd90d9d920ec1a48c194e9ad7bba23eb1c92d3eb974f97",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+          "0x0000000000000000000000000000000000000000000000000000000000000000"
+        ],
+        "data": "0x",
+        "blockNumber": "0x275c38f",
+        "blockHash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "transactionHash": "0xbc7b8d511668b52bd05cc7b1ffa8e5b64c9e0224e6d5f795358fae6378c441fa",
+        "transactionIndex": "0x13",
+        "logIndex": "0x11",
+        "removed": false
+      },
+      "castDecodedData": [],
+      "expected": {
+        "chainId": 100,
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "blockNumber": "41272207",
+        "blockHash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "blockTimestamp": 1753472145,
+        "transactionHash": "0xbc7b8d511668b52bd05cc7b1ffa8e5b64c9e0224e6d5f795358fae6378c441fa",
+        "logIndex": 17,
+        "kind": "RealityArbitratorAnswered",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "reality-LogNewAnswer-arbitrator",
+      "signature": "LogNewAnswer(bytes32,bytes32,bytes32,address,uint256,uint256,bool)",
+      "topic0": "0xe47ca4ebbbc2990134d1168821f38c5e177f3d5ee564bffeadeaa351905e6221",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0xe78996a233895be74a66f451f1019ca9734205cc --from-block 41272207 --to-block 41272207 --json '' '0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305'",
+      "header": {
+        "number": "41272207",
+        "hash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "timestamp": 1753472145
+      },
+      "log": {
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "topics": [
+          "0xe47ca4ebbbc2990134d1168821f38c5e177f3d5ee564bffeadeaa351905e6221",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+          "0x000000000000000000000000136bbec3b1b182ae3136423448e3d5b111a8a7da"
+        ],
+        "data": "0x0000000000000000000000000000000000000000000000000000000000000000446d3035f282c68ba5ffb0f25f765b4f707452c22152a0c4f0cf3725f9eb24af0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000006883dc910000000000000000000000000000000000000000000000000000000000000000",
+        "blockNumber": "0x275c38f",
+        "blockHash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "transactionHash": "0xbc7b8d511668b52bd05cc7b1ffa8e5b64c9e0224e6d5f795358fae6378c441fa",
+        "transactionIndex": "0x13",
+        "logIndex": "0x12",
+        "removed": false
+      },
+      "castDecodedData": [
+        "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "0x446d3035f282c68ba5ffb0f25f765b4f707452c22152a0c4f0cf3725f9eb24af",
+        "0",
+        "1753472145 [1.753e9]",
+        "false"
+      ],
+      "expected": {
+        "chainId": 100,
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "blockNumber": "41272207",
+        "blockHash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "blockTimestamp": 1753472145,
+        "transactionHash": "0xbc7b8d511668b52bd05cc7b1ffa8e5b64c9e0224e6d5f795358fae6378c441fa",
+        "logIndex": 18,
+        "kind": "RealityNewAnswer",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "historyHash": "0x446d3035f282c68ba5ffb0f25f765b4f707452c22152a0c4f0cf3725f9eb24af",
+        "user": "0x136bbec3b1b182ae3136423448e3d5b111a8a7da",
+        "bond": "0",
+        "ts": 1753472145,
+        "isCommitment": false
+      }
+    },
+    {
+      "name": "ctf-ConditionResolution",
+      "signature": "ConditionResolution(bytes32,address,bytes32,uint256,uint256[])",
+      "topic0": "0xb44d84d3289691f71497564b85d4233648d9dbae8cbdbb4329f301c3a0185894",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0xceafdd6bc0bef976fdcd1112955828e00543c0ce --from-block 48532009 --to-block 48532009 --json",
+      "header": {
+        "number": "48532009",
+        "hash": "0x5321ca9a764d1593fc900cd90bcc0e39a60cad9ff93d7e98ac5721cdbb917705",
+        "timestamp": 1790851525
+      },
+      "log": {
+        "address": "0xceafdd6bc0bef976fdcd1112955828e00543c0ce",
+        "topics": [
+          "0xb44d84d3289691f71497564b85d4233648d9dbae8cbdbb4329f301c3a0185894",
+          "0xf87179177e0fb1330b7d27d12a385c5bdcd27cd2ed76660a5fb3d431e537ccc2",
+          "0x000000000000000000000000c260adfac11f97c001dc143d2a4f45b98e0f2d6c",
+          "0x58d87ef69ee4ba767acbae2ea4596239951e469afcab44c68fe9e0c91c46ec54"
+        ],
+        "data": "0x000000000000000000000000000000000000000000000000000000000000000300000000000000000000000000000000000000000000000000000000000000400000000000000000000000000000000000000000000000000000000000000003000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000",
+        "blockNumber": "0x2e48a29",
+        "blockHash": "0x5321ca9a764d1593fc900cd90bcc0e39a60cad9ff93d7e98ac5721cdbb917705",
+        "transactionHash": "0x2320b64be0965a2f43675cb1b1c603330fb72b2587bb8d877a1270fd297c1b53",
+        "transactionIndex": "0x19",
+        "logIndex": "0x68",
+        "removed": false
+      },
+      "castDecodedData": [
+        "3",
+        "[0, 1, 0]"
+      ],
+      "expected": {
+        "chainId": 100,
+        "address": "0xceafdd6bc0bef976fdcd1112955828e00543c0ce",
+        "blockNumber": "48532009",
+        "blockHash": "0x5321ca9a764d1593fc900cd90bcc0e39a60cad9ff93d7e98ac5721cdbb917705",
+        "blockTimestamp": 1790851525,
+        "transactionHash": "0x2320b64be0965a2f43675cb1b1c603330fb72b2587bb8d877a1270fd297c1b53",
+        "logIndex": 104,
+        "kind": "ConditionResolution",
+        "conditionId": "0xf87179177e0fb1330b7d27d12a385c5bdcd27cd2ed76660a5fb3d431e537ccc2",
+        "oracle": "0xc260adfac11f97c001dc143d2a4f45b98e0f2d6c",
+        "ctfQuestionId": "0x58d87ef69ee4ba767acbae2ea4596239951e469afcab44c68fe9e0c91c46ec54",
+        "outcomeSlotCount": 3,
+        "payoutNumerators": [
+          "0",
+          "1",
+          "0"
+        ]
+      }
+    },
+    {
+      "name": "kleros-RequestNotified",
+      "signature": "RequestNotified(bytes32,address,uint256)",
+      "topic0": "0xf56e18fc84dbd66db78337b5bd0973943fa70c9b52243a540bdac79274f6682d",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0x68154ea682f95bf582b80dd6453fa401737491dc --from-block 40985567 --to-block 40985567 --json",
+      "header": {
+        "number": "40985567",
+        "hash": "0x5dd8ab8f14ab7547101d464c015649ce45ae4b2b1b32e6ac122fda6601055c25",
+        "timestamp": 1751987805
+      },
+      "log": {
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "topics": [
+          "0xf56e18fc84dbd66db78337b5bd0973943fa70c9b52243a540bdac79274f6682d",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+          "0x000000000000000000000000136bbec3b1b182ae3136423448e3d5b111a8a7da"
+        ],
+        "data": "0x0000000000000000000000000000000000000000000000008ac7230489e80000",
+        "blockNumber": "0x27163df",
+        "blockHash": "0x5dd8ab8f14ab7547101d464c015649ce45ae4b2b1b32e6ac122fda6601055c25",
+        "transactionHash": "0x79a0d7b950b1af94ccfc933dcacf4f4d421752a40c98694de510ecf7b93ce71e",
+        "transactionIndex": "0x1",
+        "logIndex": "0x3",
+        "removed": false
+      },
+      "castDecodedData": [
+        "10000000000000000000 [1e19]"
+      ],
+      "expected": {
+        "chainId": 100,
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "blockNumber": "40985567",
+        "blockHash": "0x5dd8ab8f14ab7547101d464c015649ce45ae4b2b1b32e6ac122fda6601055c25",
+        "blockTimestamp": 1751987805,
+        "transactionHash": "0x79a0d7b950b1af94ccfc933dcacf4f4d421752a40c98694de510ecf7b93ce71e",
+        "logIndex": 3,
+        "kind": "KlerosHome",
+        "stage": "RequestNotified",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "requester": "0x136bbec3b1b182ae3136423448e3d5b111a8a7da",
+        "maxPrevious": "10000000000000000000",
+        "reason": null,
+        "answer": null
+      }
+    },
+    {
+      "name": "kleros-RequestAcknowledged",
+      "signature": "RequestAcknowledged(bytes32,address)",
+      "topic0": "0xff09615c531ab8799ea1c67a0952ddbef1c864ef91d390995d0dc07656f4210f",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0x68154ea682f95bf582b80dd6453fa401737491dc --from-block 40985610 --to-block 40985610 --json",
+      "header": {
+        "number": "40985610",
+        "hash": "0x685591d4e1bc7c7973aa69486999ca74a834a979aee273f131355d93920cd35b",
+        "timestamp": 1751988020
+      },
+      "log": {
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "topics": [
+          "0xff09615c531ab8799ea1c67a0952ddbef1c864ef91d390995d0dc07656f4210f",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+          "0x000000000000000000000000136bbec3b1b182ae3136423448e3d5b111a8a7da"
+        ],
+        "data": "0x",
+        "blockNumber": "0x271640a",
+        "blockHash": "0x685591d4e1bc7c7973aa69486999ca74a834a979aee273f131355d93920cd35b",
+        "transactionHash": "0xc693e58d12ca64930ad2e71470acd018b7ce58717ace0f1d584bc5bf154b60f1",
+        "transactionIndex": "0x2",
+        "logIndex": "0x4",
+        "removed": false
+      },
+      "castDecodedData": [],
+      "expected": {
+        "chainId": 100,
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "blockNumber": "40985610",
+        "blockHash": "0x685591d4e1bc7c7973aa69486999ca74a834a979aee273f131355d93920cd35b",
+        "blockTimestamp": 1751988020,
+        "transactionHash": "0xc693e58d12ca64930ad2e71470acd018b7ce58717ace0f1d584bc5bf154b60f1",
+        "logIndex": 4,
+        "kind": "KlerosHome",
+        "stage": "RequestAcknowledged",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "requester": "0x136bbec3b1b182ae3136423448e3d5b111a8a7da",
+        "maxPrevious": null,
+        "reason": null,
+        "answer": null
+      }
+    },
+    {
+      "name": "kleros-ArbitratorAnswered",
+      "signature": "ArbitratorAnswered(bytes32,bytes32)",
+      "topic0": "0x1813d15d8cef51cff8bbd419a8e13e0655c1babea320dea4174d5e7bc40c4294",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0x68154ea682f95bf582b80dd6453fa401737491dc --from-block 41230453 --to-block 41230453 --json",
+      "header": {
+        "number": "41230453",
+        "hash": "0x6c98d06767782a2d6ba640f7e24dbaf609fb54d1b92ec233111d31a6e5d4e82f",
+        "timestamp": 1753257380
+      },
+      "log": {
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "topics": [
+          "0x1813d15d8cef51cff8bbd419a8e13e0655c1babea320dea4174d5e7bc40c4294",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305"
+        ],
+        "data": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "blockNumber": "0x2752075",
+        "blockHash": "0x6c98d06767782a2d6ba640f7e24dbaf609fb54d1b92ec233111d31a6e5d4e82f",
+        "transactionHash": "0x77572d45a8d5cb16f201219234fcd4a2b15c53629e4eccba1e2bae0a79262e80",
+        "transactionIndex": "0x0",
+        "logIndex": "0x1",
+        "removed": false
+      },
+      "castDecodedData": [
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "expected": {
+        "chainId": 100,
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "blockNumber": "41230453",
+        "blockHash": "0x6c98d06767782a2d6ba640f7e24dbaf609fb54d1b92ec233111d31a6e5d4e82f",
+        "blockTimestamp": 1753257380,
+        "transactionHash": "0x77572d45a8d5cb16f201219234fcd4a2b15c53629e4eccba1e2bae0a79262e80",
+        "logIndex": 1,
+        "kind": "KlerosHome",
+        "stage": "ArbitratorAnswered",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "requester": null,
+        "maxPrevious": null,
+        "reason": null,
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "name": "kleros-ArbitrationFinished",
+      "signature": "ArbitrationFinished(bytes32)",
+      "topic0": "0x2abf2fd86256e4607561adae782a4853682b6c0b976995a9a45c5fc3a1757386",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0x68154ea682f95bf582b80dd6453fa401737491dc --from-block 41272207 --to-block 41272207 --json",
+      "header": {
+        "number": "41272207",
+        "hash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "timestamp": 1753472145
+      },
+      "log": {
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "topics": [
+          "0x2abf2fd86256e4607561adae782a4853682b6c0b976995a9a45c5fc3a1757386",
+          "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305"
+        ],
+        "data": "0x",
+        "blockNumber": "0x275c38f",
+        "blockHash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "transactionHash": "0xbc7b8d511668b52bd05cc7b1ffa8e5b64c9e0224e6d5f795358fae6378c441fa",
+        "transactionIndex": "0x13",
+        "logIndex": "0x13",
+        "removed": false
+      },
+      "castDecodedData": [],
+      "expected": {
+        "chainId": 100,
+        "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+        "blockNumber": "41272207",
+        "blockHash": "0xc2177439382b8b5202c532518c7a052c9f8e55a17607297c291407543e617ba1",
+        "blockTimestamp": 1753472145,
+        "transactionHash": "0xbc7b8d511668b52bd05cc7b1ffa8e5b64c9e0224e6d5f795358fae6378c441fa",
+        "logIndex": 19,
+        "kind": "KlerosHome",
+        "stage": "ArbitrationFinished",
+        "questionId": "0xa179036590de5daf19e748b6d52f16edef1ce6a1eec2ed82da971950fe32f305",
+        "requester": null,
+        "maxPrevious": null,
+        "reason": null,
+        "answer": null
+      }
+    },
+    {
+      "name": "reality-LogReopenQuestion",
+      "signature": "LogReopenQuestion(bytes32,bytes32)",
+      "topic0": "0x32e7d5617fb1be6bd0e7c3974d438d4514c4cf349e9330691d8abf6f6fd43121",
+      "capturedWith": "cast logs --rpc-url https://rpc.gnosischain.com --address 0xe78996a233895be74a66f451f1019ca9734205cc --from-block 48259756 --to-block 48309755 --json 0x32e7d5617fb1be6bd0e7c3974d438d4514c4cf349e9330691d8abf6f6fd43121 (captured 2026-10-03; first hit of a search over the last 2,000,000 blocks in 50,000-block steps)",
+      "stateCheck": {
+        "description": "Contract state at the log's block, read with cast call (independent of the event ABI): reopened_questions(topic2) returns topic1 and reopener_questions(topic1) is true, so topic1 is the NEW question id and topic2 the reopened (settled too soon) one.",
+        "reopened_questions(topic2)": "0x33c9bde0b7e3dcbd64b54ef13d44f4a96794469117c0511ed9658305b3fa81f9",
+        "reopener_questions(topic1)": true,
+        "isSettledTooSoon(topic2)": true
+      },
+      "header": {
+        "number": "48274679",
+        "hash": "0xf719c3a6a7c8eea1f961ae7d6b59df451fa96abd5d8ab6ee575ee00d5955faaf",
+        "timestamp": 1789536060
+      },
+      "log": {
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "topics": [
+          "0x32e7d5617fb1be6bd0e7c3974d438d4514c4cf349e9330691d8abf6f6fd43121",
+          "0x33c9bde0b7e3dcbd64b54ef13d44f4a96794469117c0511ed9658305b3fa81f9",
+          "0x230430343d3227421e89091a3c5ba57897f55e1f94565f0349a4f7ee99023971"
+        ],
+        "data": "0x",
+        "blockHash": "0xf719c3a6a7c8eea1f961ae7d6b59df451fa96abd5d8ab6ee575ee00d5955faaf",
+        "blockNumber": "0x2e09cf7",
+        "transactionHash": "0xd3b524d3097649569df733698c5cd3e3a63afd2d748c27e4535e1bef6bcd9d56",
+        "transactionIndex": "0x11",
+        "logIndex": "0x28",
+        "removed": false
+      },
+      "castDecodedData": [],
+      "expected": {
+        "chainId": 100,
+        "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+        "blockNumber": "48274679",
+        "blockHash": "0xf719c3a6a7c8eea1f961ae7d6b59df451fa96abd5d8ab6ee575ee00d5955faaf",
+        "blockTimestamp": 1789536060,
+        "transactionHash": "0xd3b524d3097649569df733698c5cd3e3a63afd2d748c27e4535e1bef6bcd9d56",
+        "logIndex": 40,
+        "kind": "RealityQuestionReopened",
+        "questionId": "0x33c9bde0b7e3dcbd64b54ef13d44f4a96794469117c0511ed9658305b3fa81f9",
+        "reopenedQuestionId": "0x230430343d3227421e89091a3c5ba57897f55e1f94565f0349a4f7ee99023971"
+      }
+    }
+  ],
+  "gaps": [
+    "No LogFundAnswerBounty, LogAnswerReveal or LogCancelArbitration log of the Gnosis Reality v3 contract exists in blocks 46,559,756..48,559,755 (searched 2026-10-03 with cast logs in 50,000-block steps). Their topic0s are verified against the deployed bytecode (topic0-verification.json) and their field order is covered only by the shared-ABI encode/decode round trip; the topic1 = question_id position the request plan relies on is pinned from the shared ABI in decode.test.ts."
+  ]
+}
