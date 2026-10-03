@@ -64,6 +64,23 @@ for (const k of [
  * Import redirections that depend on the importer (relative specifiers inside Prism and @pine/react),
  * which `resolve.alias` cannot express.
  */
+/**
+ * The artifact host rejects files containing a literal U+FFFD. micromark uses it on purpose (as the
+ * substitute for invalid characters) inside template literals; the escape sequence is equivalent there.
+ */
+function escapeReplacementChar(): Plugin {
+  return {
+    name: 'prism-share:escape-replacement-char',
+    apply: 'build',
+    // After minification: the minifier would turn the escape back into the literal character.
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type === 'chunk' && file.code.includes('\uFFFD')) file.code = file.code.replaceAll('\uFFFD', '\\uFFFD')
+      }
+    },
+  }
+}
+
 function prismOverrides(): Plugin {
   const layout = resolve(prismSrc, 'app/layout.tsx')
   const providersIndex = resolve(packages, 'react/src/providers/index.tsx')
@@ -91,7 +108,7 @@ function prismOverrides(): Plugin {
 export default defineConfig({
   root: here,
   base: './',
-  plugins: [prismOverrides(), react(), tailwindcss()],
+  plugins: [prismOverrides(), react(), tailwindcss(), escapeReplacementChar()],
   define,
   resolve: {
     alias: [
