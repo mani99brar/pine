@@ -1,26 +1,43 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { formatDate, getPolicy, POLICY_FAMILIES } from '@pine/core'
+import { connection } from 'next/server'
+import { formatDate, getPolicy, POLICY_FAMILIES, type PolicyVersion } from '@pine/core'
 import { COPY } from '@pine/core/copy'
+import { readPineEnv } from '@pine/data'
 import { FamilyIcon } from '@/components/icons'
 import { HashChip } from '@/components/ui/interactive'
 import { Container, Notice } from '@/components/ui/primitives'
 import { SafeMarkdown } from '@/components/ui/SafeMarkdown'
 import { FAMILY_VAR } from '@/lib/crystal'
+import { getPolicyServer } from '@/lib/server/data'
 import { PolicyClaims } from './PolicyClaims'
 
 type Params = { params: Promise<{ id: string }> }
 
+/** `api` mode: the backend's catalog entry (its digest is what claims pin), read per request; else the bundled one. */
+async function findPolicy(id: string, version?: string): Promise<PolicyVersion | null> {
+  if (readPineEnv().dataSource !== 'api') return getPolicy(id, version) ?? null
+  await connection()
+  return getPolicyServer(id, version)
+}
+
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
   const { id } = await params
-  const p = getPolicy(decodeURIComponent(id).split('@')[0] ?? id)
+  const [pid, version] = decodeURIComponent(id).split('@')
+  const p = await findPolicy(pid ?? id, version)
   if (!p) return { title: 'Policy not found', robots: { index: false } }
   return {
     title: `${p.id}@${p.version}: ${p.title}`,
     description: p.summary,
-    alternates: { canonical: `/policies/${p.id}`, types: { 'application/json': `/api/agent/v1/policies/${p.id}` } },
+    alternates: { canonical: `/policies/${p.id}`, types: { 'application/json': policyJsonPath(p.id, p.version) } },
   }
+}
+
+/** The policy's JSON alternate: the Pine backend's catalog route in `api` mode, else the app's agent route. */
+function policyJsonPath(id: string, version: string): string {
+  if (readPineEnv().dataSource !== 'api') return `/api/agent/v1/policies/${id}`
+  return `/api/v1/policies/${encodeURIComponent(id)}/${encodeURIComponent(version)}`
 }
 
 function Section({ title, items }: { title: string; items: string[] }) {
@@ -42,10 +59,10 @@ function Section({ title, items }: { title: string; items: string[] }) {
 export default async function PolicyPage({ params }: Params) {
   const { id } = await params
   const [pid, version] = decodeURIComponent(id).split('@')
-  const p = getPolicy(pid ?? id, version)
+  const p = await findPolicy(pid ?? id, version)
   if (!p) notFound()
   const fam = POLICY_FAMILIES.find((f) => f.id === p.family)
-  const gated = p.status !== 'enabled'
+  const gated = p.status === 'gated' || p.status === 'retired'
   return (
     <Container>
       <Link href="/policies" className="mt-6 inline-flex text-[0.875rem] text-lumen-3 hover:text-lumen">
@@ -63,8 +80,8 @@ export default async function PolicyPage({ params }: Params) {
         <p className="t-lead mt-4 max-w-[64ch]">{p.summary}</p>
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <HashChip value={p.contentHash} label="Content hash" />
-          <span className="text-[0.84375rem] text-lumen-3">Published {formatDate(p.publishedAt, 'short')}</span>
-          <span className="t-code text-[0.78rem] text-lumen-3">{p.uri}</span>
+          {p.publishedAt && <span className="text-[0.84375rem] text-lumen-3">Published {formatDate(p.publishedAt, 'short')}</span>}
+          {p.uri && <span className="t-code text-[0.78rem] text-lumen-3">{p.uri}</span>}
         </div>
         <div className="mt-6 flex flex-wrap gap-3">
           {gated ? (

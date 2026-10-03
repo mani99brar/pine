@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useClaims, useStats } from '@pine/react'
+import { useClaims, usePine, useStats } from '@pine/react'
 import { formatAmount } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { Constellation, ConstellationLegend } from '@/components/table/Constellation'
@@ -116,6 +116,8 @@ export function Endings() {
 }
 
 export function ForAgents({ siteUrl }: { siteUrl: string }) {
+  const { env } = usePine()
+  if (env.dataSource === 'api') return <ForAgentsBackend siteUrl={siteUrl} />
   const curl = `curl -s ${siteUrl}/api/agent/v1/claims?status=open | jq '.items[0].question'\ncurl -s ${siteUrl}/api/agent/v1/claims/pine-0009?format=md`
   return (
     <section className="py-16 sm:py-24" aria-labelledby="agents-title">
@@ -164,6 +166,66 @@ export function ForAgents({ siteUrl }: { siteUrl: string }) {
               <span className="text-lumen-3"># one claim as a Markdown brief</span>
               {'\n'}
               <span className="text-hb">curl</span> -s {siteUrl}/api/agent/v1/claims/pine-0009?format=md
+            </code>
+          </pre>
+          <p className="border-t border-edge px-4 py-3 text-[0.8125rem] text-lumen-3">{COPY.untrustedContent}</p>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/** `api` mode: the agent endpoints are the Pine backend's (same origin, public, cookie-free). */
+function ForAgentsBackend({ siteUrl }: { siteUrl: string }) {
+  const feed = `curl -s '${siteUrl}/api/v1/agents/claims?phase=evidence_open' | jq '.items[0].userSupplied.title'`
+  const one = `curl -s ${siteUrl}/api/v1/agents/claims/<market> | jq '.item.userSupplied.document'`
+  return (
+    <section className="py-16 sm:py-24" aria-labelledby="agents-title">
+      <div className="mx-auto grid w-full max-w-[1240px] gap-10 px-4 sm:px-6 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:px-8">
+        <div>
+          <h2 id="agents-title" className="t-h1 chroma">
+            Investigators and agents read the same claim
+          </h2>
+          <p className="t-lead mt-4 max-w-[52ch]">
+            Every claim is public as JSON: the pinned commit, deadlines, oracle state and evidence instructions written by Pine, apart from the creator&apos;s document, which is marked untrusted.
+          </p>
+          <ul className="mt-6 grid gap-2 text-[0.96875rem]">
+            <li>
+              <a className="link text-lumen-2" href="/llms.txt">
+                llms.txt
+              </a>
+            </li>
+            <li>
+              <a className="link text-lumen-2" href="/.well-known/pine.json">
+                .well-known/pine.json
+              </a>
+            </li>
+            <li>
+              <a className="link text-lumen-2" href="/api/v1/agents/claims">
+                Claim feed (JSON)
+              </a>
+            </li>
+            <li>
+              <a className="link text-lumen-2" href="/api/openapi.json">
+                OpenAPI document
+              </a>
+            </li>
+          </ul>
+        </div>
+        <div className="cut-xl well relative overflow-hidden">
+          <div className="flex items-center justify-between border-b border-edge px-4 py-2.5">
+            <p className="text-[0.8125rem] text-lumen-3">Terminal</p>
+            <CopyButton text={`${feed}\n${one}`} label="Copy commands" size="xs" variant="ghost" />
+          </div>
+          <pre className="t-code overflow-x-auto whitespace-pre px-4 py-4 text-lumen-2">
+            <code>
+              <span className="text-lumen-3"># claims open for evidence, first title</span>
+              {'\n'}
+              <span className="text-hb">curl</span> -s &apos;{siteUrl}/api/v1/agents/claims?phase=evidence_open&apos; | jq &apos;.items[0].userSupplied.title&apos;
+              {'\n\n'}
+              <span className="text-lumen-3"># one claim and its document, by market address</span>
+              {'\n'}
+              <span className="text-hb">curl</span> -s {siteUrl}/api/v1/agents/claims/&lt;market&gt; | jq &apos;.item.userSupplied.document&apos;
             </code>
           </pre>
           <p className="border-t border-edge px-4 py-3 text-[0.8125rem] text-lumen-3">{COPY.untrustedContent}</p>

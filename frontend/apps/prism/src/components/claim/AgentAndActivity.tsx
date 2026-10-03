@@ -1,24 +1,53 @@
 'use client'
 
 import { useMemo } from 'react'
-import type { ActivityItem, ClaimDetail } from '@pine/core'
+import type { ActivityItem, AgentClaimBrief, ClaimDetail } from '@pine/core'
 import { explorerTxUrl, formatDate, shortHash } from '@pine/core'
 import { briefToMarkdown, toAgentBrief } from '@pine/core/agent'
-import { useActivity } from '@pine/react'
+import { useActivity, usePine } from '@pine/react'
 import { CopyButton, HashChip } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/primitives'
 import { clientSiteUrl } from '@/lib/site-client'
 import { cn } from '@/lib/cn'
 
+const ADDRESS = /^0x[0-9a-fA-F]{40}$/
+const POLICY_ID = /^[A-Z]{2,8}-\d{3}$/
+const VERSION = /^\d+\.\d+\.\d+$/
+
+/** `api` mode: the claim's market address, which names it in the backend's agent routes. */
+function marketOf(claim: ClaimDetail): string | null {
+  const m = claim.marketAddress ?? claim.id
+  return ADDRESS.test(m) ? m.toLowerCase() : null
+}
+
+/** `api` mode links of a claim: the backend's agent view and policy route (the app's /api/agent routes do not exist). */
+function backendLinks(claim: ClaimDetail, site: string): { claimJson: string | null; policyUrl: string } {
+  const market = marketOf(claim)
+  const { id, version } = claim.policy
+  return {
+    claimJson: market ? `${site}/api/v1/agents/claims/${market}` : null,
+    policyUrl: POLICY_ID.test(id) && VERSION.test(version) ? `${site}/api/v1/policies/${id}/${version}` : `${site}/policies/${encodeURIComponent(id)}`,
+  }
+}
+
+function withBackendLinks(brief: AgentClaimBrief, links: { claimJson: string | null; policyUrl: string }): AgentClaimBrief {
+  return { ...brief, manifest: { ...brief.manifest, jsonUrl: links.claimJson ?? '' }, policy: { ...brief.policy, url: links.policyUrl } }
+}
+
 export function AgentBrief({ claim }: { claim: ClaimDetail }) {
   const site = clientSiteUrl()
+  const { env } = usePine()
+  const api = env.dataSource === 'api'
+  const links = useMemo(() => (api ? backendLinks(claim, site) : null), [api, claim, site])
   const md = useMemo(() => {
     try {
-      return briefToMarkdown(toAgentBrief(claim, { siteUrl: site }))
+      const brief = toAgentBrief(claim, { siteUrl: site })
+      return briefToMarkdown(links ? withBackendLinks(brief, links) : brief)
     } catch {
       return null
     }
-  }, [claim, site])
+  }, [claim, site, links])
+  if (links) return <BackendAgentBrief claim={claim} md={md} claimJson={links.claimJson} site={site} />
   const json = `${site}/api/agent/v1/claims/${claim.id}`
   const curl = `curl -s '${json}?format=md'`
   return (
@@ -56,6 +85,63 @@ export function AgentBrief({ claim }: { claim: ClaimDetail }) {
           </li>
           <li>
             <a className="link text-lumen-2" href="/agents">
+              How the agent API works
+            </a>
+          </li>
+        </ul>
+        <HashChip value={claim.manifestHash} label="Manifest hash" className="w-fit max-w-full" />
+      </div>
+    </div>
+  )
+}
+
+/** `api` mode: the Pine backend's agent view of this claim (public, cookie-free, same origin). */
+function BackendAgentBrief({ claim, md, claimJson, site }: { claim: ClaimDetail; md: string | null; claimJson: string | null; site: string }) {
+  const curl = claimJson ? `curl -s '${claimJson}' | jq '.item.userSupplied.document'` : `curl -s '${site}/api/v1/agents/claims?phase=evidence_open' | jq '.items[].platform.market'`
+  return (
+    <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      <div className="cut-xl well overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-edge px-4 py-2.5">
+          <p className="text-[0.8125rem] text-lumen-3">Investigation brief (Markdown)</p>
+          {md && <CopyButton text={md} label="Copy Markdown" size="xs" variant="ghost" />}
+        </div>
+        {md ? (
+          <pre className="t-code max-h-[26rem] overflow-auto whitespace-pre-wrap break-words px-4 py-4 text-[0.78rem] text-lumen-2">{md}</pre>
+        ) : (
+          <p className="px-4 py-4 text-lumen-3">The brief could not be built for this claim.</p>
+        )}
+      </div>
+      <div className="grid content-start gap-4">
+        <p className="text-[0.9375rem] text-lumen-2">
+          Agents and people read the same pinned terms. The Pine API serves this claim as JSON: platform facts apart from the creator&apos;s document, which is marked untrusted.
+        </p>
+        <div className="cut-md well p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[0.78rem] text-lumen-3">curl</p>
+            <CopyButton text={curl} label="Copy curl" size="xs" variant="ghost" />
+          </div>
+          <code className="t-code mt-1 block break-all text-[0.78rem] text-lumen">{curl}</code>
+        </div>
+        <ul className="grid gap-2 text-[0.9rem]">
+          {claimJson && (
+            <li>
+              <a className="link text-lumen-2" href={claimJson}>
+                Claim as JSON
+              </a>
+            </li>
+          )}
+          <li>
+            <a className="link text-lumen-2" href="/api/v1/schemas/claim-document.json">
+              Claim document schema
+            </a>
+          </li>
+          <li>
+            <a className="link text-lumen-2" href="/.well-known/pine.json">
+              Deployment and deadline rules
+            </a>
+          </li>
+          <li>
+            <a className="link text-lumen-2" href="/llms.txt">
               How the agent API works
             </a>
           </li>

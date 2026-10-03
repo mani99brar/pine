@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { SessionProvider } from 'next-auth/react'
+import { SessionContext, SessionProvider } from 'next-auth/react'
 import type { Session } from 'next-auth'
 import { WagmiProvider, type Config } from 'wagmi'
 import { QueryClient, QueryClientProvider, notifyManager, useQueryClient } from '@tanstack/react-query'
@@ -114,15 +114,12 @@ export function PineProviders(props: PineProvidersProps): React.JSX.Element {
   )
   const [queryClient] = useState(() => props.queryClient ?? createPineQueryClient())
 
-  // `api` mode: identity is the backend's SIWE session (usePineSession), not next-auth. The provider stays mounted
-  // for hooks that read it, initialised signed-out so it never calls /api/auth (which the backend owns).
+  // `api` mode: identity is the backend's SIWE session (usePineSession), not next-auth. Hooks that read next-auth get a
+  // fixed signed-out context, so nothing ever calls /api/auth (which the backend owns), not even after a dev remount.
   const apiMode = value.env.dataSource === 'api'
+  const SessionScope = apiMode ? SignedOutSession : SessionProvider
   return (
-    <SessionProvider
-      session={apiMode ? null : session}
-      refetchOnWindowFocus={!apiMode}
-      basePath={value.apiBase ? `${value.apiBase}/api/auth` : undefined}
-    >
+    <SessionScope session={apiMode ? null : session} basePath={value.apiBase ? `${value.apiBase}/api/auth` : undefined}>
       <WagmiProvider config={wagmiConfig}>
         <QueryClientProvider client={queryClient}>
           <RainbowKitProvider
@@ -138,8 +135,15 @@ export function PineProviders(props: PineProvidersProps): React.JSX.Element {
           </RainbowKitProvider>
         </QueryClientProvider>
       </WagmiProvider>
-    </SessionProvider>
+    </SessionScope>
   )
+}
+
+const SIGNED_OUT = { data: null, status: 'unauthenticated' as const, update: async () => null }
+
+/** next-auth's context, permanently signed out (api mode). */
+function SignedOutSession({ children }: { children: ReactNode; session?: Session | null; basePath?: string }): React.JSX.Element {
+  return <SessionContext.Provider value={SIGNED_OUT}>{children}</SessionContext.Provider>
 }
 
 export default PineProviders

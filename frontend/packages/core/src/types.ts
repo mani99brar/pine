@@ -156,6 +156,8 @@ export interface SourceRef {
   /** Required when the claim concerns a regression introduced relative to base */
   baseCommit?: { sha: string; htmlUrl: string }
   license?: string | null
+  /** Additive (api mode): branch whose history contains the commit, proving membership when there is no pull request */
+  branch?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -752,7 +754,15 @@ export interface ClaimDraft {
   spec: Partial<ClaimSpec>
   funding?: Partial<FundingInput>
   /** Persisted tx progress for recovery */
-  publication?: { steps: PublicationStep[]; manifestUri?: string; manifestHash?: Hex; marketAddress?: Address; claimId?: string }
+  publication?: {
+    steps: PublicationStep[]
+    manifestUri?: string
+    manifestHash?: Hex
+    marketAddress?: Address
+    claimId?: string
+    /** Additive (api mode): the backend draft this local draft is mirrored to, and its latest preview and publication */
+    backend?: { draftId: string; revision: number; previewId?: string; documentSha256?: Hex; publicationId?: string }
+  }
 }
 
 export interface LinkedWallet {

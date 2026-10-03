@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Page } from '@playwright/test'
 
 /** Values of the local stack (scripts/dev-stack/.state/frontend.env), overridable through the environment. */
@@ -26,7 +27,8 @@ function readEnvFile(path: string): Record<string, string> {
 }
 
 export function stackEnv(): StackEnv {
-  const file = readEnvFile(resolve(__dirname, '../../../../scripts/dev-stack/.state/frontend.env'))
+  const here = dirname(fileURLToPath(import.meta.url))
+  const file = readEnvFile(resolve(here, '../../../../../scripts/dev-stack/.state/frontend.env'))
   const get = (name: string, fallback: string) => process.env[name] ?? file[name] ?? fallback
   return {
     appOrigin: get('NEXT_PUBLIC_SITE_URL', 'http://localhost:3004'),

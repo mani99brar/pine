@@ -33,11 +33,11 @@ const store = {
   get: () => memory ?? readHidden(),
 }
 
-/** Persistent, dismissible demo-mode strip with the "fail the next transaction" reviewer control. */
+/** Persistent, dismissible demo-mode strip with the "fail the next transaction" reviewer control. Never in `api` mode. */
 export function DemoBanner() {
-  const { demo } = usePine()
+  const { demo, env } = usePine()
   const hidden = useSyncExternalStore(store.subscribe, store.get, () => false)
-  if (!demo || hidden) return null
+  if (!demo || env.dataSource === 'api' || hidden) return null
   return (
     <div className="relative z-[61] border-b border-edge bg-[#1c1512]">
       <span aria-hidden className="absolute inset-y-0 left-0 w-24 bg-[linear-gradient(90deg,rgba(255,182,72,0.22),transparent)]" />

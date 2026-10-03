@@ -20,3 +20,11 @@ export const getPolicyServer = cache(async (id: string, version?: string): Promi
     return null
   }
 })
+
+export const listPoliciesServer = cache(async (): Promise<PolicyVersion[]> => {
+  try {
+    return await provider().listPolicies()
+  } catch {
+    return []
+  }
+})

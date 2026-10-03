@@ -106,6 +106,13 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
     [manifest, publicClient, wallet.address, env.defaultChainId],
   )
 
+  // Another action (key): forget the plan loaded for the previous one.
+  useEffect(() => {
+    setPlan(null)
+    setPhase('idle')
+    setError(null)
+  }, [storeKey])
+
   // A plan stored by an earlier visit is shown only after it verifies again.
   useEffect(() => {
     const stored = readJson<StoredPlan>(storage, storeKey)
@@ -153,19 +160,22 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
   const run = useCallback(async () => {
     setError(null)
     try {
-      let current = plan
-      if (!current) {
+      const stored = readJson<StoredPlan>(storage, storeKey)
+      let current: TxPlan
+      if (stored?.wire && stored.planId) {
+        // Verified again on every run, against the wallet connected NOW (it may differ from when it was loaded).
+        current = await verify(stored.wire)
+      } else {
         setPhase('planning')
-        const stored = readJson<StoredPlan>(storage, storeKey)
         // The idempotency key is persisted BEFORE the request: a crash or reload retries with the same key.
         const idempotencyKey = stored?.idempotencyKey ?? newIdempotencyKey()
         writeJson(storage, storeKey, { ...stored, idempotencyKey } satisfies StoredPlan)
         const created = await specRef.current.create(idempotencyKey)
         current = await verify(created.wire)
         writeJson(storage, storeKey, { idempotencyKey, wire: created.wire, planId: created.planId } satisfies StoredPlan)
-        setPlan(current)
-        setPhase('verified')
       }
+      setPlan(current)
+      setPhase('verified')
       if (!manifest) throw new Error('This build has no Pine deployment configured, so it cannot verify transactions.')
       // Hand the verified steps to the machine now (the render-time sync happens a tick later).
       machine.setSteps(planToTxSteps(current, manifest))
@@ -174,7 +184,7 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
       setError(errorMessage(e))
       setPhase('error')
     }
-  }, [plan, storage, storeKey, verify, machine, manifest])
+  }, [storage, storeKey, verify, machine, manifest])
 
   const discard = useCallback(() => {
     removeKey(storage, storeKey)

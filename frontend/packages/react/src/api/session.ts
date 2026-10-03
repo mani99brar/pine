@@ -87,8 +87,11 @@ function requireApi(api: PineApiClient | null): PineApiClient {
   return api
 }
 
-/** Query keys that hold per-user data; cleared whenever the signed-in identity changes. */
-const USER_KEYS = new Set(['session', 'account', 'drafts', 'draft', 'github', 'notifications', 'portfolio', 'plans'])
+/**
+ * Query keys that hold per-user data; removed whenever the signed-in identity changes. The session query itself is
+ * overwritten with setQueryData instead: removing it would leave mounted observers on the old value.
+ */
+const USER_KEYS = new Set(['account', 'drafts', 'draft', 'github', 'notifications', 'portfolio', 'plans'])
 
 export interface PineSessionState {
   /** `disabled` outside `api` mode. */
