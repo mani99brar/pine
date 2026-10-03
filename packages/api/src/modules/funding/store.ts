@@ -8,8 +8,9 @@ import { canonicalJson, type JsonValue } from "@pine/shared/canonical";
 import type { DeploymentManifest } from "@pine/shared/deployment";
 import { newPlan, planToWire, PlanVerificationError, verifyPlan, type PlanContext, type TxStep, type WireTxPlan } from "@pine/shared/tx-plan";
 import type { Address } from "@pine/shared/types";
-import type { AppContext, ComplianceAction, SessionInfo } from "../../contracts/app.js";
+import type { AppContext, AuditEntry, ComplianceAction, SessionInfo } from "../../contracts/app.js";
 import { ApiError } from "../../contracts/errors.js";
+import { flushAuditInBackground, queueAuditFrom } from "./audit.js";
 import { assertReadModelReady, FUNDING_PLAN_LIMITS, HOUR, MINUTE, sessionOf } from "./common.js";
 import { fromMs, msOf, one, rows, sql, ts, type Executor } from "./db.js";
 
@@ -156,11 +157,12 @@ export async function listOwnedPlans(db: Executor, userId: string, before: { cre
 
 /**
  * Inserts the plan and its steps in one atomic statement. Returns the stored plan: the new one, or on a key conflict
- * the winner's (the caller compares body hashes); `created` is true only when this statement inserted it.
+ * the winner's (the caller compares body hashes); `created` is true only when this statement inserted it. With
+ * `audit`, the same statement queues the entry in the audit outbox, only when the plan was inserted (SEC-OPS-07).
  */
 export async function insertPlan(
   db: Executor,
-  input: { id: string; userId: string; route: string; key: string; bodyHash: string; kind: PlanKind; market: Address; account: Address; wire: WireTxPlan; details: JsonValue; now: Date; expiresAt: Date },
+  input: { id: string; userId: string; route: string; key: string; bodyHash: string; kind: PlanKind; market: Address; account: Address; wire: WireTxPlan; details: JsonValue; now: Date; expiresAt: Date; audit?: AuditEntry },
 ): Promise<{ stored: StoredPlan; created: boolean }> {
   const steps = input.wire.steps.map((step, position) => ({ step_id: step.id, position }));
   const inserted = await rows<{ id: string }>(
@@ -175,7 +177,7 @@ export async function insertPlan(
           INSERT INTO funding_plan_steps (plan_id, step_id, position)
           SELECT inserted.id, s.step_id, s.position FROM inserted CROSS JOIN jsonb_to_recordset(${JSON.stringify(steps)}::jsonb) AS s(step_id text, position int)
           RETURNING plan_id
-        )
+        )${input.audit ? sql`, queued AS (${queueAuditFrom(sql`inserted`, input.audit, input.now)})` : sql``}
         SELECT id::text AS id FROM inserted`,
   );
   const stored = await findPlanByKey(db, input.userId, input.route, input.key);
@@ -199,7 +201,8 @@ export interface BuiltPlan {
  * The common plan-creating flow (PRD-04 sections 1 and 4b): session, Idempotency-Key, compliance, same-key lookup
  * (same body: the stored plan; different body: 409), readiness (NOT_READY), quota, build, verifyPlan, atomic insert.
  * A replay therefore needs no fresh read model and no quota; a NOT_READY refusal burns no quota; an exhausted quota
- * makes no chain read. Only the request that actually inserted the plan writes the audit entry (SEC-OPS-07).
+ * makes no chain read. Only the request that actually inserted the plan queues the audit entry (SEC-OPS-07), in the
+ * insert statement itself; an audit flush is started (not awaited) after the insert and on every same-key replay.
  */
 export async function createPlan(input: {
   ctx: AppContext;
@@ -219,6 +222,7 @@ export async function createPlan(input: {
   const existing = await findPlanByKey(ctx.db, session.userId, route, key);
   if (existing) {
     if (existing.bodyHash !== bodyHash) throw new ApiError("CONFLICT", "This Idempotency-Key was already used with a different request body");
+    flushAuditInBackground(ctx, request.log);
     return toView(existing);
   }
   await assertReadModelReady(ctx);
@@ -234,7 +238,7 @@ export async function createPlan(input: {
     throw error;
   }
   const ttl = Math.min(PLAN_TTL_SECONDS[kind], MAX_PLAN_TTL_SECONDS);
-  const { stored, created } = await insertPlan(ctx.db, {
+  const { stored } = await insertPlan(ctx.db, {
     id: planId,
     userId: session.userId,
     route,
@@ -247,17 +251,17 @@ export async function createPlan(input: {
     details: built.details,
     now,
     expiresAt: new Date(now.getTime() + ttl * 1000),
-  });
-  if (created) {
-    await ctx.audit.record({
+    audit: {
       actorUserId: session.userId,
       action: "funding.plan.created",
       subjectType: "funding_plan",
       subjectId: planId,
       details: { route, kind, market: built.market, steps: plan.steps.length },
       ip: auditIp(request),
-    });
-  }
+    },
+  });
+  // The inserted plan's queued entry, or (a lost race returns the winner's plan, a replay) whatever an outage left.
+  flushAuditInBackground(ctx, request.log);
   if (stored.bodyHash !== bodyHash) throw new ApiError("CONFLICT", "This Idempotency-Key was already used with a different request body");
   return toView(stored);
 }
@@ -265,7 +269,8 @@ export async function createPlan(input: {
 /**
  * Records a reported transaction hash for a step (idempotent; at most 8 per step) and moves the plan
  * planned -> submitted. Terminal plans are returned unchanged. Owner only: anything else is NOT_FOUND. Only a NEW
- * {stepId, txHash} is audited; a repeated identical hint is an idempotent replay and writes no audit entry (PRD-04 4b).
+ * {stepId, txHash} is audited (queued in the audit outbox by the append statement itself; a flush is then started, not awaited); a repeated
+ * identical hint is an idempotent replay and writes no audit entry (PRD-04 4b).
  */
 export async function recordSubmitted(ctx: AppContext, request: FastifyRequest, userId: string, planId: string, stepId: string, txHash: string): Promise<PlanView> {
   const plan = await findOwnedPlan(ctx.db, userId, planId);
@@ -276,15 +281,19 @@ export async function recordSubmitted(ctx: AppContext, request: FastifyRequest, 
   if (plan.state !== "planned" && plan.state !== "submitted") return toView(plan);
   const now = ctx.clock.now();
   if (!step.txHashes.includes(hash)) {
+    const reported: AuditEntry = { actorUserId: userId, action: "funding.plan.tx_reported", subjectType: "funding_plan", subjectId: planId, details: { stepId, txHash: hash }, ip: auditIp(request) };
     const appended = await rows(
       ctx.db,
-      sql`UPDATE funding_plan_steps SET tx_hashes = array_append(tx_hashes, ${hash}::text)
-          WHERE plan_id = ${planId}::uuid AND step_id = ${stepId} AND NOT (${hash}::text = ANY(tx_hashes)) AND cardinality(tx_hashes) < ${MAX_TX_HASHES_PER_STEP}
-          RETURNING step_id`,
+      sql`WITH appended AS (
+            UPDATE funding_plan_steps SET tx_hashes = array_append(tx_hashes, ${hash}::text)
+            WHERE plan_id = ${planId}::uuid AND step_id = ${stepId} AND NOT (${hash}::text = ANY(tx_hashes)) AND cardinality(tx_hashes) < ${MAX_TX_HASHES_PER_STEP}
+            RETURNING step_id
+          ), queued AS (
+            ${queueAuditFrom(sql`appended`, reported, now)}
+          )
+          SELECT step_id FROM appended`,
     );
-    if (appended.length > 0) {
-      await ctx.audit.record({ actorUserId: userId, action: "funding.plan.tx_reported", subjectType: "funding_plan", subjectId: planId, details: { stepId, txHash: hash }, ip: auditIp(request) });
-    } else {
+    if (appended.length === 0) {
       const again = await findOwnedPlan(ctx.db, userId, planId);
       if (!again?.steps.find((item) => item.id === stepId)?.txHashes.includes(hash)) {
         throw new ApiError("CONFLICT", `A step accepts at most ${MAX_TX_HASHES_PER_STEP} reported transaction hashes`);
@@ -292,6 +301,7 @@ export async function recordSubmitted(ctx: AppContext, request: FastifyRequest, 
     }
   }
   await rows(ctx.db, sql`UPDATE funding_plans SET state = 'submitted', updated_at = ${ts(now)} WHERE id = ${planId}::uuid AND state = 'planned' RETURNING id`);
+  flushAuditInBackground(ctx, request.log);
   const updated = await findOwnedPlan(ctx.db, userId, planId);
   if (!updated) throw new ApiError("NOT_FOUND", "Plan not found");
   return toView(updated);

@@ -149,3 +149,55 @@ after moving the clock, because expiry is decided only while it is fresh.
 | Operator clarification 4: range narrower than one tick spacing → VALIDATION_FAILED | ladder.test.ts › "refuses a range narrower than one tick spacing with VALIDATION_FAILED (operator clarification 4)"; math.test.ts › "refuses a range narrower than one tick spacing (operator clarification 4)" |
 | Operator clarification 5: approval exactly S; residual allowance ≤ 10 wei disclosed | ladder.test.ts › "missing pool, YES = token0: …" (approve args [NPM, S]; residualAllowance /10 wei/) |
 | Operator security fix (markets-002, P1): every BigInt refinement guarded by `isUintString` (zod 4 runs refinements after a failed regex) | ladder.test.ts › "malformed budgetWei (\"abc\", \"1.5\", \"-1\", \"\", 79 digits) is 400 VALIDATION_FAILED, never 500, with or without a session"; exits.test.ts › "merge amount: \"abc\", \"1.5\", \"-1\", \"\" and 79 digits are VALIDATION_FAILED with or without a session; no plan is stored"; "withdraw tokenId: …" (same) |
+
+## PRD-07 sections 3, 3c and 3d — api-hardening (funding)
+
+Each row names the test that fails when the behaviour is removed; "Mutation" is the change that was applied to production
+code, run against the named tests (`hardening.test.ts` filtered by test name, one worker, JSON reporter) and reverted;
+every one listed was killed: EACH named test of the row failed under it, and the same tests passed unmutated (baseline
+run). Ids F1..F18 are those of the hardening-a-003 mutation run (F1..F15 keep their hardening-a-002 meaning and were
+re-run; F16..F18 are new). Since PRD-07 the 4b audit
+entries are queued in `funding_audit_outbox` by the audited statement itself and recorded by `flushAudit` (`audit.ts`);
+the 4b audit tests above are unchanged and still pass.
+
+| Requirement | Test file › test name | Mutation (killed) |
+|---|---|---|
+| funding.reconcile checks `signal.aborted` between plans: abort before the run starts no plan (no receipt read, no `reconciled_at`) | hardening.test.ts › "an abort before the run starts no plan: no confirmation, no reconciled_at, no receipt read" (through the registered job, `job.run(ctx, signal)`) | F1: delete `if (signal?.aborted) return;` in `reconcileOnce` |
+| Abort during a batch: the plan in progress finishes, the second is untouched | hardening.test.ts › "an abort during the first plan finishes that plan and leaves the second untouched" (abort from the first scripted receipt; registered job) | F1 |
+| A step CAS that returns no row because another run confirmed the step: re-read and count it confirmed; a partial execution is never `expired` with confirmedSteps 0 | hardening.test.ts › "a step confirmed by another run between read and CAS counts as confirmed: the partial execution is failed, not expired" (confirmation injected inside `eth_getTransactionByHash`) | F2: the re-read short-circuited to false |
+| SEC-OPS-07 outbox: an outage keeps the row; the next write records it once and deletes it | hardening.test.ts › "SEC-OPS-07 an audit outage keeps the plan-created entry in the outbox; the next write records it exactly once" | F3: delete the flush in `recordSubmitted` |
+| 3d SEC-OPS-07 atomicity, plan insert: the `funding.plan.created` outbox INSERT is a CTE of the plan INSERT (`queued` on `inserted` in `insertPlan`); when it fails the request fails and neither the plan nor its steps are committed | hardening.test.ts › "SEC-OPS-07 a plan insert whose outbox INSERT fails is refused and commits no plan and no step" (outbox INSERTs made to fail with `ALTER TABLE funding_audit_outbox ADD CONSTRAINT outbox_fail CHECK (false) NOT VALID`, dropped in `finally`) | F16: the outbox INSERT as a separate statement after the plan insert |
+| 3d atomicity, hint append: the `tx_reported` outbox INSERT is a CTE of the `appended` UPDATE; when it fails the request fails, no hash is appended and the plan stays `planned` | hardening.test.ts › "SEC-OPS-07 a tx-hash hint whose outbox INSERT fails is refused: no hash appended, the plan stays planned" | F17: the outbox INSERT as a separate statement after the append |
+| 3d atomicity, reconcile transition (one `transition` statement for confirmed, failed and expired): when the outbox INSERT fails the CAS is not committed and the next run moves and audits the plan | hardening.test.ts › "SEC-OPS-07 a confirmed transition whose outbox INSERT fails is not committed; the next run confirms and audits it"; › "SEC-OPS-07 an expired transition whose outbox INSERT fails is not committed; the next run expires and audits it" (`failed` is the same `transition` call as `expired`, only `next` differs) | F18: the outbox INSERT as a separate statement after the CAS; F6 |
+| Flush on a same-key replay | hardening.test.ts › "SEC-OPS-07 a same-key replay flushes an entry left by an outage" | F4: delete the flush on the replay path of `createPlan` |
+| Flush at the START of every reconcile run, before the "no open plans" early return | hardening.test.ts › "SEC-OPS-07 a reconcile run with no open plans flushes an entry left by an outage" | F5: delete the flush at the start of `reconcileOnce` |
+| Several pending entries of one plan (created, 4 tx_reported, confirmed) survive an outage and are recorded once each, details unchanged | hardening.test.ts › "SEC-OPS-07 several pending entries of one plan (created, tx_reported, confirmed) all survive an outage" (also killed by the two 3d transition tests) | F6: the transition statement without its `queued` CTE |
+| `flushAudit` checks `signal.aborted` before each entry: an abort between entries leaves the unrecorded rows | hardening.test.ts › "SEC-OPS-07 an abort between entries leaves the unrecorded rows in the outbox" | F7: delete `if (signal?.aborted) return;` in `drain` |
+| 3c single-flight: one in-flight flush per module and database handle; a call while it runs sets the coalesced rerun flag and drains again before the shared promise settles | hardening.test.ts › "SEC-OPS-07 single-flight: a flush called while one is recording drains again; both entries are recorded once when it resolves" | F8: delete `running.rerun = true` |
+| 3c the single-flight entry is cleared in `finally`: a rejected drain never wedges later flushes | hardening.test.ts › "SEC-OPS-07 a drain that rejects clears the single-flight entry: the next flush still records the pending entry" | F9: clear the entry only after a fulfilled drain |
+| 3c request path: audited writes start the flush without awaiting it; a slow or stuck audit store never delays the response | hardening.test.ts › "SEC-OPS-07 an audit store that never resolves does not delay the plan response; the committed row is recorded later" (raw inject; a 5 s race) | F10: `await flushAudit(ctx)` after the plan insert |
+| 3c request path: a failing background flush never fails the response; the error is logged through the redactor | hardening.test.ts › "SEC-OPS-07 a failing background flush never fails the response and is logged redacted" | F15: log `String(error)` instead of `safeErrorMessage(error, ctx.redact)` |
+| 3c test-harness rule: `buildLaneTestApp` wraps `app.inject` so every response waits for the module's in-flight flush (`settledAudit`, no further drain); `rawInject` bypasses it | the 4b exact-match audit tests (`ladder.test.ts`, `reconcile.test.ts`, …) pass unchanged | test support, not production behaviour |
+| `ctx.audit` is record-only; never cast or duck-typed | code: `audit.ts` calls only `ctx.audit.record` | review |
+| `GET /api/v1/markets/:market/liquidity`: own limiter (4 in flight per process, checked after the 30 s cache); a 5th concurrent miss is 429 RATE_LIMITED with Retry-After at once, never queued; a refused call caches nothing | hardening.test.ts › "caps concurrent cache misses at 4: a 5th is 429 RATE_LIMITED at once, never queued, and caches nothing" | F11: call `readLiquidity` without the limiter |
+| 3c separate limiters: with the 4 liquidity slots held the positions route still gets a slot, and the reverse | hardening.test.ts › "four liquidity misses holding every liquidity slot leave the positions route its own slot"; › "four positions misses holding every positions slot leave the liquidity route its own slot" | F12: both routes take one shared limiter |
+| History items show reconciled plan state, step states and confirmedTxHash | hardening.test.ts › "items carry the reconciled plan state, step states and confirmedTxHash" (a confirmed and a failed plan) | F13: `confirmedTxHash: null`; F14: every step `pending` |
+
+Outbox atomicity (3d): every audited write's outbox INSERT is part of the write's own SQL statement (a data-modifying CTE),
+so the write and its pending entry commit or fail together. A separate statement after the write is the only placement
+that can lose an entry; F16..F18 apply exactly that and are killed. No production change was needed for 3d.
+
+At-least-once audit: a crash between `record` and the outbox `DELETE`, or a flusher in another API process, can only
+duplicate an entry, never lose one. Natural keys for de-duplication: (action, subjectId) for `funding.plan.created`,
+`.confirmed`, `.failed`, `.expired`, and (action, subjectId, details.stepId, details.txHash) for `funding.plan.tx_reported`.
+A `record` failure stops the flush with the row kept. Flushes start (not awaited) after each audited write on the request
+path (and every hint request), on a same-key replay (and a lost insert race, which returns the winner's plan), and are
+awaited at the start of every reconcile run and after each reconcile transition; each drain reads at most 50 entries.
+
+Accepted (PRD-07 3c): outbox rows hold the request IP until flushed (bounded by the flush cadence) and are deletable by
+`pine_api` until flushed (inherent in the outbox design). The operator-settled choices this lane keeps are listed in
+`../markets/COVERAGE.md` (PRD-07 sections 3, 3c and 3d); they apply to this module unchanged.
+
+Not covered by an executed check (PRD-07): cross-process duplicate entries and a crash between `record` and `DELETE`
+(accepted at-least-once, not exercised); a rejected flush at the start of a reconcile run (an unexpected failure; it
+propagates and the platform logs and retries the job; not exercised); the liquidity and positions limiters are per process.

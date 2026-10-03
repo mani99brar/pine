@@ -2,11 +2,15 @@
 // A step is confirmed when one of its reported hashes has a successful receipt at or below the finalized block and the
 // transaction itself (to, from, input, value) equals the stored step; evidence commit/publish and submitAnswer steps may
 // instead be confirmed from read-model facts. Unconfirmed plans become expired (nothing confirmed) or failed (partial)
-// one hour after their expiry, decided only while the read model is fresh.
+// one hour after their expiry, decided only while the read model is fresh AND finalizedBlock() succeeded in this run
+// (otherwise a missing receipt may just be unseen yet). Every transition queues its audit entry in the outbox by the
+// same statement; the outbox is flushed after each transition and at the start of every run. The run checks its abort
+// signal between plans: an aborted run starts no further plan.
 
 import { TransactionNotFoundError, TransactionReceiptNotFoundError } from "viem";
 import type { Address, Hex32 } from "@pine/shared/types";
-import type { AppContext, JobDefinition } from "../../contracts/app.js";
+import type { AppContext, AuditEntry, JobDefinition } from "../../contracts/app.js";
+import { flushAudit } from "./audit.js";
 import { freshness, nowSeconds, type MarketsState } from "./common.js";
 import { one, rows, sql, ts } from "./db.js";
 import { EXPIRY_GRACE_SECONDS, planColumns, READ_MODEL_CONFIRMABLE, stepsOf, toPlanRow, transitionPlan, type PlanRow, type StepRow } from "./plans.js";
@@ -94,7 +98,7 @@ async function confirmedByTransaction(ctx: AppContext, plan: PlanRow, step: Step
   return null;
 }
 
-async function reconcileOne(ctx: AppContext, plan: PlanRow, context: { finalized: bigint | null; fresh: boolean }): Promise<Outcome> {
+async function reconcileOne(ctx: AppContext, plan: PlanRow, context: { finalized: bigint | null; fresh: boolean }, signal: AbortSignal | undefined): Promise<Outcome> {
   const now = ctx.clock.now();
   for (const step of await stepsOf(ctx.db, plan.id)) {
     if (step.state === "confirmed") continue;
@@ -111,17 +115,17 @@ async function reconcileOne(ctx: AppContext, plan: PlanRow, context: { finalized
   }
   const steps = await stepsOf(ctx.db, plan.id);
   const confirmedCount = steps.filter((step) => step.state === "confirmed").length;
-  const audit = (action: string, details: Record<string, unknown>) =>
-    ctx.audit.record({ actorUserId: null, action, subjectType: "markets_plan", subjectId: plan.id, details, ip: null });
+  const audit = (action: string, details: Record<string, unknown>): AuditEntry => ({ actorUserId: null, action, subjectType: "markets_plan", subjectId: plan.id, details, ip: null });
   if (steps.length > 0 && confirmedCount === steps.length) {
-    const moved = await transitionPlan(ctx.db, plan.id, ["planned", "submitted"], "confirmed", now);
-    if (moved) await audit("markets.plan.confirmed", { from: plan.state, kind: plan.kind });
+    const moved = await transitionPlan(ctx.db, plan.id, ["planned", "submitted"], "confirmed", now, audit("markets.plan.confirmed", { from: plan.state, kind: plan.kind }));
+    if (moved) await flushAudit(ctx, signal);
     return moved ? "confirmed" : "unchanged";
   }
-  if (context.fresh && nowSeconds(ctx) > plan.expiresAt + EXPIRY_GRACE_SECONDS) {
+  // Without a finalized block in this run, a missing receipt proves nothing: no expiry decision (PRD-07 section 3).
+  if (context.fresh && context.finalized !== null && nowSeconds(ctx) > plan.expiresAt + EXPIRY_GRACE_SECONDS) {
     const to = confirmedCount > 0 ? "failed" : "expired";
-    const moved = await transitionPlan(ctx.db, plan.id, ["planned", "submitted"], to, now);
-    if (moved) await audit(`markets.plan.${to}`, { from: plan.state, kind: plan.kind, confirmedSteps: confirmedCount, steps: steps.length });
+    const moved = await transitionPlan(ctx.db, plan.id, ["planned", "submitted"], to, now, audit(`markets.plan.${to}`, { from: plan.state, kind: plan.kind, confirmedSteps: confirmedCount, steps: steps.length }));
+    if (moved) await flushAudit(ctx, signal);
     return moved ? to : "unchanged";
   }
   return "unchanged";
@@ -129,6 +133,8 @@ async function reconcileOne(ctx: AppContext, plan: PlanRow, context: { finalized
 
 export async function reconcilePlans(ctx: AppContext, _state: MarketsState, signal?: AbortSignal): Promise<Record<Outcome | "errors", number>> {
   const counts: Record<Outcome | "errors", number> = { confirmed: 0, expired: 0, failed: 0, unchanged: 0, errors: 0 };
+  // Entries left by an audit outage are recorded first, whether or not any plan is open.
+  await flushAudit(ctx, signal);
   const fresh = !(await freshness(ctx)).stale;
   let finalized: bigint | null;
   try {
@@ -144,7 +150,7 @@ export async function reconcilePlans(ctx: AppContext, _state: MarketsState, sign
     if (signal?.aborted) break;
     const plan = toPlanRow(raw);
     try {
-      counts[await reconcileOne(ctx, plan, { finalized, fresh })] += 1;
+      counts[await reconcileOne(ctx, plan, { finalized, fresh }, signal)] += 1;
     } catch {
       // Transient (RPC, read model): the plan stays as it is and the next run retries it.
       counts.errors += 1;

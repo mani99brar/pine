@@ -1,22 +1,37 @@
 // Public evidence browsing (PRD-04 section 2.2, SEC-EVID-09/11/15, SEC-IDX-07): read-model submissions joined with
 // locally stored manifests, timeliness from the frozen deadline operators, availability and moderation. A listing never
 // triggers a remote fetch (`stored` is a local `has`); `retrievable` (content-addressed gateway read by digest) is
-// computed only on the detail route and cached for 10 minutes. Nothing is ever fetched from a URL inside a manifest.
+// computed only on the detail route and cached for 10 minutes, behind its own fan-out limiter. Nothing is ever fetched
+// from a URL inside a manifest. SEC-EVID-11: the listing cache holds only the read-model page (ids and on-chain fields);
+// moderation states and manifests are computed at serve time for every response, and every evidence response is sent
+// with Cache-Control: no-store, so a block applies to the next response.
 
 import { z } from "zod";
 import { rawCidFromSha256 } from "@pine/shared/canonical";
 import { EVIDENCE_MANIFEST_MAX_BYTES, parseEvidenceManifestBytes, type EvidenceManifest } from "@pine/shared/evidence";
-import type { ClaimRecord, EvidenceRecord } from "@pine/shared/read-model";
+import type { ClaimRecord, EvidenceRecord, Page } from "@pine/shared/read-model";
 import type { Address, Hex32 } from "@pine/shared/types";
 import type { AppContext, ModerationState } from "../../contracts/app.js";
 import { ApiError } from "../../contracts/errors.js";
-import { addressParam, CONTENT_TRUST, cursorParam, freshness, isoSeconds, nowSeconds, PUBLIC_ROUTE, requireClaim, sendPublic, withCursor, type MarketsRouteDeps, type MarketsState } from "./common.js";
+import { addressParam, CONTENT_TRUST, cursorParam, freshness, type Freshness, isoSeconds, nowSeconds, PUBLIC_ROUTE, requireClaim, sendPublic, withCursor, type MarketsRouteDeps, type MarketsState } from "./common.js";
 
 export const RETRIEVABLE_CACHE_SECONDS = 600;
 /** Public listings are cached per (market, status, cursor) for 10 s on the server (PRD-04 4b), bounded in entries. */
 export const EVIDENCE_LIST_CACHE_SECONDS = 10;
 export const EVIDENCE_LIST_CACHE_ENTRIES = 2_048;
 const LISTING_LIMIT = 50;
+/** Concurrent `retrievable` cache misses that may reach the content store's gateways (per process); the next is 429. */
+export const RETRIEVE_MAX_IN_FLIGHT = 4;
+export const RETRIEVE_RETRY_AFTER_SECONDS = 2;
+/** Responses with moderated, untrusted content are never kept by shared or browser caches (SEC-EVID-11). */
+const NO_STORE = "no-store";
+
+/** What the listing cache holds: read-model data only (the claim, the page and its freshness), never rendered output. */
+interface CachedListing {
+  claim: ClaimRecord;
+  page: Page<EvidenceRecord>;
+  freshness: Freshness;
+}
 
 export const ERC1497_DESCRIPTION =
   "Evidence submitted to the Pine EvidenceRegistry on Gnosis Chain. The file is the submitter's evidence manifest (urn:pine:evidence-manifest:v1); " +
@@ -103,17 +118,22 @@ async function submissionView(ctx: AppContext, record: EvidenceRecord, claim: Cl
   };
 }
 
-/** Detail-route availability through the content store (local, then trusted gateways by digest), cached 10 minutes. */
+/**
+ * Detail-route availability through the content store (local, then trusted gateways by digest), cached 10 minutes. A
+ * cache miss takes a slot of the route's own limiter; the limiter wraps the whole read OUTSIDE the error conversion, so
+ * a refused miss is a 429 and writes nothing to the cache (never a false `retrievable: false`).
+ */
 async function retrievable(ctx: AppContext, state: MarketsState, sha256: Hex32): Promise<boolean> {
   const now = nowSeconds(ctx);
   const cached = state.retrievableCache.get(sha256);
   if (cached && cached.until > now) return cached.value;
-  let value: boolean;
-  try {
-    value = (await ctx.contentStore.retrieve(sha256, EVIDENCE_MANIFEST_MAX_BYTES)) !== null;
-  } catch {
-    value = false;
-  }
+  const value = await state.retrieveFanOut.run(async () => {
+    try {
+      return (await ctx.contentStore.retrieve(sha256, EVIDENCE_MANIFEST_MAX_BYTES)) !== null;
+    } catch {
+      return false;
+    }
+  });
   if (state.retrievableCache.size > 10_000) state.retrievableCache.clear();
   state.retrievableCache.set(sha256, { value, until: now + RETRIEVABLE_CACHE_SECONDS });
   return value;
@@ -149,12 +169,17 @@ export function registerEvidenceBrowseRoutes({ app, ctx, state }: MarketsRouteDe
       const { status, cursor } = request.query;
       const now = nowSeconds(ctx);
       const cacheKey = `${request.params.market}:${status ?? ""}:${cursor ?? ""}`;
-      const cached = state.evidenceCache.get(cacheKey, now);
-      if (cached !== undefined) return sendPublic(request, reply, cached);
-      const claim = await requireClaim(ctx, state, request.params.market);
-      const page = await withCursor(() =>
-        ctx.readModel.listEvidence({ market: claim.market, limit: LISTING_LIMIT, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) }),
-      );
+      let listing = state.evidenceCache.get(cacheKey, now) as CachedListing | undefined;
+      if (listing === undefined) {
+        const claim = await requireClaim(ctx, state, request.params.market);
+        const page = await withCursor(() =>
+          ctx.readModel.listEvidence({ market: claim.market, limit: LISTING_LIMIT, ...(status ? { status } : {}), ...(cursor ? { cursor } : {}) }),
+        );
+        listing = { claim, page, freshness: await freshness(ctx) };
+        state.evidenceCache.set(cacheKey, listing, now);
+      }
+      const { claim, page } = listing;
+      // Serve time: moderation and manifests are never taken from the cache (SEC-EVID-11).
       const moderation = await moderationOf(ctx, page.items);
       const items = [];
       for (const record of page.items) {
@@ -169,11 +194,10 @@ export function registerEvidenceBrowseRoutes({ app, ctx, state }: MarketsRouteDe
         revealDeadline: claim.revealDeadline,
         items,
         nextCursor: page.nextCursor,
-        freshness: await freshness(ctx),
+        freshness: listing.freshness,
         contentTrust: CONTENT_TRUST,
       };
-      state.evidenceCache.set(cacheKey, body, now);
-      return sendPublic(request, reply, body);
+      return sendPublic(request, reply, body, NO_STORE);
     },
   );
 
@@ -186,7 +210,7 @@ export function registerEvidenceBrowseRoutes({ app, ctx, state }: MarketsRouteDe
     return sendPublic(request, reply, {
       submission: { ...view, availability: { ...view.availability, retrievable: isRetrievable, retrievableCachedForSeconds: RETRIEVABLE_CACHE_SECONDS } },
       freshness: await freshness(ctx),
-    });
+    }, NO_STORE);
   });
 
   app.get("/api/v1/markets/:market/evidence/:registry/:submissionId/erc1497.json", { config: PUBLIC_ROUTE, schema: { params: submissionParams } }, async (request, reply) => {
@@ -219,6 +243,6 @@ export function registerEvidenceBrowseRoutes({ app, ctx, state }: MarketsRouteDe
       },
       title,
       contentTrust: CONTENT_TRUST,
-    });
+    }, NO_STORE);
   });
 }

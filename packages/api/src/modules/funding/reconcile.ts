@@ -4,11 +4,14 @@
 // (sessions are EOA-only; speed-ups and replacements keep the calldata). Unconfirmed plans become `expired` (no step
 // confirmed) or `failed` (partial execution) once expires_at + 1 h has passed, decided only while the read model is
 // fresh and finalizedBlock() succeeded in this run (PRD-04 4b): otherwise a missing receipt may just be unseen yet.
-// Every plan transition that wins its compare-and-set writes exactly one audit entry (SEC-OPS-07); a lost race none.
+// Every plan transition that wins its compare-and-set queues exactly one audit entry in the audit outbox by the same
+// statement (SEC-OPS-07); a lost race none. The outbox is flushed after each transition and at the start of every run.
+// The run checks its abort signal between plans: an aborted run starts no further plan.
 
 import { z } from "zod";
 import { planFromWire, type TxPlan, type TxStep } from "@pine/shared/tx-plan";
-import type { AppContext, JobDefinition } from "../../contracts/app.js";
+import type { AppContext, AuditEntry, JobDefinition } from "../../contracts/app.js";
+import { flushAudit, queueAuditFrom } from "./audit.js";
 import { readModelFreshness } from "./common.js";
 import { fromMs, msOf, rows, sql, ts } from "./db.js";
 import { EXPIRY_GRACE_SECONDS } from "./store.js";
@@ -65,7 +68,7 @@ export async function checkTransaction(ctx: AppContext, plan: TxPlan, step: TxSt
   return receipt.data.status === "0x1" ? "confirmed" : "reverted";
 }
 
-async function reconcilePlan(ctx: AppContext, row: OpenPlanRow, now: Date, run: RunContext): Promise<void> {
+async function reconcilePlan(ctx: AppContext, row: OpenPlanRow, now: Date, run: RunContext, signal: AbortSignal | undefined): Promise<void> {
   // Bump reconciled_at first, on every attempt: a plan whose checks throw (RPC errors, bad data) moves to the back of
   // the queue like any other, so failing plans cannot starve the batch (PRD-04 4a). Nothing returned: no longer open.
   const attempted = await rows<{ state: string }>(
@@ -91,7 +94,12 @@ async function reconcilePlan(ctx: AppContext, row: OpenPlanRow, now: Date, run: 
           sql`UPDATE funding_plan_steps SET state = 'confirmed', confirmed_tx_hash = ${hash}, revert_reason = NULL
               WHERE plan_id = ${row.id}::uuid AND step_id = ${stored.step_id} AND state = 'pending' RETURNING step_id`,
         );
-        if (done.length > 0) {
+        // No row: another run confirmed the step first (its CAS won). Re-read it so a partial execution is never
+        // recorded as `expired` with confirmedSteps 0 (PRD-07 section 3).
+        const confirmedNow =
+          done.length > 0 ||
+          (await rows<{ state: string }>(ctx.db, sql`SELECT state FROM funding_plan_steps WHERE plan_id = ${row.id}::uuid AND step_id = ${stored.step_id}`))[0]?.state === "confirmed";
+        if (confirmedNow) {
           confirmed.add(stored.step_id);
           reverted.delete(stored.step_id);
         }
@@ -106,29 +114,32 @@ async function reconcilePlan(ctx: AppContext, row: OpenPlanRow, now: Date, run: 
       }
     }
   }
-  const audit = (action: string, details: Record<string, unknown>) =>
-    ctx.audit.record({ actorUserId: null, action, subjectType: "funding_plan", subjectId: row.id, details, ip: null });
-  if (steps.length > 0 && steps.every((step) => confirmed.has(step.step_id))) {
-    const moved = await rows(
+  // One statement per transition: the compare-and-set and, only when it won, its queued audit entry.
+  const transition = (next: "confirmed" | "failed" | "expired", details: Record<string, unknown>) => {
+    const entry: AuditEntry = { actorUserId: null, action: `funding.plan.${next}`, subjectType: "funding_plan", subjectId: row.id, details, ip: null };
+    return rows(
       ctx.db,
-      sql`UPDATE funding_plans SET state = 'confirmed', updated_at = ${ts(now)}, reconciled_at = ${ts(now)} WHERE id = ${row.id}::uuid AND state IN ('planned', 'submitted') RETURNING id`,
+      sql`WITH moved AS (
+            UPDATE funding_plans SET state = ${next}, updated_at = ${ts(now)}, reconciled_at = ${ts(now)} WHERE id = ${row.id}::uuid AND state IN ('planned', 'submitted') RETURNING id
+          ), queued AS (
+            ${queueAuditFrom(sql`moved`, entry, now)}
+          )
+          SELECT id FROM moved`,
     );
-    if (moved.length > 0) await audit("funding.plan.confirmed", { from, kind: row.kind, steps: steps.length });
+  };
+  if (steps.length > 0 && steps.every((step) => confirmed.has(step.step_id))) {
+    const moved = await transition("confirmed", { from, kind: row.kind, steps: steps.length });
+    if (moved.length > 0) await flushAudit(ctx, signal);
     return;
   }
   if (!run.fresh || run.finalized === null) return;
   const expiresAt = fromMs(row.expires_ms);
   if (now.getTime() >= expiresAt.getTime() + EXPIRY_GRACE_SECONDS * 1000) {
     const next = confirmed.size > 0 ? "failed" : "expired";
-    const moved = await rows(
-      ctx.db,
-      sql`UPDATE funding_plans SET state = ${next}, updated_at = ${ts(now)}, reconciled_at = ${ts(now)} WHERE id = ${row.id}::uuid AND state IN ('planned', 'submitted') RETURNING id`,
-    );
-    if (moved.length > 0) {
-      // Revert reasons are the fixed REVERTED_REASON vocabulary (never upstream text); the audit log redacts strings too.
-      const revertReasons = [...reverted.entries()].map(([stepId, reason]) => ({ stepId, reason }));
-      await audit(`funding.plan.${next}`, { from, kind: row.kind, confirmedSteps: confirmed.size, steps: steps.length, revertReasons });
-    }
+    // Revert reasons are the fixed REVERTED_REASON vocabulary (never upstream text); the audit log redacts strings too.
+    const revertReasons = [...reverted.entries()].map(([stepId, reason]) => ({ stepId, reason }));
+    const moved = await transition(next, { from, kind: row.kind, confirmedSteps: confirmed.size, steps: steps.length, revertReasons });
+    if (moved.length > 0) await flushAudit(ctx, signal);
   }
 }
 
@@ -137,6 +148,8 @@ async function reconcilePlan(ctx: AppContext, row: OpenPlanRow, now: Date, run: 
  * included); one plan's failure never stops the run. Freshness and the finalized block are read once per run.
  */
 export async function reconcileOnce(ctx: AppContext, signal?: AbortSignal): Promise<void> {
+  // Entries left by an audit outage are recorded first, also when no plan is open.
+  await flushAudit(ctx, signal);
   const now = ctx.clock.now();
   const open = await rows<OpenPlanRow>(
     ctx.db,
@@ -154,7 +167,7 @@ export async function reconcileOnce(ctx: AppContext, signal?: AbortSignal): Prom
   for (const row of open) {
     if (signal?.aborted) return;
     try {
-      await reconcilePlan(ctx, row, now, { finalized, fresh });
+      await reconcilePlan(ctx, row, now, { finalized, fresh }, signal);
     } catch {
       ctx.metrics.increment("funding_reconcile_errors");
     }

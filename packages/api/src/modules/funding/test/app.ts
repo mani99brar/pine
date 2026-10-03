@@ -2,13 +2,15 @@
 // provider, `request.session` from the test header, `app.requireSession`, the shared error mapping) and additionally
 // registers `@fastify/multipart` once with exactly the core options of PRD-02 section 2.2 and a logger writing to an
 // in-memory stream, so tests can assert that nothing secret is ever logged. The module itself never registers multipart.
+// Every inject waits for the request's audit flush (awaitAuditAfterInject, PRD-07 3c).
 
 import multipart from "@fastify/multipart";
-import Fastify, { type FastifyInstance, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest, type InjectOptions, type LightMyRequestResponse } from "fastify";
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
 import type { AppContext, RouteModule, SessionInfo } from "../../../contracts/app.js";
 import { ApiError, toErrorResponse } from "../../../contracts/errors.js";
 import { ADMIN_STEP_UP_SECONDS, TEST_SESSION_HEADER } from "../../../contracts/testing.js";
+import { settledAudit } from "../audit.js";
 
 export interface LogCapture {
   readonly lines: string[];
@@ -67,5 +69,32 @@ export async function buildLaneTestApp(modules: RouteModule[], ctx: AppContext):
     });
   }
   await app.ready();
+  awaitAuditAfterInject(app, ctx);
   return { app, logs };
+}
+
+/** The unwrapped inject of each test app (see awaitAuditAfterInject). */
+const rawInjects = new WeakMap<FastifyInstance, FastifyInstance["inject"]>();
+
+/**
+ * Test-harness rule (PRD-07 3c, operator decision): handlers start the audit flush without awaiting it, so every
+ * inject of a test app waits for the module's in-flight flush after the response (it requests no further drain). The
+ * existing exact-match audit tests therefore see the recorded entries right after the response.
+ */
+function awaitAuditAfterInject(app: FastifyInstance, ctx: AppContext): void {
+  const raw = app.inject.bind(app) as FastifyInstance["inject"];
+  rawInjects.set(app, raw);
+  const wrapped = async (options: InjectOptions | string): Promise<LightMyRequestResponse> => {
+    const response = await raw(options);
+    await settledAudit(ctx);
+    return response;
+  };
+  app.inject = wrapped as unknown as FastifyInstance["inject"];
+}
+
+/** An inject that does not wait for the audit flush its request started (the "slow audit store" tests). */
+export function rawInject(app: FastifyInstance, options: InjectOptions): Promise<LightMyRequestResponse> {
+  const raw = rawInjects.get(app);
+  if (!raw) throw new Error("not a lane test app");
+  return raw(options);
 }

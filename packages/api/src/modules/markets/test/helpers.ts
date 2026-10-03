@@ -5,7 +5,7 @@ import http from "node:http";
 import https from "node:https";
 import net from "node:net";
 import multipart from "@fastify/multipart";
-import Fastify, { type FastifyInstance, type FastifyRequest, type LightMyRequestResponse } from "fastify";
+import Fastify, { type FastifyInstance, type FastifyRequest, type InjectOptions, type LightMyRequestResponse } from "fastify";
 import { serializerCompiler, validatorCompiler, type ZodTypeProvider } from "fastify-type-provider-zod";
 import { decodeFunctionData, encodeFunctionResult, type Hex } from "viem";
 import { afterAll, beforeAll, beforeEach, vi } from "vitest";
@@ -43,6 +43,7 @@ import {
 } from "../../../contracts/testing.js";
 import type { SqlExecutor } from "../../../contracts/migrations.js";
 import { createRedactor } from "../../../contracts/redact.js";
+import { settledAudit } from "../audit.js";
 import { MARKETS_PLAN_LIMITS } from "../common.js";
 import { createMarketsModule } from "../index.js";
 import { waitForMemory } from "./lock.js";
@@ -58,7 +59,7 @@ export const ZERO32 = `0x${"0".repeat(64)}` as Hex32;
  * Mirrors the frozen buildTestApp (zod compilers, request.session from the test header, requireSession/requireAdmin,
  * shared error mapping) and adds what PRD-04 section 4 requires of lane-local apps: @fastify/multipart registered with
  * exactly the core options of PRD-02 section 2.2, a logger writing to an in-memory stream, and a record of every
- * route's `config.pine`.
+ * route's `config.pine`. Every inject waits for the request's audit flush (awaitAuditAfterInject).
  */
 export async function buildMarketsTestApp(modules: RouteModule[], ctx: AppContext, logLines: string[], routes: { url: string; method: string; pine: unknown }[]): Promise<FastifyInstance> {
   const app = Fastify({ logger: { level: "trace", stream: { write: (line: string) => void logLines.push(line) } } }).withTypeProvider<ZodTypeProvider>();
@@ -103,7 +104,34 @@ export async function buildMarketsTestApp(modules: RouteModule[], ctx: AppContex
     });
   }
   await app.ready();
+  awaitAuditAfterInject(app, ctx);
   return app;
+}
+
+/** The unwrapped inject of each test app (see awaitAuditAfterInject). */
+const rawInjects = new WeakMap<FastifyInstance, FastifyInstance["inject"]>();
+
+/**
+ * Test-harness rule (PRD-07 3c, operator decision): handlers start the audit flush without awaiting it, so every
+ * inject of a test app waits for the module's in-flight flush after the response (it requests no further drain). The
+ * existing exact-match audit tests therefore see the recorded entries right after the response.
+ */
+function awaitAuditAfterInject(app: FastifyInstance, ctx: AppContext): void {
+  const raw = app.inject.bind(app) as FastifyInstance["inject"];
+  rawInjects.set(app, raw);
+  const wrapped = async (options: InjectOptions | string): Promise<LightMyRequestResponse> => {
+    const response = await raw(options);
+    await settledAudit(ctx);
+    return response;
+  };
+  app.inject = wrapped as unknown as FastifyInstance["inject"];
+}
+
+/** An inject that does not wait for the audit flush its request started (the "slow audit store" tests). */
+export function rawInject(app: FastifyInstance, options: InjectOptions): Promise<LightMyRequestResponse> {
+  const raw = rawInjects.get(app);
+  if (!raw) throw new Error("not a lane test app");
+  return raw(options);
 }
 
 // ------------------------------------------------------------------------------------------------ scripted chain
@@ -338,7 +366,7 @@ export function useHarness(options: { database?: boolean } = {}): () => Harness 
 
   beforeEach(async () => {
     const ctx = base!;
-    if (withDatabase) await ctx.database.sql.exec("TRUNCATE markets_plan_txs, markets_plan_steps, markets_plans, markets_uploads, markets_notifications, markets_watch_state");
+    if (withDatabase) await ctx.database.sql.exec("TRUNCATE markets_plan_txs, markets_plan_steps, markets_plans, markets_uploads, markets_notifications, markets_watch_state, markets_audit_outbox");
     const b = new EventBuilder();
     ctx.clock.set(new Date(b.now() * 1000));
     ctx.readModel = new MemoryReadModel({ chainId: ctx.config.chainId, questionTimeout: ctx.config.seer.questionTimeoutSeconds });

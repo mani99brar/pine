@@ -15,7 +15,7 @@ import {
 import type { Address, Hex32 } from "@pine/shared/types";
 import type { AppContext } from "../../contracts/app.js";
 import { ApiError } from "../../contracts/errors.js";
-import { addressParam, chainRead, CONTENT_TRUST, freshness, nowSeconds, PUBLIC_ROUTE, requireClaim, sendPublic, ZERO_HASH, type MarketsRouteDeps, type MarketsState } from "./common.js";
+import { addressParam, chainRead, CONTENT_TRUST, freshness, nowSeconds, PUBLIC_ROUTE, publicMaxAge, requireClaim, sendPublic, ZERO_HASH, type MarketsRouteDeps, type MarketsState } from "./common.js";
 import { dueActions, phaseOf, settledTooSoon, type ChainFacts } from "./due-actions.js";
 
 /** The public status route fans out to eth_call: responses are cached per (market, account) for 10 s (PRD-04 4a). */
@@ -115,10 +115,10 @@ export function registerOracleStatusRoute({ app, ctx, state }: MarketsRouteDeps)
       const account = request.query.account ?? null;
       const cacheKey = `${request.params.market}:${account ?? ""}`;
       const cached = state.oracleCache.get(cacheKey, now);
-      if (cached !== undefined) return sendPublic(request, reply, cached, 5);
+      if (cached !== undefined) return sendPublic(request, reply, cached, publicMaxAge(5));
       const body = await state.oracleFanOut.run(() => oracleStatus(ctx, state, request.params.market, account, now));
       state.oracleCache.set(cacheKey, body, now);
-      return sendPublic(request, reply, body, 5);
+      return sendPublic(request, reply, body, publicMaxAge(5));
     },
   );
 }

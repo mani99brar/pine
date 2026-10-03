@@ -78,7 +78,7 @@ removed. Format: `file` > test name. All files are in this directory and run und
 | `/markets/:market/oracle` caps concurrent RPC fan-out: at most 4 in flight per process, checked after the 10 s cache lookup; a 5th concurrent miss is refused immediately with RATE_LIMITED (429) and Retry-After, never queued (4 scripted RPC promises held open, then released) | `oracle-plans.test.ts` > caps concurrent RPC fan-out at 4 cache misses: a 5th is refused at once with 429 and Retry-After, never queued (mutation-checked: fails with the cap raised to 40) |
 | Fan-out slots are released after errors | `oracle-plans.test.ts` > releases a fan-out slot when the status computation fails (six failures in a row are 502, never 429) |
 | An audited tx-hash hint is a NEW {stepId, txHash}; an identical repeated hint is an idempotent replay and is not audited (markets already followed this rule; no change needed) | `plan-store.test.ts` > records hints idempotently, moves planned -> submitted, and is owner-only (exact audit entries for hashes 1 and 2; repeats of 1 and 2 add none) |
-| Funding-lane items of 4b (audit log, reconcile freshness gate) | funding lane; markets already records plan-created, tx_reported and every reconcile CAS transition through `ctx.audit.record` (`plans.ts`, `reconcile.ts`) and decides expiry only while fresh with a successful `finalizedBlock()` (`plan-store.test.ts` > never expires while the read model is stale, and concurrent runs move a plan once) |
+| Funding-lane items of 4b (audit log, reconcile freshness gate) | funding lane; markets records plan-created, tx_reported and every reconcile CAS transition (since PRD-07 through the audit outbox, `audit.ts`) and decides expiry only while fresh with a successful `finalizedBlock()` (the finalized gate made explicit and tested in PRD-07) (`plan-store.test.ts` > never expires while the read model is stale, and concurrent runs move a plan once) |
 
 ## PRD-04 section 4: both lanes (plan store, history arguments)
 
@@ -168,6 +168,82 @@ capped at 4 concurrent misses per process (429, never queued).
 - Tests: lane-local test app with @fastify/multipart (core options) and a capturing logger; the module never registers
   multipart; bidi/zero-width characters only as `\u` escapes; PGlite test files serialized by the cross-process lock.
 
+## PRD-07 sections 3, 3c and 3d: api-hardening (markets module)
+
+Each row names the test that fails when the behaviour is removed. "Mutation" is the change that was applied to production
+code, run against the named tests (one vitest file filtered by test name, one worker, JSON reporter) and reverted; every
+one listed was killed: EACH named test of the row failed under it, and the same tests passed unmutated (baseline run).
+Ids M1..M28 are those of the hardening-a-003 mutation run (M1..M21 keep their hardening-a-002 meaning and were re-run;
+M22..M28 are new).
+
+| Requirement | Test | Mutation (killed) |
+|---|---|---|
+| markets.reconcile checks `signal.aborted` between plans: abort before the run starts no plan (no confirmation, no `reconciled_at`) | `hardening.test.ts` > an abort before the run starts no plan: nothing confirmed, no reconciled_at written (through the registered job, `job.run(ctx, signal)`) | M1: delete `if (signal?.aborted) break;` in `reconcilePlans` |
+| markets.reconcile abort during a batch: the plan in progress finishes (its transition and queued audit entry are one statement), the second plan is untouched; the aborted run does not flush, the next run records the entry | `hardening.test.ts` > an abort during the first plan finishes that plan and leaves the second untouched (abort from inside the first plan's `listEvidence`; registered job) | M1 |
+| markets.watch checks the signal between listing pages: abort before the run lists no claim | `hardening.test.ts` > an abort before the run lists no claim, inserts nothing and keeps the cursor (registered `markets.watch` job, `job.run(ctx, signal)`) | M2: delete `&& !signal?.aborted` in the listing loop |
+| markets.watch checks the signal between claims: abort during the first claim leaves the second untouched | `hardening.test.ts` > an abort during the first claim leaves the second claim untouched and the cursor where it was (abort from inside the first claim's `getOracleQuestion`; registered job) | M3: delete `if (signal?.aborted) break;` in the claim loop |
+| markets.watch: an aborted run does not persist the rotated cursor past claims it never processed | same test (`markets_watch_state` stays empty) | M4: delete the post-loop `if (signal?.aborted) return …` |
+| reconcile decides `expired`/`failed` only when the read model is fresh AND `finalizedBlock()` succeeded in this attempt | `hardening.test.ts` > finalizedBlock() throws for a plan past expires_at + 1 h: the plan state is unchanged; the next run expires it | M5: drop `context.finalized !== null &&` from the expiry condition |
+| SEC-OPS-07 outbox: an outage keeps the row; the next write (a NEW hint) records it exactly once and deletes the row | `hardening.test.ts` > SEC-OPS-07 an audit outage keeps the plan-created entry in the outbox; the next write records it exactly once | M6: delete the flush after the hint write (`plans.ts`) |
+| 3d SEC-OPS-07 atomicity, plan insert: the `markets.plan.created` outbox INSERT is a CTE of the plan INSERT; when it fails the request fails and neither the plan nor its steps are committed | `hardening.test.ts` > SEC-OPS-07 a plan insert whose outbox INSERT fails is refused and commits no plan and no step (outbox INSERTs made to fail with `ALTER TABLE markets_audit_outbox ADD CONSTRAINT outbox_fail CHECK (false) NOT VALID`, dropped in `finally`) | M24: the outbox INSERT as a separate statement after the plan insert |
+| 3d atomicity, new hint: the `tx_reported` outbox INSERT is a CTE of the hint INSERT; when it fails the request fails, no hint is stored and the plan stays `planned` | `hardening.test.ts` > SEC-OPS-07 a new tx-hash hint whose outbox INSERT fails is refused: no hint stored, the plan stays planned | M25: the outbox INSERT as a separate statement after the hint insert |
+| 3d atomicity, reconcile transition (`transitionPlan`, shared by confirmed, failed and expired): when the outbox INSERT fails the CAS is not committed (plan stays `planned`) and the next run moves and audits it | `hardening.test.ts` > SEC-OPS-07 a confirmed transition whose outbox INSERT fails is not committed; the next run confirms and audits it; > SEC-OPS-07 an expired transition whose outbox INSERT fails is not committed; the next run expires and audits it (`failed` is the same `transitionPlan` call as `expired`, only `to` differs) | M26: the outbox INSERT as a separate statement after the CAS; M9 |
+| 3d atomicity, evidence upload: the first upload's outbox INSERT is a CTE of the `markets_uploads` INSERT (failure: request fails, no upload row); a restored upload's single-statement outbox INSERT failing fails the request (never a 201 without a queued entry) | `hardening.test.ts` > SEC-OPS-07 an evidence upload whose outbox INSERT fails is refused: no upload row (first upload), no silent loss (restored upload) | M27: the first-upload outbox INSERT as a separate statement after the upload insert; M28: the restored-upload outbox INSERT failure swallowed; M14; M15 |
+| Flush on a same-key replay | `hardening.test.ts` > SEC-OPS-07 a same-key replay flushes an entry left by an outage | M7: delete the flush in `replay` |
+| Flush at the START of every reconcile run, before the "no open plans" case | `hardening.test.ts` > SEC-OPS-07 a reconcile run with no open plans flushes an entry left by an outage | M8: delete the flush at the start of `reconcilePlans` |
+| Several pending entries of one plan (created, tx_reported, confirmed) all survive an outage and are recorded once each with unchanged details; the reconcile transition queues its entry in the `transitionPlan` statement | `hardening.test.ts` > SEC-OPS-07 several pending entries of one plan (created, tx_reported, confirmed) all survive an outage (also killed by the two 3d transition tests) | M9: `transitionPlan` without the `queued` CTE (the confirmed entry is lost) |
+| `flushAudit` checks `signal.aborted` before each entry: an abort between entries leaves the unrecorded rows | `hardening.test.ts` > SEC-OPS-07 an abort between entries leaves the unrecorded rows in the outbox | M10: delete `if (signal?.aborted) return;` in `drain` |
+| 3c single-flight: one in-flight flush per module and database handle; a call while it runs sets the coalesced rerun flag and drains again before the shared promise settles; in-process triggers never double-record | `hardening.test.ts` > SEC-OPS-07 single-flight: a flush called while one is recording drains again; both entries are recorded once when it resolves (first flush held at `ctx.audit.record`, second row queued, second call, release) | M11: delete `running.rerun = true` (the second call returns the in-flight promise without draining again) |
+| 3c flushAudit robustness: the single-flight entry is cleared in `finally`, so a rejected drain never wedges later flushes | `hardening.test.ts` > SEC-OPS-07 a drain that rejects clears the single-flight entry: the next flush still records the pending entry (record fails once and the failure path throws once) | M12: clear the entry only after a fulfilled drain |
+| 3c request path: audited writes start the flush without awaiting it (`flushAuditInBackground`; errors caught and logged through `safeErrorMessage(…, ctx.redact)`); the outbox row is already committed with the write | `hardening.test.ts` > SEC-OPS-07 an audit store that never resolves does not delay the plan response; the committed row is recorded later (raw inject; a 5 s race) | M13: `await flushAudit(ctx)` after the plan insert |
+| 3c request path: a failing background flush never fails the response; the error is logged through the redactor | `hardening.test.ts` > SEC-OPS-07 a failing background flush never fails the response and is logged redacted (the error text carries a configured secret) | M21: log `String(error)` instead of `safeErrorMessage(error, ctx.redact)` |
+| 3c test-harness rule: `buildMarketsTestApp` wraps `app.inject` so every response waits for the module's in-flight flush (`settledAudit`, which requests no further drain); `rawInject` bypasses it | every existing exact-match audit test (`plan-store.test.ts`, `evidence-content.test.ts`, `oracle-plans.test.ts`) passes unchanged | test support, not production behaviour |
+| Evidence upload audits through the outbox: CTE on the `markets_uploads` INSERT (first upload), one plain outbox INSERT for a restored upload whose INSERT conflicts; same action and details; an outage loses no entry | `hardening.test.ts` > SEC-OPS-07 an audit outage during evidence uploads loses no entry (first upload and restored upload) (M14 and M15 also kill the 3d upload test); `evidence-content.test.ts` audit assertions unchanged | M14: delete the restored-upload `queueAudit`; M15: drop the first-upload `queued` CTE |
+| `ctx.audit` is record-only (frozen `AuditLog.record`); never cast or duck-typed | code: `audit.ts` calls only `ctx.audit.record` | review |
+| Audit details unchanged (no outbox id); existing exact-match audit tests unchanged | `plan-store.test.ts`, `evidence-content.test.ts` (files unchanged, passing) | n/a |
+| loadOracle accepts a replacement linked only through the original's `reopenedBy` and refuses one linked by neither | `hardening.test.ts` > accepts a replacement linked only through the original's reopenedBy, and refuses one linked by neither | M16: drop `&& original?.reopenedBy !== currentId` |
+| Evidence detail `contentStore.retrieve` cache misses: own limiter, at most 4 in flight per process; a 5th concurrent miss is 429 RATE_LIMITED with Retry-After at once; the limiter wraps the call OUTSIDE the `retrievable: false` conversion, so a refused call caches nothing | `evidence-browse.test.ts` > caps concurrent retrieve cache misses at 4: a 5th is 429 at once and caches nothing; slots are released | M17: call the store without the limiter |
+| 3c separate limiters: with the 4 oracle slots held, the detail route's retrieve still gets a slot; with the 4 retrieve slots held, the oracle status still gets one | `evidence-browse.test.ts` > four oracle misses holding every slot of the oracle limiter leave the evidence detail retrieve its own slot; > four retrieve misses holding every slot of the retrieve limiter leave the oracle status its own slot | M18: the detail route uses `state.oracleFanOut` instead of `retrieveFanOut` |
+| SEC-EVID-11: the listing caches only the read-model page (claim, page, freshness); moderation and manifests are computed at serve time; the listing is sent with `Cache-Control: no-store` (`sendPublic` takes a cache-control parameter) | `evidence-browse.test.ts` > SEC-EVID-11 blocking the evidence after a cached listing removes the manifest from the next listing; sent with no-store; > SEC-EVID-11 blocking the content after a cached listing removes the manifest from the next listing | M19: listing sent as `public, max-age=10`; M20: moderation cached with the listing |
+| Detail and ERC-1497 responses (they carry manifest text and moderation) are also `no-store` (safer reading; open assumption) | `evidence-browse.test.ts` > SEC-EVID-11 the detail and ERC-1497 routes are sent with no-store too | M22: detail route without `no-store`; M23: ERC-1497 route without `no-store` |
+
+Outbox atomicity (3d): every audited write's outbox INSERT is part of the write's own SQL statement (a data-modifying CTE),
+so the write and its pending entry commit or fail together; the restored upload, whose event has no row of its own, uses a
+single-statement outbox INSERT and fails the request when it fails. A separate statement after the write is the only
+placement that can lose an entry (write committed, entry not); M24..M27 apply exactly that and are killed. (A separate
+statement BEFORE the write could only leave a spurious entry, never lose one, and is not distinguishable by these tests.)
+
+At-least-once audit (SEC-OPS-07): a crash between `record` and the outbox `DELETE`, or a flusher in another API process,
+can only duplicate an entry, never lose one. Duplicates are identified by the event's natural key: (action, subjectId) for
+`markets.plan.created/confirmed/failed/expired` and `markets.evidence.*_uploaded` (plus `details.restored`), and (action,
+subjectId, details.stepId, details.txHash) for `markets.plan.tx_reported`. A `record` failure stops the flush with the row
+kept (no claim step, no re-insert). Flushes start (not awaited) after each audited write on the request path, on a
+same-key replay (and a repeated hint or re-upload answered from its row), and are awaited at the start of every reconcile
+run and after each reconcile transition. Each drain reads at most 50 entries.
+
+Accepted (PRD-07 3c, recorded here as required):
+- Outbox rows hold the request IP (`entry.ip`) until they are flushed, bounded by the flush cadence (the request's own
+  background flush, the next audited write or replay, and every reconcile run), and are deletable by `pine_api` until
+  flushed: inherent in the outbox design; accepted.
+- The evidence listing's per-request cost: moderation queries and up to 50 manifest reads per response (nothing rendered
+  is cached), bounded by the platform rate limit; accepted.
+
+Operator-settled choices this lane keeps (PRD-07 sections 3/3c/3d, `features/hardening/decisions.md`):
+- Audited events are exactly the existing ones (plan created; a NEW tx-hash hint `tx_reported`, which is also the audit of
+  planned -> submitted; reconcile confirmed/failed/expired) plus the evidence upload audits through the same outbox.
+- `ctx.audit` is record-only; one outbox table per module in a new migration; same-statement CTE inserts; at-least-once
+  with unchanged details; `flushAudit` single-flight per module and database handle (one in-flight promise plus a
+  coalesced rerun flag, cleared in `finally`).
+- The request path never awaits the flush; the module test helpers await the module's single-flight flush after each
+  response, and the "never resolves" test uses a raw inject.
+- Per-route limiters (4 in flight per process), not shared with the oracle limiter; refusal is 429 RATE_LIMITED.
+- 3d: outbox atomicity is tested by making the outbox INSERT fail on PGlite with a `CHECK (false) NOT VALID` constraint
+  (test-only DDL, dropped after each test); no production change was needed for 3d.
+- Contract changes are limited to the EvidenceRegistry SafeCast; each lane ships this coverage matrix and the independent
+  coverage reviewer blocks on gaps.
+- The API keys claims only by registry addresses (copycat markets sharing Pine's question, condition and INVALID token are
+  accepted); verification runs vitest with one worker.
+
 ## Not covered by an executed check
 
 - node-postgres driver behaviour (tests run on PGlite only).
@@ -178,6 +254,11 @@ capped at 4 concurrent misses per process (429, never queued).
 - dueActions omits `withdraw` while the current (reopened) question is not indexed yet (transient; the Reality balance
   is still shown under `chainReads.balance`). Since 4b the status route answers NOT_READY in that window unless the
   original's `reopenedBy` already names the replacement.
-- Moderation changes (hide/block) reach the cached evidence listing within at most 10 s (the cache window); the detail
-  and ERC-1497 routes are not cached and apply them immediately.
+- (PRD-07) Moderation changes now apply to the next listing response (the cache holds only the read-model page). A
+  submission indexed inside the 10 s window still appears only after the window.
 - The fan-out cap is per process (several API processes multiply it); not exercised across processes.
+- (PRD-07) Cross-process duplicate audit entries (two API processes flushing at once): accepted at-least-once, not exercised.
+- (PRD-07) A crash between `record` and the outbox `DELETE` (duplicate entry): not exercised.
+- (PRD-07) The retrieve and oracle limiters are per process (several API processes multiply them).
+- (PRD-07) A rejected flush (an unexpected failure; an audit outage never rejects) at the start of a reconcile run
+  propagates and the platform logs and retries the job; after a transition it counts as that plan's error. Not exercised.
