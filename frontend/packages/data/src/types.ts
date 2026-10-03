@@ -25,8 +25,8 @@ import type {
   RepoSummary,
 } from '@pine/core'
 
-/** Which indexer backs reads. */
-export type DataSourceKind = 'mock' | 'rest' | 'envio'
+/** Which indexer backs reads. `api` is the Pine backend (`packages/api`), served same-origin under /api/v1. */
+export type DataSourceKind = 'mock' | 'rest' | 'envio' | 'api'
 
 /**
  * Read-side contract for indexed chain + off-chain state.
@@ -98,9 +98,20 @@ export interface AccountStore {
   remove(githubLogin: string): Promise<void>
 }
 
+/** Pine's own contract deployment (the rest of the deployment manifest is the verified Gnosis constants). */
+export interface PineDeploymentEnv {
+  claimRegistry: Address
+  evidenceRegistry: Address
+  deploymentBlock: number
+}
+
 export interface PineEnv {
   dataSource: DataSourceKind
   apiUrl?: string
+  /** `api` mode, server only: the internal origin of pine-api for SSR reads (PINE_API_INTERNAL_URL). */
+  apiInternalUrl?: string
+  /** `api` mode: Pine's deployment, pinned at build time, used to verify every transaction plan. */
+  deployment?: PineDeploymentEnv
   envioGraphqlUrl?: string
   ipfsGateway: string
   ipfsUploadUrl?: string

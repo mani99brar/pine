@@ -1,7 +1,7 @@
 'use client'
 
 import { createContext, useContext } from 'react'
-import type { DraftStore, ManifestStorage, PineDataProvider, PineEnv } from '@pine/data'
+import type { DraftStore, ManifestStorage, PineApiClient, PineDataProvider, PineEnv } from '@pine/data'
 
 export interface PineContextValue {
   env: PineEnv
@@ -13,6 +13,8 @@ export interface PineContextValue {
   appName: string
   /** Base path for the app's API routes (default ""). */
   apiBase: string
+  /** `api` mode: the same-origin client for the Pine backend (`/api/v1`); null in every other mode. */
+  api: PineApiClient | null
 }
 
 export const PineContext = createContext<PineContextValue | null>(null)

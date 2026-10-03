@@ -10,6 +10,7 @@ import {
   createDataProvider,
   createDraftStore,
   createManifestStorage,
+  PineApiClient,
   readPineEnv,
   type PineEnv,
 } from '@pine/data'
@@ -73,6 +74,8 @@ function createContextValue(appName: string, overrides: Partial<PineEnv> | undef
     demo: isDemoEnv(env),
     appName,
     apiBase: base,
+    // The backend is same-origin in the browser; the session cookie is HttpOnly and never read by script.
+    api: env.dataSource === 'api' ? new PineApiClient({ baseUrl: '' }) : null,
   }
 }
 
@@ -111,8 +114,15 @@ export function PineProviders(props: PineProvidersProps): React.JSX.Element {
   )
   const [queryClient] = useState(() => props.queryClient ?? createPineQueryClient())
 
+  // `api` mode: identity is the backend's SIWE session (usePineSession), not next-auth. The provider stays mounted
+  // for hooks that read it, initialised signed-out so it never calls /api/auth (which the backend owns).
+  const apiMode = value.env.dataSource === 'api'
   return (
-    <SessionProvider session={session} basePath={value.apiBase ? `${value.apiBase}/api/auth` : undefined}>
+    <SessionProvider
+      session={apiMode ? null : session}
+      refetchOnWindowFocus={!apiMode}
+      basePath={value.apiBase ? `${value.apiBase}/api/auth` : undefined}
+    >
       <WagmiProvider config={wagmiConfig}>
         <QueryClientProvider client={queryClient}>
           <RainbowKitProvider

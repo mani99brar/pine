@@ -4,6 +4,17 @@ export { createDataProvider, getMockDataProvider } from './provider'
 export { MockDataProvider, MOCK_STORAGE_KEYS, toSummary, buildDepth, type MockDataProviderOptions } from './mock/provider'
 export { RestDataProvider, type RestDataProviderOptions } from './rest/provider'
 export { EnvioDataProvider, type EnvioDataProviderOptions } from './envio/provider'
+export {
+  PineApiClient,
+  PineBackendError,
+  CSRF_HEADER,
+  seg,
+  type PineApiClientOptions,
+  type PineApiErrorCode,
+  type PineApiIssue,
+  type RequestOptions as PineApiRequestOptions,
+} from './api/http'
+export { pineSessionSchema, siweChallengeSchema, githubStartSchema, anyBodySchema, type PineSession } from './api/auth'
 export { DEMO_WALLET_ADDRESS, DEMO_GITHUB_USER } from './demo'
 export { parseGitHubRef } from '@pine/core'
 

@@ -130,6 +130,22 @@ export {
   type LinkWalletStatus,
 } from './account'
 
+// api mode (Pine backend): session, SIWE sign-in, GitHub linking
+export {
+  usePineSession,
+  useSiweSignIn,
+  useSignOut,
+  useGitHubLink,
+  checkSiweChallenge,
+  checkGitHubAuthorizationUrl,
+  pineSessionSchema,
+  SiweChallengeError,
+  SIWE_TERMS_STATEMENT,
+  type PineSession,
+  type PineSessionState,
+  type SiweStep,
+} from './api/session'
+
 // misc
 export { useNow, useCopy, useHotkeys } from './misc'
 export { PineApiError } from './internal/api'
