@@ -122,16 +122,18 @@ Contracts are immutable once deployed, so every contract change here lands befor
 - Verification starvation: each integrity run takes up to 50 never-attempted rows (attempts = 0, oldest first) AND up to 50
   retry rows (attempts > 0, ordered by next_attempt_at), so retries of unavailable documents can never crowd out new claims.
   Test: 60 always-due unavailable rows plus one new claim → the new claim is verified in the first run.
-- Reorg reopen (operator decision after the design challenge): the publish request moves a publication to `mined` only when
-  the market comes from the finalized read model (`indexedMarket`); a `marketOf` hit at `latest` alone only suppresses the plan
-  (no plan, state unchanged; SEC-TX-08 holds). Reconcile step 2a then applies only to hint-backed `mined` rows: a new migration
-  adds `success_block` and `first_absent_at` to `claim_publication_txs` (do not reuse `missing_at`, which expiry depends on);
-  a `mined` publication returns to the plan-able state only when the read model is fresh, its covered (finalized) block is at
-  least 64 blocks after `success_block`, the read model has no claim for this creator and document digest, and the receipt is
-  absent in two runs at least 10 minutes apart (`first_absent_at` recorded on the first absence and cleared when a receipt is
-  seen again). One absent receipt never reopens. The existing tests reconcile.test.ts "…mined publication whose on-chain market
-  disappears returns to planned" and the single-missing-receipt reopen test are REWRITTEN to this rule (operator decision; the
-  "keep every existing test passing" constraint does not apply to these two). Tests for each condition.
+- Finality instead of reopen (operator decision after design challenge attempt 2): a publication becomes `mined` only from
+  finalized evidence: the market from the finalized read model (`indexedMarket`), or a succeeded hint whose receipt is in a
+  block at or below the read model's covered (finalized) block. A finalized success cannot be reorged, so reconcile step 2a
+  (reopen of a `mined` publication) is REMOVED and a `mined` publication is never reopened. A `marketOf` hit at `latest` alone
+  (on the request path or in reconcile) never moves the state and withholds the plan: POST /publications answers 503 NOT_READY
+  with retryAfterSeconds 30 ("the claim is being created on chain; retry when it is final"), state unchanged, no plan.
+- Rewritten tests (operator decision; the "keep every existing test passing" constraint does not apply to tests whose
+  expectations encode behaviour this section replaces): in publication.test.ts the tests that expect `mined` from a latest-only
+  `marketOf` hit (around lines 236, 432, 545, 806) now expect 503 NOT_READY, state unchanged and no plan, and `mined` only after
+  the market is indexed; the "first request after expiry" part of the plan-expiry test now expects 409 CONFLICT; in
+  reconcile.test.ts the reopen tests now assert a finalized `mined` publication is never reopened. Every rewritten test is
+  listed in the completion with its reason; no other existing test may change.
 - Audit atomicity (SEC-OPS-07): claims audit writes (publication created, hint reported, transitions, integrity verdicts) use a
   `claims_audit_outbox` with the same design as section 3 (same-statement CTE insert, single-flight record-then-delete flush
   at the start of every claims job run and after each audited write, at-least-once, details unchanged). Tests as in section 3.
