@@ -82,6 +82,22 @@ Contracts are immutable once deployed, so every contract change here lands befor
 - Claims items (job abort for claims reconcile/integrity, catalog policy-text pinning) are carried by a later claims-hardening
   lane after the claims feature merges.
 
+## 3c. hardening-a-001 review fixes (carried by hardening-a-002; markets and funding)
+- Single-flight flush test (both modules): hold the first flush at `ctx.audit.record`, queue a second outbox row, call
+  `flushAudit` again, release; assert both entries are recorded exactly once and the outbox is empty when the second call
+  resolves (fails if flushAudit returns the in-flight promise without draining again).
+- Separate limiters: a test fills the 4 oracle slots and asserts the evidence-detail retrieve still gets a slot (and the reverse),
+  failing if `retrieveFanOut` were replaced by the oracle limiter; likewise the liquidity limiter vs the positions limiter.
+- flushAudit robustness: the single-flight entry is cleared on rejection as well as fulfilment (a rejected drain never wedges
+  later flushes); test with a drain that rejects once.
+- Request path: audited writes trigger the flush without awaiting it (fire-and-forget, errors caught and logged through the
+  redactor), so an audit backlog or a slow audit store never delays or fails the user's request; the outbox row is already
+  committed with the write. Test: an audit store that never resolves does not delay the plan response.
+- Cooperative abort tests go through the registered jobs (`job.run(ctx, signal)`) for markets watch and funding reconcile too.
+- Record in the coverage matrix: outbox rows hold the request IP until flushed (bounded by the flush cadence) and are
+  deletable by pine_api until flushed (inherent in the outbox design; accepted); the evidence listing's per-request cost
+  (moderation queries and up to 50 manifest reads; bounded by the platform rate limit; accepted).
+
 ## 3b. claims-hardening (claims module; run after claims-010 merged at 74659eb)
 - Cooperative abort: claims reconcile and integrity jobs (including discovery and backfillParameters) check `signal.aborted`
   between items and stop promptly; tests abort before a run and from inside a fake during the first item (second untouched);
