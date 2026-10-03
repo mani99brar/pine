@@ -44,6 +44,13 @@ Contracts are immutable once deployed, so every contract change here lands befor
     the planned→submitted move; no separate `submitted` entry), and the reconcile transitions confirmed, failed and expired.
     Existing audit tests stay as they are.
   - `ctx.audit` is record-only (frozen `AuditLog.record`); never cast or duck-type it to reach a platform method.
+  - The markets evidence upload audits (`markets.evidence.{artifact,manifest}_uploaded`, evidence-content.ts) go through the
+    markets outbox too: an outbox CTE on the `markets_uploads` INSERT for a first upload, and a plain single-statement outbox
+    INSERT for a restored upload whose INSERT conflicts. Their entries keep today's action and details, so the existing
+    evidence-content tests stay unchanged; add a test that an audit outage during an upload loses no entry.
+  - `flushAudit` is single-flight per module and database handle inside one process (one in-flight promise chain; a call while a
+    flush runs waits for it and then flushes again), so in-process concurrent triggers never double-record; at-least-once is
+    the cross-process guarantee.
   - One outbox table per module in a new migration (`markets_audit_outbox`, `funding_audit_outbox`: id uuid PK, entry jsonb,
     created_at). Each audited write inserts its outbox row in the SAME SQL statement as the write (an extra CTE:
     `WITH moved AS (UPDATE … RETURNING …) INSERT INTO …_audit_outbox SELECT … FROM moved`), so no multi-statement transaction
