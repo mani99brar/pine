@@ -45,7 +45,7 @@ export function CopyButton({ text, label = 'Copy', className, size = 'sm', varia
 }
 
 /** An immutable reference (hash, SHA, address) with its label and a copy action. */
-export function HashChip({ value, label, display, className, href }: { value: string; label?: string; display?: string; className?: string; href?: string }) {
+export function HashChip({ value, label, name, display, className, href }: { value: string; label?: string; /** Accessible name when the visible label sits outside the chip. */ name?: string; display?: string; className?: string; href?: string }) {
   const { copy, copied } = useCopy()
   const short = display ?? (value.length > 18 ? `${value.slice(0, 10)}…${value.slice(-6)}` : value)
   return (
@@ -64,7 +64,7 @@ export function HashChip({ value, label, display, className, href }: { value: st
         type="button"
         onClick={() => void copy(value)}
         className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-[3px] text-lumen-3 transition-colors hover:bg-smoke-3 hover:text-lumen"
-        aria-label={copied ? `${label ?? 'Value'} copied` : `Copy ${label ?? 'value'}`}
+        aria-label={copied ? `${label ?? name ?? 'Value'} copied` : `Copy ${(label ?? name ?? 'value').toLowerCase()}`}
       >
         {copied ? <Check size={13} aria-hidden className="text-hb" /> : <Copy size={13} aria-hidden />}
       </button>

@@ -90,7 +90,7 @@ export function LifecyclePath({ claim }: { claim: ClaimDetail }) {
   const stages = stagesFor(claim)
   const failed = claim.status === 'failed'
   return (
-    <ol className="grid grid-cols-5 gap-1" aria-label="Lifecycle">
+    <ol className="grid grid-cols-5 gap-x-1.5 gap-y-1 sm:gap-1" aria-label="Lifecycle">
       {stages.map((st) => (
         <li key={st.id} className="min-w-0" aria-current={st.current ? 'step' : undefined}>
           <div
@@ -100,9 +100,9 @@ export function LifecyclePath({ claim }: { claim: ClaimDetail }) {
               boxShadow: st.current ? '0 0 12px rgba(90,216,255,0.6)' : undefined,
             }}
           />
-          <p className={cn('mt-2 truncate text-[0.78rem] font-semibold', st.current ? 'text-lumen' : st.done ? 'text-lumen-2' : 'text-lumen-3')}>{st.label}</p>
+          <p className={cn('mt-2 text-[0.75rem] font-semibold leading-[1.25] sm:truncate sm:text-[0.78rem]', st.current ? 'text-lumen' : st.done ? 'text-lumen-2' : 'text-lumen-3')}>{st.label}</p>
           {st.at && (
-            <p className="truncate text-[0.72rem] text-lumen-3">
+            <p className="mt-0.5 text-[0.75rem] leading-[1.25] text-lumen-3 sm:mt-0 sm:truncate">
               {st.note ? `${st.note} ` : ''}
               {formatDate(st.at, 'short')}
             </p>

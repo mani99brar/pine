@@ -62,6 +62,12 @@ export function EvidenceForm({ id }: { id: string }) {
   const allChecked = reqs.every((_, i) => checks[i])
   const evChain = getChainOrDefault(sub.chainId)
   const marketChain = getChainOrDefault(claim.chainId)
+  // Package copy for the commitment step ends with "the content becomes public", which is wrong in
+  // commit mode: only the hash is published until the reveal. Say what actually happens.
+  const describe = (s: { id: string }) =>
+    mode === 'commit' && s.id === 'submit_evidence'
+      ? `Records only the hash of your evidence package, through the Kleros arbitration contract on ${evChain.name}. The block timestamp of this transaction is the timeliness proof, and it costs ${evChain.nativeSymbol} gas. The package itself stays private in this browser until you reveal it. Switch your wallet to ${evChain.name} first.`
+      : undefined
   const late = now !== null && Date.parse(claim.evidenceDeadline) < now
   const running = sub.runner.state === 'running'
   const done = sub.runner.state === 'done'
@@ -113,7 +119,7 @@ export function EvidenceForm({ id }: { id: string }) {
               : 'The block timestamp is your proof of timeliness. Answerers and jurors decide whether it demonstrates the violation.'}{' '}
             {COPY.evidenceIsNotPayment}
           </p>
-          <TxSteps runner={sub.runner} chainId={sub.chainId} className="mt-6" />
+          <TxSteps runner={sub.runner} chainId={sub.chainId} className="mt-6" describe={describe} />
           <div className="mt-8 flex flex-wrap gap-3">
             <ButtonLink href={`/claims/${claim.id}#evidence`}>Back to the claim</ButtonLink>
             <Button variant="glass" onClick={() => sub.reset()}>
@@ -122,9 +128,41 @@ export function EvidenceForm({ id }: { id: string }) {
           </div>
         </div>
       ) : (
-        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.5fr)_minmax(18rem,1fr)]">
+        <div className="grid gap-8 lg:grid-cols-[minmax(0,1.5fr)_minmax(18rem,1fr)] lg:grid-rows-[auto_1fr]">
+          <aside className="grid content-start gap-5 lg:col-start-2 lg:row-start-1" aria-label="How evidence is filed">
+            <section className="glass cut-lg p-5" aria-labelledby="mode-title">
+              <h2 id="mode-title" className="t-h4">
+                How it is filed
+              </h2>
+              <Segmented
+                className="mt-3"
+                label="Submission mode"
+                size="sm"
+                value={mode}
+                onChange={setMode}
+                options={[
+                  { value: 'direct', label: 'Direct' },
+                  { value: 'commit', label: 'Commit, reveal later' },
+                ]}
+              />
+              {mode === 'direct' ? (
+                <p className="mt-3 text-[0.875rem] text-lumen-2">The evidence package is pinned publicly, then its URI is submitted on-chain. Anyone can read it immediately.</p>
+              ) : (
+                <Notice tone="caution" className="mt-3" title="Launch gate: commit-reveal">
+                  Only the package hash goes on-chain now, which limits front-running. The package stays in this browser until you reveal it. How reveals are judged is not settled yet.
+                </Notice>
+              )}
+              <div className="cut-md mt-4 flex gap-3 border border-[rgba(90,216,255,0.35)] bg-[rgba(90,216,255,0.06)] p-3 text-[0.84375rem] text-lumen-2">
+                <Shuffle size={16} aria-hidden className="mt-0.5 shrink-0 text-hb" />
+                <span>
+                  Your wallet switches to <strong className="text-lumen">{evChain.name}</strong> for this transaction
+                  {claim.chainId !== sub.chainId ? `, even though the market is on ${marketChain.name}` : ''}. Evidence goes to the Kleros arbitration contract there, and the block timestamp proves timeliness.
+                </span>
+              </div>
+            </section>
+          </aside>
           <form
-            className="grid gap-6"
+            className="grid content-start gap-6 lg:col-start-1 lg:row-span-2 lg:row-start-1"
             onSubmit={(e) => {
               e.preventDefault()
               if (ready && !running) void submit()
@@ -136,21 +174,47 @@ export function EvidenceForm({ id }: { id: string }) {
               </Notice>
             )}
             <fieldset>
-              <legend className="label">Kind</legend>
-              <div role="radiogroup" className="grid gap-2 sm:grid-cols-3">
-                {KINDS.map((k) => (
-                  <button
-                    key={k.value}
-                    type="button"
-                    role="radio"
-                    aria-checked={kind === k.value}
-                    onClick={() => setKind(k.value)}
-                    className={cn('cut-md border p-3 text-left transition-colors', kind === k.value ? 'border-[rgba(255,236,220,0.45)] bg-smoke-2' : 'border-edge bg-smoke hover:border-edge-strong')}
-                  >
-                    <span className="block font-semibold text-lumen">{k.label}</span>
-                    <span className="block text-[0.8125rem] text-lumen-3">{k.help}</span>
-                  </button>
-                ))}
+              <legend id="ev-kind-label" className="label">
+                Kind
+              </legend>
+              <div
+                role="radiogroup"
+                aria-labelledby="ev-kind-label"
+                className="grid items-stretch gap-2 sm:grid-cols-3"
+                onKeyDown={(e) => {
+                  const i = KINDS.findIndex((k) => k.value === kind)
+                  const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+                  if (!d) return
+                  e.preventDefault()
+                  const next = KINDS[(i + d + KINDS.length) % KINDS.length]!
+                  setKind(next.value)
+                  requestAnimationFrame(() => document.getElementById(`ev-kind-${next.value}`)?.focus())
+                }}
+              >
+                {KINDS.map((k) => {
+                  const on = kind === k.value
+                  return (
+                    <button
+                      key={k.value}
+                      id={`ev-kind-${k.value}`}
+                      type="button"
+                      role="radio"
+                      aria-checked={on}
+                      tabIndex={on ? 0 : -1}
+                      onClick={() => setKind(k.value)}
+                      className={cn(
+                        'cut-md relative flex flex-col items-start border p-3 text-left transition-colors',
+                        on ? 'border-[rgba(255,236,220,0.5)] bg-smoke-2 shadow-[inset_0_1px_0_rgba(255,240,228,0.08)]' : 'border-edge bg-smoke hover:border-edge-strong',
+                      )}
+                    >
+                      <span className="flex items-center gap-2 font-semibold text-lumen">
+                        <span aria-hidden className={cn('h-2.5 w-2.5 shrink-0 rotate-45 border transition-colors', on ? 'border-lumen bg-lumen shadow-[0_0_10px_rgba(255,236,220,0.6)]' : 'border-edge-strong')} />
+                        {k.label}
+                      </span>
+                      <span className="mt-1 block text-[0.8125rem] leading-[1.45] text-lumen-3">{k.help}</span>
+                    </button>
+                  )
+                })}
               </div>
             </fieldset>
             <FormField id="ev-title" label="Title" help="One line naming what you demonstrate.">
@@ -252,7 +316,7 @@ export function EvidenceForm({ id }: { id: string }) {
 
             {sub.runner.steps.length > 0 && sub.runner.state !== 'idle' && (
               <div className="glass cut-lg p-5">
-                <TxSteps runner={sub.runner} chainId={sub.chainId} />
+                <TxSteps runner={sub.runner} chainId={sub.chainId} describe={describe} />
               </div>
             )}
             {(submitError ?? sub.runner.error) && (
@@ -276,42 +340,12 @@ export function EvidenceForm({ id }: { id: string }) {
               {!ready && !running && <p className="text-[0.8125rem] text-lumen-3">{!allChecked ? 'Check every admissibility requirement first.' : 'Add a title, a summary and, for a counterexample, the reproduction.'}</p>}
             </div>
           </form>
-
-          <aside className="grid content-start gap-5">
-            <section className="glass cut-lg p-5" aria-labelledby="mode-title">
-              <h2 id="mode-title" className="t-h4">
-                How it is filed
-              </h2>
-              <Segmented
-                className="mt-3"
-                label="Submission mode"
-                size="sm"
-                value={mode}
-                onChange={setMode}
-                options={[
-                  { value: 'direct', label: 'Direct' },
-                  { value: 'commit', label: 'Commit, reveal later' },
-                ]}
-              />
-              {mode === 'direct' ? (
-                <p className="mt-3 text-[0.875rem] text-lumen-2">The evidence package is pinned publicly, then its URI is submitted on-chain. Anyone can read it immediately.</p>
-              ) : (
-                <Notice tone="caution" className="mt-3" title="Launch gate: commit-reveal">
-                  Only the package hash goes on-chain now, which limits front-running. The package stays in this browser until you reveal it. How reveals are judged is not settled yet.
-                </Notice>
-              )}
-              <div className="cut-md mt-4 flex gap-3 border border-[rgba(90,216,255,0.35)] bg-[rgba(90,216,255,0.06)] p-3 text-[0.84375rem] text-lumen-2">
-                <Shuffle size={16} aria-hidden className="mt-0.5 shrink-0 text-hb" />
-                <span>
-                  Your wallet switches to <strong className="text-lumen">{evChain.name}</strong> for this transaction
-                  {claim.chainId !== sub.chainId ? `, even though the market is on ${marketChain.name}` : ''}. Evidence goes to the Kleros arbitration contract there, and the block timestamp proves timeliness.
-                </span>
-              </div>
-            </section>
+          <aside className="grid content-start gap-5 lg:col-start-2 lg:row-start-2" aria-label="Before you file">
             <Notice tone="boundary">{COPY.untrustedContent}</Notice>
             <Notice tone="boundary">{COPY.noAttackAuthorization}</Notice>
             <p className="text-[0.84375rem] text-lumen-3">{COPY.evidenceIsNotPayment}</p>
           </aside>
+
         </div>
       )}
     </div>

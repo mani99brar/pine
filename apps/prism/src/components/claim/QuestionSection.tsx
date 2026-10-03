@@ -78,7 +78,7 @@ export function QuestionSection({ claim }: { claim: ClaimDetail }) {
             {refs.map((r) => (
               <li key={`${r.label}-${r.value}`} className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-[0.84375rem] text-lumen-2">{r.label}</span>
-                <HashChip value={r.value} href={r.href} />
+                <HashChip value={r.value} href={r.href} name={r.label} />
               </li>
             ))}
           </ul>
@@ -128,7 +128,7 @@ export function QuestionSection({ claim }: { claim: ClaimDetail }) {
               <>
                 <dt className="text-lumen-3">Lockfile</dt>
                 <dd className="min-w-0">
-                  <span className="t-code">{env.dependencyLock.path}</span> <HashChip value={env.dependencyLock.hash} className="ml-1 align-middle" />
+                  <span className="t-code">{env.dependencyLock.path}</span> <HashChip value={env.dependencyLock.hash} name="Lockfile hash" className="ml-1 align-middle" />
                 </dd>
               </>
             )}

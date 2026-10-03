@@ -87,7 +87,11 @@ export function DraftsView() {
   if (isLoading) return <LoadingBlock lines={5} />
   if (!drafts.length)
     return (
-      <EmptyState title="No drafts yet" action={<ButtonLink href="/compose" icon={<Plus size={15} aria-hidden />}>Compose a claim</ButtonLink>}>
+      <EmptyState
+        title="No drafts yet"
+        icon={<CrystalGlyph seed="drafts:empty" hue={FAMILY_HEX.FUNC} state="partial" cut={[]} size={84} glow={false} decorative />}
+        action={<ButtonLink href="/compose" icon={<Plus size={15} aria-hidden />}>Compose a claim</ButtonLink>}
+      >
         Drafts save automatically while you compose. Unfinished publications also appear here so you can resume them.
       </EmptyState>
     )

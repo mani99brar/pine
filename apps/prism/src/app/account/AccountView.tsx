@@ -105,7 +105,7 @@ export function AccountView() {
           <ul className="mt-4 grid gap-2">
             {acc.wallets.map((w) => (
               <li key={w.address} className="cut-md flex flex-wrap items-center gap-3 border border-edge bg-void px-3 py-2.5">
-                <HashChip value={w.address} display={shortHash(w.address)} />
+                <HashChip value={w.address} display={shortHash(w.address)} name="Wallet address" />
                 <span className="text-[0.8125rem] text-lumen-3">
                   {w.label ?? getChainOrDefault(w.chainId).name}, verified {formatDate(w.verifiedAt, 'short')}
                 </span>

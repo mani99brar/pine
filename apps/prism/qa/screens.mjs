@@ -53,6 +53,7 @@ const ROUTES = [
 
 const browser = await launch({ webgl: !nowebgl })
 const page = await newPage(browser, { mobile, reduced })
+await page.context().setDefaultTimeout(30000)
 
 async function capture(name, path, opts = {}) {
   if (only && !name.includes(only)) return
@@ -101,6 +102,21 @@ if (!only || 'signed'.includes(only)) {
       await page.waitForTimeout(2500)
     }
     await capture('account-in', '/account', { full: true })
+    // Account journey: connect and link the demo wallet, set a default spending limit, export.
+    page.errors = []
+    const cw = page.getByRole('main').getByRole('button', { name: /connect demo wallet/i }).first()
+    if (await cw.count()) await cw.click()
+    await page.getByRole('button', { name: /link the connected wallet/i }).click({ timeout: 10000 }).catch(() => log('no link button'))
+    await page.getByText(/The connected wallet is linked|Linked/).first().waitFor({ timeout: 15000 }).catch(() => log('wallet not linked'))
+    await page.locator('#pref-limit').fill('120')
+    await page.locator('#pref-limit').press('Enter')
+    await page.getByText(/Default spending limit saved/).waitFor({ timeout: 10000 }).catch(() => log('limit not saved'))
+    const dl = page.waitForEvent('download', { timeout: 10000 }).catch(() => null)
+    await page.getByRole('button', { name: /Export as JSON/ }).click()
+    const file = await dl
+    log(file ? `export: ${file.suggestedFilename()}` : 'no export download')
+    await shot(page, `${tag}-account-journey`, true)
+    report.push({ name: 'account-journey', errors: [...page.errors], overflow: await overflow(page) })
     await go(page, '/dashboard')
     const connect = page.getByRole('button', { name: /connect demo wallet/i }).first()
     if (await connect.count()) await connect.click()
@@ -145,6 +161,20 @@ if (!only || 'journeys'.includes(only)) {
       await page.waitForTimeout(600)
       await shot(page, `${tag}-journey-evidence-done`)
     } else log('submit disabled')
+
+    // Commit-reveal mode: only the package hash goes on-chain.
+    await go(page, '/claims/pine-0010/evidence', { wait: 1500 })
+    await page.getByRole('radio', { name: /Commit, reveal later/ }).click()
+    await page.locator('#ev-title').fill('Nested duplicate keys pass strict mode at depth 3')
+    await page.locator('#ev-summary').fill('Package hash committed now; full repro revealed after the deadline.')
+    for (const cb of await page.locator('fieldset input[type="checkbox"]').all()) await cb.check()
+    const commit = page.getByRole('button', { name: /Commit the evidence hash/ })
+    if (await commit.isEnabled()) {
+      await commit.click()
+      await page.getByText(/Your commitment is on-chain/).waitFor({ timeout: 30000 }).catch(() => log('commitment not done'))
+      await page.waitForTimeout(500)
+      await shot(page, `${tag}-journey-evidence-commit`)
+    } else log('commit disabled')
 
     await go(page, '/claims/pine-0015', { wait: 1500 })
     const fin = page.getByRole('button', { name: /Finish publishing|Continue publishing/ }).first()
@@ -197,6 +227,10 @@ if (!args.includes('--skip-compose') && (!only || 'compose'.includes(only))) {
           await p.press('Enter')
         }
       }
+    }
+    // Policy vocabularies (multiselect chips): pick the first option when none is chosen.
+    for (const group of await page.locator('div[id^="param-"]').all()) {
+      if (!(await group.locator('button[aria-pressed="true"]').count())) await group.locator('button').first().click()
     }
     await page.waitForTimeout(700)
     await c('3-claim')

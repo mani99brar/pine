@@ -295,8 +295,9 @@
   .glass-float {
     background: rgba(28, 22, 19, 0.9);
     border: 1px solid var(--edge);
-    backdrop-filter: blur(16px) saturate(1.25);
+    /* Prefixed first: Lightning CSS drops an unprefixed declaration that a later prefixed one "overrides". */
     -webkit-backdrop-filter: blur(16px) saturate(1.25);
+    backdrop-filter: blur(16px) saturate(1.25);
     box-shadow:
       inset 0 1px 0 rgba(255, 240, 228, 0.07),
       0 24px 60px -24px rgba(0, 0, 0, 0.7);
@@ -665,9 +666,20 @@
     animation: sweep 1.6s var(--ease-glint) infinite;
   }
 
+  /* Clouded (invalid): a faint milky grain behind the content. Kept low so text contrast never changes. */
   .frosted {
+    position: relative;
+    isolation: isolate;
+  }
+  .frosted::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
     background-image: var(--frost-noise);
     background-size: 120px 120px;
+    opacity: 0.07;
   }
 
   .hairline {

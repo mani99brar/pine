@@ -81,7 +81,15 @@ export function useSubmitEvidence(claimId: string): SubmitEvidence {
       // buildEvidenceTx takes the market chain and targets the arbitration chain (request.chainId).
       const tx = buildEvidenceTx({ chainId: marketChainId, questionId, evidenceUri: uri, allowPlaceholderAddresses: demo })
       if (mode === 'commit') {
-        return [{ ...tx, label: 'Submit evidence commitment', description: `Records only the hash of your evidence package on-chain now; reveal the package later. ${tx.description}` }]
+        return [
+          {
+            ...tx,
+            label: 'Submit evidence commitment',
+            description:
+              'Records only the hash of your evidence package with the Kleros arbitration contract. The block timestamp proves when you committed; ' +
+              'the package itself stays private on this device until you reveal it. Costs gas on the arbitration chain, so your wallet switches there first.',
+          },
+        ]
       }
       return [
         {

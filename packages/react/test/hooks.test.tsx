@@ -246,6 +246,28 @@ describe('useSubmitEvidence (demo)', () => {
   })
 })
 
+describe('useSubmitEvidence commit mode (demo)', () => {
+  it('describes a hash-only commitment and never claims the content becomes public', async () => {
+    const { result } = renderHook(() => ({ ev: useSubmitEvidence('pine-0009'), wallet: useWallet() }), { wrapper })
+    act(() => result.current.wallet.connect())
+    await waitFor(() => expect(result.current.ev.blockers).toEqual([]))
+    await act(async () => {
+      await result.current.ev.submit({
+        claimId: 'pine-0009',
+        kind: 'counterexample',
+        title: 'Sealed counterexample',
+        summary: 'Committed now, revealed later.',
+        reproduction: { command: 'pnpm vitest run', environment: 'node 22', expected: 'a', actual: 'b' },
+        attachments: [],
+        mode: 'commit',
+      })
+    })
+    const step = result.current.ev.runner.steps.find((s) => s.id === 'submit_evidence')
+    expect(step?.description).toMatch(/only the hash/)
+    expect(step?.description).not.toMatch(/becomes public/)
+  })
+})
+
 describe('useHotkeys', () => {
   it('handles mod+k, sequences and ignores plain keys in inputs', () => {
     const calls: string[] = []

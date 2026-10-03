@@ -126,3 +126,7 @@ QA uses Playwright with Chromium. Output goes to `.qa/`.
 | `node qa/sheet.mjs <prefix> [cols] [out] [crop]` | Contact sheet of captured frames. |
 | `node qa/peek.mjs /path name [--mobile] [--reduced] [--nowebgl] [--full]` | One-off capture. |
 | `node qa/anchor.mjs /path sectionId name` | Captures a section of a page. |
+| `node qa/keys.mjs /path [tabs] [--mobile] [--shots=3,8]` | Keyboard-only walk: logs every Tab stop, its accessible name and whether a focus ring shows. |
+| `node qa/crop.mjs <name> <y> <height> [x] [width] [scale]` | Crops a region of a full-page capture at native resolution. |
+
+Set `BASE=http://localhost:<port>` to point any script at a server other than 3004. `screens.mjs` also walks the account journey (link the demo wallet, set the default spending limit, export) and evidence in both direct and commit-reveal modes.

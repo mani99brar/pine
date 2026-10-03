@@ -6,7 +6,7 @@ import { useInfiniteClaims } from '@pine/react'
 import type { ClaimQuery, ClaimSort, PolicyFamilyId } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { Search, X } from 'lucide-react'
-import { Constellation } from './Constellation'
+import { Constellation, ConstellationLegend } from './Constellation'
 import { ClaimRow } from './ClaimRow'
 import { Segmented } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, Skeleton } from '@/components/ui/primitives'
@@ -188,15 +188,23 @@ export function LightTable() {
         ) : (
           <>
             {view === 'constellation' && (
-              <section aria-label="Constellation view" className="glass cut-xl mb-6 overflow-hidden p-2 sm:p-4">
+              <section aria-label="Light table view" className="glass cut-xl relative mb-6 overflow-hidden p-2 sm:p-4">
+                <a
+                  href="#claims-list"
+                  className="cut-sm sr-only z-20 bg-lumen px-3 py-2 text-[0.875rem] font-semibold text-umbra focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
+                >
+                  Skip the {claims.length} crystals and go to the list
+                </a>
                 <Constellation claims={claims} nowMs={now} />
-                <p className="px-2 pb-1 pt-3 text-[0.8125rem] text-lumen-3">
-                  Height is the Yes price ({COPY.priceLabel.toLowerCase()}). Size is liquidity, hue is the policy family, and the glow pulses faster as the evidence deadline nears.{' '}
-                  {COPY.volumeCaveat}
-                </p>
+                <div className="grid gap-4 px-2 pb-1 pt-4">
+                  <ConstellationLegend />
+                  <p className="text-[0.8125rem] text-lumen-3">
+                    Height is the Yes price, the {COPY.priceLabel.toLowerCase()}. Size is liquidity. Left of the slit the evidence deadline has passed. {COPY.volumeCaveat}
+                  </p>
+                </div>
               </section>
             )}
-            <section aria-label="Claims list" className={cn('glass cut-xl overflow-hidden')}>
+            <section id="claims-list" tabIndex={-1} aria-label="Claims list" className={cn('glass cut-xl scroll-mt-24 overflow-hidden focus:outline-none')}>
               <ul className="divide-y divide-[var(--edge)]">
                 {claims.map((c) => (
                   <ClaimRow key={c.id} claim={c} nowMs={now} />

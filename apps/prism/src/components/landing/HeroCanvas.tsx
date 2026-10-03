@@ -303,9 +303,9 @@ const causticFragment = /* glsl */ `
     return pow(1.0 - v / 3.0, 3.0);
   }
   void main() {
-    vec2 p = (vUv - 0.5) * vec2(7.0, 4.0);
-    float d = length((vUv - 0.5) * vec2(1.6, 2.4));
-    float fade = smoothstep(0.62, 0.05, d);
+    vec2 p = (vUv - 0.5) * vec2(4.6, 2.8);
+    float d = length((vUv - 0.5) * vec2(2.0, 2.0));
+    float fade = pow(smoothstep(0.98, 0.0, d), 1.6);
     float c = caustic(p, uTime);
     vec3 warm = vec3(1.0, 0.72, 0.36);
     vec3 cool = vec3(0.4, 0.82, 1.0);
@@ -330,11 +330,13 @@ function CausticFloor({ start }: { start: React.RefObject<number> }) {
   useFrame((state) => {
     const t = state.clock.elapsedTime - (start.current ?? 0)
     mat.uniforms.uTime!.value = state.clock.elapsedTime
-    mat.uniforms.uOpacity!.value = 0.5 * phase(t, 1.6, 2.8)
+    mat.uniforms.uOpacity!.value = 0.42 * phase(t, 1.6, 2.8)
   })
+  // Tilted toward the camera and kept inside the frame, so the pool reads as light on a bench rather
+  // than a thin streak seen edge-on or a band clipped by the canvas edge.
   return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0.4, -1.62, 0]} material={mat}>
-      <planeGeometry args={[7, 4]} />
+    <mesh rotation={[-Math.PI / 2 + 0.62, 0, 0]} position={[0.35, -1.18, -0.3]} material={mat}>
+      <planeGeometry args={[4.4, 2.2]} />
     </mesh>
   )
 }

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useClaims, useStats } from '@pine/react'
 import { formatAmount } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { Constellation } from '@/components/table/Constellation'
+import { Constellation, ConstellationLegend } from '@/components/table/Constellation'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { CopyButton } from '@/components/ui/interactive'
 import { Skeleton } from '@/components/ui/primitives'
@@ -47,8 +47,9 @@ export function TablePreview() {
         )}
         <div className="glass cut-xl mt-8 p-2 sm:p-4">
           {q.data && now !== null ? <Constellation claims={q.data.items} nowMs={now} compact /> : <Skeleton className="aspect-[1200/440] w-full" />}
+          <ConstellationLegend className="px-2 pb-1 pt-4" />
         </div>
-        <p className="mt-3 text-[0.8125rem] text-lumen-3">{COPY.volumeCaveat}</p>
+        <p className="mt-3 text-[0.8125rem] text-lumen-3">Height is the Yes price, size is liquidity, and the slit is now. {COPY.volumeCaveat}</p>
       </div>
     </section>
   )

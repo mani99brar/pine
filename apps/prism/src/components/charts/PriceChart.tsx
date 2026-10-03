@@ -88,12 +88,13 @@ export function PriceChart({ claimId, evidence = [], deadline }: { claimId: stri
       </div>
       <div
         ref={ref}
-        className="relative h-[260px] w-full outline-none"
+        className="relative h-[260px] w-full rounded-[4px] outline-none focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-hb"
         tabIndex={0}
-        role="img"
+        role="group"
+        aria-roledescription="chart"
         aria-label={
           first && last
-            ? `Yes price over ${range}: from ${formatPrice(first.yes)} to ${formatPrice(last.yes)}. ${COPY.priceLabel}.`
+            ? `Yes price over ${range}: from ${formatPrice(first.yes)} to ${formatPrice(last.yes)}. ${COPY.priceLabel}. Use the left and right arrow keys to read prices.`
             : 'Price history'
         }
         onMouseMove={(e) => onMove(e.clientX, e.currentTarget.getBoundingClientRect())}

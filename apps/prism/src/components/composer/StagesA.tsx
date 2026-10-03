@@ -239,17 +239,36 @@ export function StagePolicy({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
   return (
     <div>
       <StageHeader step="policy">A policy defines what counts as a counterexample. Its version and content hash go into the question, so later edits to the policy never change this claim.</StageHeader>
-      <div role="radiogroup" aria-label="Policy" className="grid gap-3">
-        {POLICIES.map((p) => {
+      <div
+        role="radiogroup"
+        aria-label="Policy"
+        className="grid gap-3"
+        onKeyDown={(e) => {
+          // Arrow keys move between enabled policies and select them, as in a native radio group.
+          const d = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0
+          if (!d || c.frozen) return
+          const enabled = POLICIES.filter((p) => p.status === 'enabled')
+          const i = Math.max(0, enabled.findIndex((p) => p.id === selected))
+          const next = enabled[(i + d + enabled.length) % enabled.length]
+          if (!next) return
+          e.preventDefault()
+          c.update({ spec: { policyId: next.id, claimClass: undefined } })
+          requestAnimationFrame(() => document.getElementById(`policy-${next.id}`)?.focus())
+        }}
+      >
+        {POLICIES.map((p, idx) => {
           const gated = p.status !== 'enabled'
           const active = selected === p.id
+          const firstEnabled = !selected && idx === POLICIES.findIndex((x) => x.status === 'enabled')
           return (
             <button
               key={p.id}
+              id={`policy-${p.id}`}
               type="button"
               role="radio"
               aria-checked={active}
               aria-disabled={gated}
+              tabIndex={active || firstEnabled || gated ? 0 : -1}
               disabled={c.frozen}
               onClick={() => {
                 if (gated) return
@@ -325,6 +344,46 @@ function ParamField({ p, value, onChange, disabled, error }: { p: PolicyParamete
       {!p.required && <span className="ml-1.5 text-[0.8rem] font-normal text-lumen-3">optional</span>}
     </>
   )
+  if (p.kind === 'multiselect' && p.options?.length) {
+    // A fixed vocabulary from the policy: pick from it (chips), never free text.
+    const picked = new Set(Array.isArray(value) ? value : [])
+    const toggle = (v: string) => {
+      const next = new Set(picked)
+      if (next.has(v)) next.delete(v)
+      else next.add(v)
+      // "none" excludes every fault, so it cannot be combined with the others.
+      if (v === 'none' && next.has('none')) return onChange(['none'])
+      next.delete(v === 'none' ? '' : 'none')
+      onChange(p.options!.map((o) => o.value).filter((x) => next.has(x)))
+    }
+    return (
+      <fieldset aria-describedby={`${id}-help`}>
+        <legend className="label">
+          {label}
+        </legend>
+        <p id={`${id}-help`} className="help -mt-1 mb-2.5">
+          {p.help}
+        </p>
+        <div className="flex flex-wrap gap-2" id={id}>
+          {p.options.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              className="chip"
+              aria-pressed={picked.has(o.value)}
+              disabled={disabled}
+              onClick={() => toggle(o.value)}
+              title={o.help}
+            >
+              <span aria-hidden className={cn('h-2 w-2 rotate-45 border transition-colors', picked.has(o.value) ? 'border-lumen bg-lumen' : 'border-edge-strong')} />
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {error && <p className="mt-1.5 text-[0.8125rem] font-medium text-ha">{error}</p>}
+      </fieldset>
+    )
+  }
   if (p.kind === 'list' || p.kind === 'multiselect') {
     return <ListEditor id={id} label={p.label} help={p.help} items={Array.isArray(value) ? value : []} onChange={onChange} disabled={disabled} placeholder={typeof p.example === 'string' ? p.example : p.placeholder} />
   }
@@ -418,7 +477,16 @@ export function StageClaim({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
           </fieldset>
         )}
 
-        <FormField id="fault-model" label="Fault model" optional help="Allowed faults, for example process crash or timeout. Do not silently assume arbitrary corruption.">
+        <FormField
+          id="fault-model"
+          label={policy?.parameters.some((x) => x.key === 'faultModel') ? 'Fault model details' : 'Fault model'}
+          optional
+          help={
+            policy?.parameters.some((x) => x.key === 'faultModel')
+              ? `Anything the ${policy.id} fault list above does not say, for example limits on retries or timing. Do not silently assume arbitrary corruption.`
+              : 'Allowed faults, for example process crash or timeout. Do not silently assume arbitrary corruption.'
+          }
+        >
           <textarea id="fault-model" className="field" rows={2} value={spec.faultModel ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { faultModel: e.target.value || undefined } })} />
         </FormField>
         <FormField id="allowed-inputs" label="Allowed inputs" optional>
@@ -563,8 +631,8 @@ export function StageDeadlines({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
           ].map(([label, sub, color]) => (
             <div key={label} className="min-w-0">
               <div className="h-[3px] rounded-full" style={{ background: color, boxShadow: `0 0 10px ${color}` }} />
-              <p className="mt-2 truncate font-semibold text-lumen-2">{label}</p>
-              <p className="truncate text-lumen-3">{sub}</p>
+              <p className="mt-2 font-semibold leading-[1.3] text-lumen-2">{label}</p>
+              <p className="mt-0.5 leading-[1.3] text-lumen-3">{sub}</p>
             </div>
           ))}
         </div>

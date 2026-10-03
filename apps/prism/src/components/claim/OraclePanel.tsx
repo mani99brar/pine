@@ -141,7 +141,10 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
           <div className="flex justify-between gap-3">
             <dt className="text-lumen-3">Court</dt>
             <dd className="text-right text-lumen">
-              {o?.arbitration.court ?? arb.courtName}, {arb.jurors} jurors
+              {(() => {
+                const court = o?.arbitration.court ?? arb.courtName
+                return /juror/i.test(court) ? court : `${court}, ${arb.jurors} jurors`
+              })()}
             </dd>
           </div>
           {o?.arbitration.disputeId && (

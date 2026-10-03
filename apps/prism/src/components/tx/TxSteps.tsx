@@ -117,7 +117,18 @@ function ManualStep({ runner, step }: { runner: TxRunner; step: TxRunnerStep }) 
 }
 
 /** Steps of any resumable run (publish, finish funding, evidence, redeem), lit one facet at a time. */
-export function TxSteps({ runner, chainId, className }: { runner: TxRunner; chainId?: number; className?: string }) {
+export function TxSteps({
+  runner,
+  chainId,
+  className,
+  describe,
+}: {
+  runner: TxRunner
+  chainId?: number
+  className?: string
+  /** Optional per-step description override (for copy the shared step builder gets wrong in a mode). */
+  describe?: (s: TxRunnerStep) => string | undefined
+}) {
   const currentId = runner.current?.id
   return (
     <ol className={cn('relative', className)} aria-label="Transaction steps">
@@ -146,7 +157,7 @@ export function TxSteps({ runner, chainId, className }: { runner: TxRunner; chai
                 </p>
               </div>
               <p className="mt-1 text-[0.875rem] leading-[1.5] text-lumen-2 [overflow-wrap:anywhere]">
-                <Description text={s.description} />
+                <Description text={describe?.(s) ?? s.description} />
               </p>
               {((s.collateralCost && Number(s.collateralCost.amount) > 0) || (s.estimatedCost && Number(s.estimatedCost.amount) > 0)) && (
                 <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-lumen-3">

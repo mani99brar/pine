@@ -59,7 +59,7 @@ export function PrismBeam({
   const beamOpacity = (k: keyof BeamPrices) => {
     if (!show(k)) return 0
     if (outcome === 'no' || (outcome === undefined && k === 'no')) return outcome === 'no' ? 0.45 : 0.5
-    if (k === 'invalid') return 0.7
+    if (k === 'invalid') return 0.72
     return 0.95
   }
   const transition = reduce ? { duration: 0 } : { duration: 0.9, ease: [0.16, 1, 0.3, 1] as const }
@@ -105,7 +105,11 @@ export function PrismBeam({
               <filter id={`${uid}-frost`} x="-5%" y="-20%" width="110%" height="140%">
                 <feTurbulence type="fractalNoise" baseFrequency="0.02 0.25" numOctaves={2} seed={7} result="n" />
                 <feDisplacementMap in="SourceGraphic" in2="n" scale="5" result="d" />
-                <feGaussianBlur in="d" stdDeviation="1.2" />
+                <feGaussianBlur in="d" stdDeviation="1.2" result="b" />
+                {/* milky grain: knock holes into the beam so it reads clouded, not solid */}
+                <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves={2} seed={3} result="g" />
+                <feColorMatrix in="g" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 -0.95 1.12" result="ga" />
+                <feComposite in="b" in2="ga" operator="in" />
               </filter>
             </defs>
 
@@ -185,11 +189,18 @@ export function PrismBeam({
           <ul className="grid h-full content-between gap-3 md:gap-2">
             {labels.map((l) => {
               const visible = outcome ? outcome === l.k : lit
+              // Unlit outcomes dim their beam swatch, never their text: labels stay readable (≥ 4.5:1).
               return (
-                <li key={l.k} className={cn('min-w-0 border-l-2 pl-3 transition-opacity duration-500', visible ? 'opacity-100' : 'opacity-35')} style={{ borderColor: l.color }}>
-                  <p className={cn('text-[0.8125rem] leading-[1.3]', compactLabels ? 'text-lumen-3' : 'text-lumen-2')}>{l.title}</p>
+                <li
+                  key={l.k}
+                  className="min-w-0 border-l-2 pl-3 transition-[border-color] duration-500"
+                  style={{ borderColor: visible ? l.color : `color-mix(in oklab, ${l.color} 28%, transparent)` }}
+                >
+                  <p className={cn('text-[0.8125rem] leading-[1.3]', compactLabels || !visible ? 'text-lumen-3' : 'text-lumen-2')}>{l.title}</p>
                   {outcome ? (
-                    <p className="t-figure mt-0.5 text-[1.5rem] leading-none text-lumen">{outcome === l.k ? 'Final' : '—'}</p>
+                    <p className={cn('t-figure mt-0.5 leading-none', outcome === l.k ? 'text-[1.5rem] text-lumen' : 'text-[1.125rem] text-lumen-3')}>
+                      {outcome === l.k ? 'Final' : <span aria-label="Not the outcome">—</span>}
+                    </p>
                   ) : lit ? (
                     <p className={cn('t-figure mt-0.5 leading-none', l.k === 'invalid' ? 'text-[1.25rem] text-lumen-2' : 'text-[2rem] text-lumen')}>
                       <AnimatedNumber value={p[l.k]} format={(n) => formatPrice(n)} />

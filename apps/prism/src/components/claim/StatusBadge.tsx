@@ -16,7 +16,8 @@ export function StatusBadge({ status, outcome, className, size = 'md' }: { statu
         <OutcomeIcon outcome={outcome} size={size === 'md' ? 14 : 12} style={{ color }} />
       ) : (
         <span aria-hidden className="relative inline-flex h-2 w-2">
-          {status === 'open' && <span className="absolute inset-0 animate-ping rounded-full opacity-60" style={{ background: color }} />}
+          {/* Live: a soft breathing halo (the light-table pulse), not a generic radar ping. */}
+          {status === 'open' && <span className="absolute -inset-[3px] animate-[glow-pulse_2.4s_ease-in-out_infinite] rounded-full opacity-60 blur-[3px]" style={{ background: color }} />}
           <span className="relative h-2 w-2 rounded-full" style={{ background: color, boxShadow: status === 'failed' ? undefined : `0 0 8px ${color}` }} />
         </span>
       )}

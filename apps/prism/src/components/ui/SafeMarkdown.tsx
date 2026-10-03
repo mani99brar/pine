@@ -15,10 +15,20 @@ const components: Components = {
   a: ({ href, children }) => {
     const ok = safeHref(href)
     if (!ok) return <span className="text-lumen-2">{children}</span>
+    let host = ''
+    try {
+      host = new URL(ok).hostname
+    } catch {
+      return <span className="text-lumen-2">{children}</span>
+    }
+    // Link text is untrusted, so the real destination host is always printed next to it.
     return (
-      <a href={ok} target="_blank" rel="noopener noreferrer nofollow" className="link break-all" title={ok}>
-        {children}
-      </a>
+      <>
+        <a href={ok} target="_blank" rel="noopener noreferrer nofollow" className="link break-all" title={ok}>
+          {children}
+        </a>
+        <span className="t-code text-[0.8em] text-lumen-3"> ({host})</span>
+      </>
     )
   },
   img: ({ alt }) => <span className="text-lumen-3">[image: {alt || 'no description'}]</span>,

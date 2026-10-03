@@ -9,6 +9,7 @@ import { useClaims, useDrafts, usePortfolio, useWallet } from '@pine/react'
 import { AlertTriangle, Coins, Hourglass, Wrench } from 'lucide-react'
 import { ClaimRow } from '@/components/table/ClaimRow'
 import { StatusBadge } from '@/components/claim/StatusBadge'
+import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { Button, ButtonLink } from '@/components/ui/Button'
 import { AnimatedNumber } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, LoadingBlock, Skeleton } from '@/components/ui/primitives'
@@ -26,14 +27,14 @@ interface Alert {
   tone: 'caution' | 'info' | 'critical'
 }
 
-function alertsFor(mine: ClaimSummary[], positions: OutcomePosition[], unfinished: number, now: number): Alert[] {
+function alertsFor(mine: ClaimSummary[], positions: OutcomePosition[], unfinished: number, now: number, sym: string): Alert[] {
   const out: Alert[] = []
   for (const p of positions.filter((x) => x.redeemable)) {
     out.push({
       id: `redeem-${p.claimId}-${p.outcome}`,
       icon: <Coins size={16} aria-hidden className="text-hb" />,
       title: `Redeemable: ${formatClaimNumber(p.claimNumber)}`,
-      detail: `${formatAmount(p.redeemableAmount ?? p.value, { maxDecimals: 2 })} redeemable under Seer's native rules.`,
+      detail: `${formatAmount(p.redeemableAmount ?? p.value, { maxDecimals: 2 })} ${sym} redeemable under Seer's native payout rules.`,
       href: `/claims/${p.claimId}`,
       action: 'Redeem',
       tone: 'info',
@@ -68,18 +69,27 @@ export function DashboardView() {
   const myClaims = useMemo(() => (wallet.address ? (mine.data?.items ?? []) : []), [mine.data, wallet.address])
   const positions = useMemo(() => portfolio.data?.positions ?? [], [portfolio.data])
   const lps = portfolio.data?.liquidity ?? []
-  const alerts = useMemo(() => (now ? alertsFor(myClaims, positions, unfinished, now) : []), [myClaims, positions, unfinished, now])
+  const symbol = myClaims[0]?.collateralSymbol ?? 'sDAI'
+  const alerts = useMemo(() => (now ? alertsFor(myClaims, positions, unfinished, now, symbol) : []), [myClaims, positions, unfinished, now, symbol])
+  // Positions carry the claim status but not its outcome: look the outcome up so a resolved claim reads
+  // "Counterexample demonstrated" (and so on) like everywhere else, not a generic "Resolved".
+  const resolvedQ = useClaims({ status: ['resolved', 'settled'], limit: 100 })
+  const outcomeOf = useMemo(() => new Map((resolvedQ.data?.items ?? []).map((c) => [c.id, c.outcome])), [resolvedQ.data])
 
   if (!mounted) return <Skeleton className="h-64 w-full" />
   if (!wallet.isConnected || !wallet.address)
     return (
-      <EmptyState title="Connect a wallet to see your dashboard" action={<Button onClick={() => wallet.connect()}>{wallet.isDemo ? 'Connect demo wallet' : 'Connect wallet'}</Button>}>
+      <EmptyState
+        title="Connect a wallet to see your dashboard"
+        icon={<CrystalGlyph seed="dashboard:unlit" hue="#A69789" state="unlit" size={84} decorative />}
+        action={<Button onClick={() => wallet.connect()}>{wallet.isDemo ? 'Connect demo wallet' : 'Connect wallet'}</Button>}
+      >
         Your claims, outcome positions, liquidity and anything waiting on you appear here. Connecting a wallet signs nothing and spends nothing.
       </EmptyState>
     )
   if (portfolio.isError) return <ErrorState error={portfolio.error} onRetry={() => void portfolio.refetch()} />
   const t = portfolio.data?.totals
-  const sym = myClaims[0]?.collateralSymbol ?? 'sDAI'
+  const sym = symbol
 
   return (
     <div className="grid gap-12">
@@ -138,7 +148,7 @@ export function DashboardView() {
                     {formatClaimNumber(p.claimNumber)} {p.claimTitle}
                   </Link>
                   <p className="mt-0.5 flex flex-wrap items-center gap-2 text-[0.8125rem] text-lumen-3">
-                    <StatusBadge status={p.status} size="sm" />
+                    <StatusBadge status={p.status} outcome={outcomeOf.get(p.claimId)} size="sm" />
                     {formatAmount(p.balance, { maxDecimals: 2 })} {p.outcome === 'yes' ? 'Yes' : p.outcome === 'no' ? 'No' : 'Invalid result'} tokens at {formatPriceCents(p.markPrice)}
                   </p>
                 </div>

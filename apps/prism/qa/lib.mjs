@@ -37,6 +37,7 @@ export async function newPage(browser, { mobile = false, reduced = false, video 
     colorScheme: 'dark',
     reducedMotion: reduced ? 'reduce' : 'no-preference',
     permissions: ['clipboard-read', 'clipboard-write'],
+    acceptDownloads: true,
     ...(video ? { recordVideo: { dir: join(OUT, 'video'), size: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 } } } : {}),
   })
   const page = await ctx.newPage()
@@ -56,7 +57,9 @@ export async function newPage(browser, { mobile = false, reduced = false, video 
 }
 
 export async function go(page, path, { wait = 700 } = {}) {
-  await page.goto(BASE + path + (path.includes('?') ? '&' : '?') + 'qa=1', { waitUntil: 'networkidle', timeout: 60000 })
+  // Keep the hash last: "/claims/x#oracle" → "/claims/x?qa=1#oracle".
+  const [p, hash] = path.split('#')
+  await page.goto(BASE + p + (p.includes('?') ? '&' : '?') + 'qa=1' + (hash ? `#${hash}` : ''), { waitUntil: 'networkidle', timeout: 60000 })
   await page.waitForTimeout(wait)
 }
 

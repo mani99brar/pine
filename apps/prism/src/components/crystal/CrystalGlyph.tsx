@@ -87,6 +87,10 @@ function CrystalGlyphImpl({
   const dimFactor = state === 'dim' ? 0.42 : state === 'frosted' ? 0.55 : state === 'settling' ? 0.85 : state === 'unlit' ? 0 : 1
   const showGlow = glow && (state === 'luminous' || state === 'settling' || state === 'fractured' || sealed)
   const width = size * ASPECT
+  // Small glyphs (rows, legend, light table) keep hairlines visible: strokes stop scaling below ~90px,
+  // otherwise a 0.8-unit outline becomes a sub-pixel line and dashed (unlit, uncut) facets vanish.
+  const ve = size < 90 ? ('non-scaling-stroke' as const) : undefined
+  const sw = (w: number) => (ve ? Math.max(0.75, w * 1.25) : w)
 
   const body = (
     <g>
@@ -100,9 +104,10 @@ function CrystalGlyphImpl({
               fill="rgba(255,236,220,0.02)"
               stroke="#A69789"
               strokeOpacity={0.55}
-              strokeWidth={0.7}
-              strokeDasharray="2.2 2.2"
+              strokeWidth={sw(0.7)}
+              strokeDasharray={ve ? '2 2' : '2.2 2.2'}
               strokeLinejoin="round"
+              vectorEffect={ve}
             />
           )
         }
@@ -113,7 +118,8 @@ function CrystalGlyphImpl({
               fill={`url(#${uid}-g-${f.id})`}
               stroke="#F5EDE4"
               strokeOpacity={state === 'dim' ? 0.22 : 0.38}
-              strokeWidth={0.6}
+              strokeWidth={ve ? 0.5 : 0.6}
+              vectorEffect={ve}
               strokeLinejoin="round"
               initial={animateCut && !reduce ? { opacity: 0 } : false}
               animate={{ opacity: 1 }}
@@ -135,15 +141,16 @@ function CrystalGlyphImpl({
       {/* Specular edges */}
       {state !== 'unlit' &&
         shape.edges.map(([a, b], i) => (
-          <line key={i} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#FFFFFF" strokeOpacity={state === 'dim' ? 0.12 : sealed ? 0.7 : 0.4} strokeWidth={sealed ? 0.9 : 0.6} />
+          <line key={i} x1={a[0]} y1={a[1]} x2={b[0]} y2={b[1]} stroke="#FFFFFF" strokeOpacity={state === 'dim' ? 0.12 : sealed ? 0.7 : 0.4} strokeWidth={ve ? 0.5 : sealed ? 0.9 : 0.6} vectorEffect={ve} />
         ))}
       <polygon
         points={pointsAttr(shape.outline)}
         fill="none"
         stroke={state === 'unlit' ? '#A69789' : '#F5EDE4'}
-        strokeOpacity={state === 'dim' ? 0.3 : state === 'unlit' ? 0.6 : sealed ? 0.85 : 0.55}
-        strokeWidth={sealed ? 1.1 : 0.8}
-        strokeDasharray={state === 'unlit' ? '3 2.5' : undefined}
+        strokeOpacity={state === 'dim' ? 0.3 : state === 'unlit' ? 0.75 : sealed ? 0.85 : 0.55}
+        strokeWidth={sw(sealed ? 1.1 : 0.8)}
+        strokeDasharray={state === 'unlit' ? (ve ? '2.5 2' : '3 2.5') : undefined}
+        vectorEffect={ve}
         strokeLinejoin="round"
       />
     </g>
@@ -215,7 +222,7 @@ function CrystalGlyphImpl({
           <motion.g
             clipPath={`url(#${uid}-up)`}
             initial={animateFracture && !reduce ? { x: 0, y: 0, rotate: 0 } : false}
-            animate={{ x: -1.8, y: -1.4, rotate: -1.2 }}
+            animate={{ x: -2.2, y: -1.8, rotate: -1.4 }}
             transition={{ delay: 0.55, duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
             style={{ transformOrigin: '50px 60px' }}
           >
@@ -224,7 +231,7 @@ function CrystalGlyphImpl({
           <motion.g
             clipPath={`url(#${uid}-lo)`}
             initial={animateFracture && !reduce ? { x: 0, y: 0, rotate: 0 } : false}
-            animate={{ x: 1.8, y: 1.6, rotate: 1.1 }}
+            animate={{ x: 2.2, y: 2, rotate: 1.3 }}
             transition={{ delay: 0.55, duration: 0.6, ease: [0.34, 1.56, 0.64, 1] }}
             style={{ transformOrigin: '50px 100px' }}
           >
@@ -242,6 +249,21 @@ function CrystalGlyphImpl({
             animate={{ pathLength: 1, opacity: 0.9 }}
             transition={{ duration: 0.6, ease: [0.65, 0, 0.35, 1] }}
           />
+          {/* The moment of fracture: one burst of H-alpha light from the crack, then it settles. */}
+          {animateFracture && !reduce && (
+            <motion.ellipse
+              cx={50}
+              cy={(crack.path[0]![1] + crack.path[crack.path.length - 1]![1]) / 2}
+              rx={46}
+              ry={18}
+              fill={OUTCOME_HEX.yes}
+              filter={`url(#${uid}-crackglow)`}
+              initial={{ opacity: 0, scale: 0.3 }}
+              animate={{ opacity: [0, 0.75, 0], scale: [0.3, 1.25, 1.6] }}
+              transition={{ delay: 0.5, duration: 1.1, times: [0, 0.25, 1], ease: [0.16, 1, 0.3, 1] }}
+              style={{ mixBlendMode: 'screen' }}
+            />
+          )}
           <motion.polyline
             points={pointsAttr(crack.path)}
             fill="none"

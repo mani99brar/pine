@@ -25,7 +25,9 @@ if (which === 'hero') {
   }
 } else if (which === 'fracture') {
   await page.goto(BASE + '/claims/pine-0002?qa=1', { waitUntil: 'domcontentloaded' })
-  await frames('m-fracture', 8, 250)
+  // Start the frames when the claim's crystal mounts, so the sequence covers crack, burst and parting.
+  await page.locator('header svg[role="img"]').first().waitFor({ timeout: 30000 })
+  await frames('m-fracture', 10, 140)
 }
 log('errors', page.errors.slice(0, 5))
 await browser.close()

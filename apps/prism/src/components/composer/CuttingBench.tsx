@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { ClaimComposer } from '@pine/react'
 import { formatAmount, formatDate, shortHash } from '@pine/core'
@@ -44,7 +45,7 @@ export function facetState(c: ClaimComposer, furthest: UiStep): FacetState {
       market: d.publication?.marketAddress,
     },
     values: {
-      commit: d.source ? `${d.source.owner}/${d.source.repo} ${d.source.commit.sha.slice(0, 7)}` : undefined,
+      commit: d.source ? d.source.commit.sha.slice(0, 12) : undefined,
       policy: c.policy ? `${c.policy.id}@${c.policy.version}` : undefined,
       question: c.question ? shortHash(c.question.hash) : undefined,
       environment: env.runtime ? shortHash(env.envHash) : undefined,
@@ -69,7 +70,22 @@ export function CuttingBench({ c, facets, compact }: { c: ClaimComposer; facets:
   if (compact) {
     return (
       <div className="flex items-center gap-3">
-        <CrystalGlyph seed={c.draft.id} facetSeeds={facets.seeds} hue={hue} state="partial" cut={facets.cut} size={64} glow={false} animateCut sealed={sealed} decorative />
+        <div className="relative shrink-0">
+          <CrystalGlyph seed={c.draft.id} facetSeeds={facets.seeds} hue={hue} state="partial" cut={facets.cut} size={64} glow={false} animateCut sealed={sealed} decorative />
+          <AnimatePresence>
+            {sealed && !reduce && (
+              <motion.span
+                key="seal-sm"
+                aria-hidden
+                className="pointer-events-none absolute left-1/2 top-1/2 h-12 w-12 -translate-x-1/2 -translate-y-1/2 rounded-full"
+                style={{ boxShadow: '0 0 0 1.5px rgba(255,236,220,0.75), 0 0 22px 4px rgba(90,216,255,0.35)' }}
+                initial={{ scale: 0.4, opacity: 0.9 }}
+                animate={{ scale: 2.2, opacity: 0 }}
+                transition={{ duration: 1.4, ease: [0.16, 1, 0.3, 1] }}
+              />
+            )}
+          </AnimatePresence>
+        </div>
         <div className="min-w-0">
           <p className="truncate text-[0.875rem] font-semibold text-lumen">{title || 'Untitled claim'}</p>
           <p className="tnum text-[0.78rem] text-lumen-3">
@@ -137,9 +153,16 @@ export function CuttingBench({ c, facets, compact }: { c: ClaimComposer; facets:
                 {isCut && <Check size={10} className="-rotate-45 text-umbra" strokeWidth={3} />}
               </span>
               <span className="w-[6.25rem] shrink-0">{FACET_LABEL[f]}</span>
-              <span className={cn('min-w-0 flex-1 truncate', isCut ? 'text-lumen-2' : 'text-lumen-3')}>
-                {facets.values[f] && (isCut || f === 'deadline' || f === 'oracle' || f === 'funding') ? (
-                  <span className={f === 'question' || f === 'environment' || f === 'manifest' || f === 'market' ? 't-code text-[0.75rem]' : ''}>{facets.values[f]}</span>
+              <span className={cn('min-w-0 flex-1 truncate', isCut ? 'text-lumen-2' : 'text-lumen-3')} title={f === 'commit' ? c.draft.source?.commit.sha : undefined}>
+                {facets.values[f] && isCut ? (
+                  <span className={f === 'commit' || f === 'question' || f === 'environment' || f === 'manifest' || f === 'market' ? 't-code text-[0.75rem]' : ''}>{facets.values[f]}</span>
+                ) : facets.values[f] && (f === 'deadline' || f === 'oracle' || f === 'funding') ? (
+                  // Prefilled defaults: shown, but clearly not cut until the creator reviews that stage.
+                  <span>
+                    <span className="sr-only">not cut, default </span>
+                    {facets.values[f]}
+                    <span aria-hidden className="ml-1.5 text-[0.75rem] text-lumen-3">default</span>
+                  </span>
                 ) : (
                   'not cut'
                 )}
@@ -155,8 +178,17 @@ export function CuttingBench({ c, facets, compact }: { c: ClaimComposer; facets:
 
 /** Step rail: each step is a small facet; done, current, blocked or locked. */
 export function FacetRail({ step, furthest, onGo, blocked, frozen }: { step: UiStep; furthest: UiStep; onGo: (s: UiStep) => void; blocked: Set<UiStep>; frozen: boolean }) {
+  const navRef = useRef<HTMLElement | null>(null)
+  const reduce = useReduceMotion()
+  useEffect(() => {
+    const nav = navRef.current
+    const cur = nav?.querySelector<HTMLElement>('[aria-current="step"]')
+    if (!nav || !cur || nav.scrollWidth <= nav.clientWidth) return
+    const left = cur.offsetLeft - (nav.clientWidth - cur.offsetWidth) / 2
+    nav.scrollTo({ left: Math.max(0, left), behavior: reduce ? 'auto' : 'smooth' })
+  }, [step, reduce])
   return (
-    <nav aria-label="Composer steps" className="overflow-x-auto">
+    <nav ref={navRef} aria-label="Composer steps" className="relative overflow-x-auto pb-1">
       <ol className="flex min-w-max items-center gap-1">
         {UI_STEPS.map((s, i) => {
           const current = s.id === step

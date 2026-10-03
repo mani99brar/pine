@@ -108,14 +108,16 @@ function Readout({ prices, live }: { prices: BeamPrices; live: { id: string; num
           ] as const
         ).map(([k, label]) => (
           <div key={k} className="min-w-0 border-l-2 pl-2.5" style={{ borderColor: OUTCOME_HEX[k] }}>
-            <dt className="min-h-[2.5em] text-[0.72rem] leading-[1.25] text-lumen-3">{label}</dt>
+            <dt className="min-h-[2.5em] text-[0.75rem] leading-[1.25] text-lumen-2">{label}</dt>
             <dd className="t-figure text-[1.6rem] leading-tight text-lumen">
               <AnimatedNumber value={prices[k]} format={formatPrice} />
             </dd>
           </div>
         ))}
       </dl>
-      <p className="mt-2 text-[0.75rem] text-lumen-3">Beam widths follow this market. {COPY.priceLabel}.</p>
+      <p className="mt-2 text-[0.78rem] leading-[1.45] text-lumen-3">
+        The three beams leaving the crystal are these outcomes, and each beam&apos;s width is its price. Yes is the {COPY.priceLabel.toLowerCase()}.
+      </p>
     </div>
   )
 }
@@ -166,7 +168,10 @@ export function Hero() {
             </h1>
           </div>
 
-          <div ref={stageRef} className="relative aspect-[8/7] w-full [grid-area:stage]">
+          <div
+            ref={stageRef}
+            className="relative aspect-[8/7] w-full [grid-area:stage] [mask-image:linear-gradient(90deg,transparent_0,#000_9%,#000_80%,transparent_99%)]"
+          >
             <div className="absolute inset-[8%] rounded-full bg-[radial-gradient(closest-side,rgba(255,182,72,0.09),transparent)]" aria-hidden />
             <HeroPoster prices={prices} hue={hue} seed={seed} mode={mode} />
             {wantGl && (

@@ -72,7 +72,7 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
                   </div>
                   <p className="tnum text-right text-[0.875rem] text-lumen">
                     {formatAmount(p.value, { maxDecimals: 2 })} {sym}
-                    {p.redeemable && <span className="block text-[0.72rem] text-hb">redeemable</span>}
+                    {p.redeemable && <span className="block text-[0.75rem] text-hb">redeemable</span>}
                   </p>
                 </li>
               ))}
@@ -256,9 +256,8 @@ export function PublishingRecovery({ claim }: { claim: ClaimDetail }) {
         <h2 id="failed-title" className="t-h3 flex items-center gap-2">
           <CircleSlash size={20} aria-hidden className="text-lumen-3" /> Publication failed
         </h2>
-        <p className="mt-2 max-w-[70ch] text-lumen-2">
-          {pub?.note ?? 'Creation stopped and cannot be resumed. Nothing beyond the confirmed steps below exists on-chain, and no market can be traded or answered.'}
-        </p>
+        {/* The reason (pub.note) is in "What happens next"; this panel says what exists on-chain. */}
+        <p className="mt-2 max-w-[70ch] text-lumen-2">Creation stopped and cannot be resumed. Only the confirmed steps below exist on-chain, and no market can be traded or answered.</p>
         <div className="mt-5">
           <RecordedSteps claim={claim} />
         </div>

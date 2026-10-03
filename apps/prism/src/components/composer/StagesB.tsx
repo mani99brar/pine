@@ -145,11 +145,15 @@ export function StageFunding({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
                     <td className="px-4 py-3">
                       <p className="font-medium text-lumen">
                         {l.label}
-                        {l.countsTowardLimit && <span className="ml-1.5 text-[0.72rem] font-normal text-lumen-3">counts toward limit</span>}
+                        {l.countsTowardLimit && <span className="ml-1.5 text-[0.75rem] font-normal text-lumen-3">counts toward limit</span>}
                       </p>
                       <p className="mt-0.5 text-[0.78rem] text-lumen-3">{l.note}</p>
-                      <p className="mt-1 text-[0.75rem] sm:hidden" style={{ color: KIND[l.kind].color }}>
-                        {KIND[l.kind].label}, paid by {PAYER[l.payer] ?? l.payer}
+                      {/* Columns hide on narrow screens; their facts move here so nothing is lost. */}
+                      <p className="mt-1 text-[0.75rem] text-lumen-2 md:hidden">
+                        <span className="sm:hidden" style={{ color: KIND[l.kind].color }}>
+                          {KIND[l.kind].label},{' '}
+                        </span>
+                        paid by {PAYER[l.payer] ?? l.payer}
                       </p>
                     </td>
                     <td className="tnum whitespace-nowrap px-4 py-3 text-right text-lumen">

@@ -107,6 +107,16 @@ function Slot({ children }: { children: React.ReactNode }) {
   return <span className="rounded-[3px] border border-dashed border-[rgba(90,216,255,0.5)] px-1 text-hb">{children}</span>
 }
 
+/** The pinned inputs, one facet each (the composer's cutting bench in miniature). */
+const PINS: { id: FacetId; label: string; value: string; mono?: boolean }[] = [
+  { id: 'commit', label: 'Commit', value: SHA.slice(0, 7), mono: true },
+  { id: 'policy', label: 'Policy', value: 'BOT-001@0.1.0' },
+  { id: 'question', label: 'Question', value: '0x9c41…e07b', mono: true },
+  { id: 'environment', label: 'Environment', value: '0x3fd2…81aa', mono: true },
+  { id: 'deadline', label: 'Deadline', value: 'UTC, fixed' },
+  { id: 'oracle', label: 'Oracle', value: 'Reality.eth' },
+]
+
 const CUTS: FacetId[][] = [
   ['commit'],
   ['commit', 'policy'],
@@ -202,6 +212,24 @@ export function StoryDiagram({ step, className }: { step: number; className?: st
         </AnimatePresence>
       </svg>
 
+      {step < 3 && (
+        <ul className="absolute right-5 top-5 hidden w-[10.5rem] gap-1 text-[0.72rem] sm:grid">
+          {PINS.map((pin) => {
+            const isCut = (cut ?? []).includes(pin.id)
+            return (
+              <li key={pin.id} className={cn('flex items-center gap-2 transition-colors duration-500', isCut ? 'text-lumen-2' : 'text-lumen-3')}>
+                <span
+                  className={cn('h-2 w-2 shrink-0 rotate-45 border transition-all duration-500', isCut ? 'border-lumen bg-lumen' : 'border-edge-strong')}
+                  style={isCut ? { boxShadow: `0 0 8px ${hue}` } : undefined}
+                />
+                <span className="w-[4.6rem] shrink-0">{pin.label}</span>
+                <span className={cn('truncate', isCut && pin.mono && 't-code text-[0.68rem]')}>{isCut ? pin.value : '…'}</span>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+
       {step < 6 ? (
         <div className="absolute left-[38.5%] top-1/2 -translate-x-1/2 -translate-y-1/2">
           <CrystalGlyph seed={SEED} hue={hue} cut={cut} state={step < 3 ? 'partial' : 'luminous'} size={250} animateCut sealed={step === 2} decorative />
@@ -227,10 +255,10 @@ export function StoryDiagram({ step, className }: { step: number; className?: st
 
       {/* Labels (decorative; the step text carries the meaning) */}
       <div className="pointer-events-none absolute inset-x-5 bottom-4 flex flex-wrap items-end justify-between gap-2 text-[0.75rem] text-lumen-3">
-        <span className="t-code">
+        <span className={step === 0 ? 't-code' : undefined}>
           {step === 0 && `commit ${SHA.slice(0, 12)}…`}
-          {step === 1 && 'BOT-001@0.1.0'}
-          {step === 2 && 'question frozen'}
+          {step === 1 && 'policy pinned with its hash'}
+          {step === 2 && 'every input cut, question frozen'}
           {step === 3 && 'Yes, No and Invalid result'}
           {step === 4 && 'evidence before the deadline'}
           {step === 5 && 'Reality.eth, then Kleros'}

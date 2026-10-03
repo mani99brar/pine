@@ -175,8 +175,8 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
         <FacetRail step={step} furthest={furthest} onGo={go} blocked={blocked} frozen={c.frozen} />
       </div>
 
-      {/* Phone: compact bench */}
-      <div className="glass-float cut-md sticky top-[4.5rem] z-[30] mt-5 px-3 py-2 lg:hidden">
+      {/* Phone: compact bench, flush under the header so nothing scrolls through a gap above it */}
+      <div className="glass-float sticky top-16 z-[30] -mx-4 mt-5 border-x-0 border-t-0 !bg-[rgba(24,19,16,0.96)] px-4 py-2 sm:-mx-6 sm:px-6 lg:hidden">
         <CuttingBench c={c} facets={facets} compact />
       </div>
 

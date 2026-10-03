@@ -8,6 +8,7 @@ import { formatClaimNumber, OUTCOME_META, shortHash, shortSha } from '@pine/core
 import { COPY } from '@pine/core/copy'
 import { ArrowLeft } from 'lucide-react'
 import { ClaimCrystal } from '@/components/crystal/ClaimCrystal'
+import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { PrismBeam, pricesFrom } from '@/components/prism/PrismBeam'
 import { PriceChart } from '@/components/charts/PriceChart'
 import { DepthAndImpact } from '@/components/charts/DepthChart'
@@ -49,7 +50,7 @@ function SectionNav() {
     return () => io.disconnect()
   }, [])
   return (
-    <nav aria-label="Claim sections" className="glass-float sticky top-16 z-[40] -mx-4 border-x-0 px-4 sm:mx-0 sm:border-x sm:px-2 sm:[border-radius:10px_3px_10px_3px]">
+    <nav aria-label="Claim sections" className="glass-float sticky top-16 z-[40] -mx-4 mt-12 border-x-0 px-4 sm:mx-0 sm:border-x sm:px-2 sm:[border-radius:10px_3px_10px_3px]">
       <ul className="flex gap-1 overflow-x-auto py-2">
         {SECTIONS.map((s) => (
           <li key={s.id}>
@@ -70,7 +71,9 @@ function SectionNav() {
 function OutcomeBanner({ claim }: { claim: ClaimDetail }) {
   if (!claim.outcome || !isResolved(claim.status)) return null
   const meta = OUTCOME_META[claim.outcome]
-  const extra = claim.outcome === 'no' ? COPY.noIsNotSafety : claim.outcome === 'invalid' ? COPY.invalidIsNotRefund : COPY.noMergeAuthority
+  // The long text already says NO is not a correctness verdict and invalid is not a refund (and the
+  // next-step card repeats it), so only YES adds a line: what the creator does with it is their call.
+  const extra = claim.outcome === 'yes' ? COPY.noMergeAuthority : null
   return (
     <div className={cn('cut-xl relative overflow-hidden border p-5 sm:p-6', claim.outcome === 'yes' ? 'border-[rgba(255,107,131,0.45)] bg-[rgba(255,107,131,0.07)]' : claim.outcome === 'invalid' ? 'frosted border-edge bg-[rgba(220,214,232,0.05)]' : 'border-edge bg-[rgba(169,180,193,0.05)]')}>
       <p className="flex items-center gap-2.5">
@@ -80,7 +83,7 @@ function OutcomeBanner({ claim }: { claim: ClaimDetail }) {
         </span>
       </p>
       <p className="mt-2 max-w-[72ch] text-[0.96875rem] text-lumen-2">{meta.long}</p>
-      <p className="mt-2 max-w-[72ch] text-[0.875rem] text-lumen-3">{extra}</p>
+      {extra && <p className="mt-2 max-w-[72ch] text-[0.875rem] text-lumen-3">{extra}</p>}
     </div>
   )
 }
@@ -127,7 +130,11 @@ export function ClaimView({ id }: { id: string }) {
   if (!claim)
     return (
       <Container className="pt-14">
-        <EmptyState title="No claim at this address" action={<ButtonLink href="/claims">Open the light table</ButtonLink>}>
+        <EmptyState
+          title="No claim at this address"
+          icon={<CrystalGlyph seed={`missing:${id}`} hue="#A69789" state="unlit" size={96} decorative />}
+          action={<ButtonLink href="/claims">Open the light table</ButtonLink>}
+        >
           There is no published claim with the id <span className="t-code">{id}</span>. It may have been mistyped, or it may exist only in another browser&apos;s demo data.
         </EmptyState>
       </Container>
@@ -149,7 +156,7 @@ export function ClaimView({ id }: { id: string }) {
       {/* Header */}
       <header className="mt-6 grid gap-6 sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-8">
         <div className="flex justify-center sm:block">
-          <ClaimCrystal claim={claim} size={212} animateFracture={claim.outcome === 'yes'} />
+          <ClaimCrystal claim={claim} size={212} animateFracture={claim.outcome === 'yes'} className="h-[150px] w-auto sm:h-[212px]" />
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -227,9 +234,8 @@ export function ClaimView({ id }: { id: string }) {
         </aside>
       </div>
 
-      <div className="mt-12">
-        <SectionNav />
-      </div>
+      {/* Not wrapped: a sticky element only sticks within its parent, so the nav sits directly in the page. */}
+      <SectionNav />
 
       <section id="claim" className="scroll-mt-32 pt-12" aria-labelledby="claim-title">
         <div className="mb-6 flex flex-wrap items-baseline justify-between gap-3">
