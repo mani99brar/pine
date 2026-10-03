@@ -1,17 +1,32 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { planFromWire, PlanVerificationError, type Address, type Hex32, type TxPlan } from '@pine/core/pine-shared'
-import { FINAL_PLAN_STATES, ORACLE_PLAN_ROUTES, type MarketsPlanResponse, type OracleActionStatus, type OraclePlanRoute, type WriteErrorInfo } from '@pine/data'
+import { FINAL_PLAN_STATES, ORACLE_PLAN_ROUTES, RetryLaterError, type MarketsPlanResponse, type OracleActionStatus, type OraclePlanRoute, type WriteErrorInfo } from '@pine/data'
 import { useWallet } from '../wallet'
 import type { ApiPlanRunner } from './use-plan-runner'
-import { actionNonce, requireWriteApi, runnerIsBusy, useOnChainClaim, usePlanAction, usePolledStatus, useStoredRecord, useWriteApi, type OnChainClaim } from './publish-plan'
+import { readCurrentQuestionId } from './plans'
+import {
+  actionNonce,
+  requireWriteApi,
+  runnerIsBusy,
+  useOnChainClaim,
+  usePinnedManifest,
+  usePlanAction,
+  usePolledStatus,
+  useRegistryReader,
+  useStoredRecord,
+  useWriteApi,
+  type OnChainClaim,
+} from './publish-plan'
 
 // Oracle actions on a claim's Reality.eth question (api mode): every argument of these plans is derived by the backend
 // from chain facts, so the browser checks each plan against the action the user chose — the exact step kinds, the
 // question it touches, the answer and the exact native value (the bond or bounty the user entered) — before verifyPlan
-// and any wallet prompt. Pine never answers, bonds or funds arbitration itself.
+// and any wallet prompt. The question a plan may touch is read on the user's own RPC (ClaimRegistry's question and
+// Reality's reopened replacement), never taken from the oracle status: a compromised API could otherwise direct a bond
+// or bounty to a question it created. Pine never answers, bonds or funds arbitration itself.
 
 const XDAI = 10n ** 18n
 /** The backend's cap on oracle bonds and bounties (MARKETS_PLAN_LIMITS). */
@@ -49,9 +64,12 @@ export interface OraclePlanCheck {
   body: OracleActionBody
   account: Address
   market: Address
-  /** The claim's original question id (ClaimRegistry). */
+  /** The claim's original question id (ClaimRegistry, on chain). */
   claimQuestionId: Hex32
-  /** The current question id (after reopens), as the oracle status reported it. */
+  /**
+   * The current question id after reopens, read on chain (readCurrentQuestionId: Reality's reopened_questions of the
+   * claim question). Never the oracle status's currentQuestionId.
+   */
   currentQuestionId: Hex32
   /** Exact native value the plan must carry (the bond or bounty), else 0. */
   valueWei: bigint
@@ -98,13 +116,17 @@ export function checkOraclePlan(wire: unknown, ctx: OraclePlanCheck): TxPlan {
   return plan
 }
 
-/** Reality question ids that replaced the claim's question (reopens), as the oracle status reports them. */
-export function reopenedQuestionIdsOf(status: OracleActionStatus | null, claimQuestionId: Hex32 | undefined): Hex32[] {
-  if (!status) return []
-  const ids = [status.currentQuestionId, status.question?.reopenedBy, status.originalQuestion?.reopenedBy]
-    .filter((v): v is string => typeof v === 'string')
-    .map((v) => v.toLowerCase() as Hex32)
-  return [...new Set(ids)].filter((id) => id !== claimQuestionId)
+/**
+ * Replacement question ids (reopens) the oracle status names that the chain confirms: only the current question read
+ * on the user's RPC (`chainCurrentQuestionId`, from readCurrentQuestionId) is returned, and nothing without it. The
+ * status alone never vouches for a question.
+ */
+export function reopenedQuestionIdsOf(status: OracleActionStatus | null, claimQuestionId: Hex32 | undefined, chainCurrentQuestionId?: Hex32 | null): Hex32[] {
+  if (!status || !chainCurrentQuestionId) return []
+  const chain = chainCurrentQuestionId.toLowerCase() as Hex32
+  if (chain === claimQuestionId?.toLowerCase()) return []
+  const named = [status.currentQuestionId, status.question?.reopenedBy, status.originalQuestion?.reopenedBy].filter((v): v is string => typeof v === 'string').map((v) => v.toLowerCase())
+  return named.includes(chain) ? [chain] : []
 }
 
 /** The smallest bond Reality accepts for the next answer: max(minBond, 2 × current bond). */
@@ -136,6 +158,8 @@ function isStoredOracleAction(value: unknown): value is StoredOracleAction {
 export interface UseApiOracleOptions {
   pollIntervalMs?: number
   sleep?(ms: number): Promise<void>
+  /** Clock (tests): plan offers are not sent after they expire. */
+  now?: () => Date
 }
 
 export interface ApiOracle {
@@ -170,10 +194,17 @@ export function useApiOracle(market: Address, options: UseApiOracleOptions = {})
   const api = useWriteApi()
   const qc = useQueryClient()
   const wallet = useWallet()
+  const reader = useRegistryReader()
+  const manifest = usePinnedManifest()
   const { claim } = useOnChainClaim(market)
   const m = market.toLowerCase() as Address
   const account = wallet.address?.toLowerCase() as Address | undefined
   const [error, setError] = useState<WriteErrorInfo | null>(null)
+  const clockRef = useRef(options.now)
+  useEffect(() => {
+    clockRef.current = options.now
+  })
+  const nowMs = useCallback(() => (clockRef.current?.() ?? new Date()).getTime(), [])
 
   const statusKey = ['pine', 'oracle-actions', m, account ?? null] as const
   const statusQ = useQuery({
@@ -185,24 +216,31 @@ export function useApiOracle(market: Address, options: UseApiOracleOptions = {})
   const status = statusQ.data ?? null
 
   const [action, setAction] = useStoredRecord<StoredOracleAction>(account ? `pine:api-oracle-action:${m}:${account}` : null, isStoredOracleAction)
-  const reopened = useMemo(() => reopenedQuestionIdsOf(status, claim?.questionId), [status, claim?.questionId])
-  const latest = useRef({ action, account, claim, status })
+  const latest = useRef({ action, account, claim, status, reader, manifest })
   useEffect(() => {
-    latest.current = { action, account, claim, status }
+    latest.current = { action, account, claim, status, reader, manifest }
   })
 
   const keyOf = useCallback((a: StoredOracleAction | null) => (a && account ? `api-oracle:${m}:${account}:${a.route}:${a.nonce}` : null), [account, m])
   const plan = usePlanAction({
     key: keyOf(action),
     idleKey: `api-oracle-idle:${m}`,
+    // Question ids are read on chain during verification (ClaimRegistry and Reality); none come from the status.
     markets: [m],
-    reopenedQuestionIds: reopened,
     limits: { maxTotalValueWei: action ? BigInt(action.valueWei) : 0n, maxApprovalAmount: 0n },
     sleep: options.sleep,
+    now: nowMs,
     async create(idempotencyKey) {
       const client = requireWriteApi(api)
-      const { action: act, account: acct, claim: c, status: s } = latest.current
+      const { action: act, account: acct, claim: c, status: s, reader: rpc, manifest: pinned } = latest.current
       if (!act || !acct || !c || !s) throw new Error('The oracle status is not loaded yet.')
+      if (!rpc || !pinned) throw new Error('This build cannot read the chain, so it cannot check oracle transactions.')
+      // The question the action targets, from the user's RPC now. Pine's status must agree before anything is planned.
+      const currentQuestionId = await readCurrentQuestionId(rpc, pinned, c.questionId)
+      if (s.currentQuestionId.toLowerCase() !== currentQuestionId) {
+        void qc.invalidateQueries({ queryKey: ['pine', 'oracle-actions', m] })
+        throw new RetryLaterError('Pine’s oracle status does not match the question on chain yet (it may have just been reopened). Nothing was sent; try again in a minute.', 30)
+      }
       const res = await client.oraclePlan(act.route, act.body as never, idempotencyKey)
       if (res.planState.offerExpired) throw new Error('This oracle plan offer expired. Start the action again.')
       checkOraclePlan(res.plan, {
@@ -211,11 +249,11 @@ export function useApiOracle(market: Address, options: UseApiOracleOptions = {})
         account: acct,
         market: m,
         claimQuestionId: c.questionId,
-        currentQuestionId: s.currentQuestionId.toLowerCase() as Hex32,
+        currentQuestionId,
         valueWei: BigInt(act.valueWei),
       })
       setAction({ ...act, planId: res.planState.id })
-      return { wire: res.plan, planId: res.planState.id }
+      return { wire: res.plan, planId: res.planState.id, expiresAt: res.planState.expiresAt * 1000 }
     },
     async submitted(planId, stepId, txHash) {
       await requireWriteApi(api).reportMarketsPlanTx(planId, stepId, txHash)

@@ -10,6 +10,7 @@ import {
   PineBackendError,
   PineWriteApi,
   pollUntil,
+  RetryLaterError,
   type DraftInput,
 } from '../src'
 
@@ -255,6 +256,11 @@ describe('describeWriteError', () => {
     const info = describeWriteError(new PlanVerificationError('create', 'createClaim minBond differs from the previewed claim document'))
     expect(info).toMatchObject({ code: 'PLAN_REJECTED', action: 'none' })
     expect(info.message).toMatch(/nothing was sent to your wallet/)
+  })
+
+  it('offers a later retry for the app’s own transient refusals', () => {
+    const info = describeWriteError(new RetryLaterError('Pine’s oracle status does not match the chain yet. Nothing was sent.', 30))
+    expect(info).toEqual({ code: 'UNKNOWN', action: 'retry_later', message: 'Pine’s oracle status does not match the chain yet. Nothing was sent.', retryAfter: 30 })
   })
 
   it('formats waits', () => {

@@ -18,6 +18,7 @@ import {
 } from '@pine/data'
 import { useWallet } from '../wallet'
 import type { ApiPlanRunner } from './use-plan-runner'
+import { getSqrtRatioAtTick, isValidTick, MAX_SQRT_RATIO, MIN_SQRT_RATIO, Q192 } from './tick-math'
 import {
   actionNonce,
   requireWriteApi,
@@ -33,28 +34,88 @@ import {
 
 // Market funding (api mode): the YES sell-ladder (split xDAI into outcome tokens, approve exactly the YES amount to the
 // Swapr position manager, create the pool if needed, mint a single-sided YES position to the wallet). The backend
-// computes every amount; the browser binds the plan to what the user accepted: the native value equals the budget,
-// approvals stay within the user's spending limit and go only to the position manager for this market's YES token, and
-// the position is minted to the wallet. Funding plans are PlanViews with ISO `expiresAt`, reported per step to
-// /api/v1/funding/plans/:planId/submitted.
+// computes every amount; the browser binds the plan to what the user accepted (SEC-LEGAL-03): the native value equals
+// the budget, the position sells YES only inside the requested price range, no more YES than the acknowledged sets is
+// approved or deposited, the computed loss if YES resolves stays within the acknowledged figure, a new pool starts on
+// the YES-only side of the range, and the position is minted to the wallet. Funding plans are PlanViews with ISO
+// `expiresAt`, reported per step to /api/v1/funding/plans/:planId/submitted.
 
 const XDAI = 10n ** 18n
+const WAD = 10n ** 18n
 /** Backend caps (FUNDING_PLAN_LIMITS). */
 export const FUNDING_MAX_VALUE_WEI = 10_000n * XDAI
 export const FUNDING_MAX_APPROVAL = 10n ** 30n
 const PRICE = /^(?:0|[1-9][0-9]{0,2})(?:\.[0-9]{1,18})?$/
+const UINT = /^(?:0|[1-9][0-9]{0,77})$/
+/** The mint's minimum may be at most this far below the deposited amount (the backend's 50 bps slippage). */
+const SLIPPAGE_BPS = 50n
+/** A mint deadline further ahead than this is refused (the backend sets now + 20 min; the rest is clock skew). */
+const MAX_MINT_DEADLINE_SECONDS = 3_600
 
 const lower = (v: unknown) => String(v).toLowerCase()
 
-/** The ladder must be split → approve YES → (create pool) → mint YES, for this market, valued at exactly the budget. */
-export function checkLadderPlan(
-  wire: unknown,
-  ctx: { market: Address; account: Address; budgetWei: bigint; yesToken: Address; manifest: DeploymentManifest },
-): TxPlan {
+/** A YES price in sDAI as wad (18 decimals); null unless a plain decimal with at most 18 fractional digits. */
+function priceWad(text: unknown): bigint | null {
+  if (typeof text !== 'string' || !PRICE.test(text)) return null
+  const scaled = toScaled(text, 18)
+  return scaled?.exact ? scaled.value : null
+}
+
+/** What the user acknowledged for a ladder: the plan may sell YES no cheaper, no dearer and no more than this. */
+export interface LadderPlanCheck {
+  market: Address
+  account: Address
+  budgetWei: bigint
+  yesToken: Address
+  manifest: DeploymentManifest
+  /** The YES price range the user requested (sDAI per YES, decimal strings, as sent in the plan request). */
+  lowerPrice: string
+  upperPrice: string
+  /** The most YES the plan may approve and deposit: the acknowledged sets (capped by the spending limit). */
+  maxYesAmount: bigint
+  /** The acknowledged maximum loss if YES resolves, sDAI share base units. */
+  maxLossIfYesShares: bigint
+  /** Unix seconds: the mint deadline must lie ahead of it (by at most an hour). */
+  now: number
+}
+
+interface MintParams {
+  token0: unknown
+  token1: unknown
+  tickLower: unknown
+  tickUpper: unknown
+  amount0Desired: unknown
+  amount1Desired: unknown
+  amount0Min: unknown
+  amount1Min: unknown
+  recipient: unknown
+  deadline: unknown
+}
+
+const isUint = (v: unknown): v is bigint => typeof v === 'bigint' && v >= 0n
+
+/**
+ * The ladder must be split → approve YES → (create pool) → mint YES, for this market, valued at exactly the budget, and
+ * bound to the acknowledged figures (see LadderPlanCheck). Integer math only. Throws PlanVerificationError.
+ */
+export function checkLadderPlan(wire: unknown, ctx: LadderPlanCheck): TxPlan {
   const plan = planFromWire(wire)
   if (plan.account !== lower(ctx.account)) throw new PlanVerificationError(null, 'the plan was built for another wallet')
+  const lowerWad = priceWad(ctx.lowerPrice)
+  const upperWad = priceWad(ctx.upperPrice)
+  if (lowerWad === null || upperWad === null || lowerWad <= 0n || !(lowerWad < upperWad) || ctx.maxYesAmount <= 0n || ctx.maxLossIfYesShares < 0n) {
+    throw new PlanVerificationError(null, 'the price range or figures you acknowledged are missing or malformed')
+  }
+  const yes = lower(ctx.yesToken)
+  const collateral = lower(ctx.manifest.seer.collateralToken)
+  // Pools order their tokens by address: with YES = token0 the pool price is sDAI per YES, otherwise YES per sDAI.
+  const yesIsToken0 = yes < collateral
+  const [token0, token1] = yesIsToken0 ? [yes, collateral] : [collateral, yes]
   const counts = new Map<string, number>()
   let total = 0n
+  let approved: bigint | null = null
+  let initialSqrtPrice: { stepId: string; value: unknown } | null = null
+  let mint: { stepId: string; params: MintParams } | null = null
   for (const step of plan.steps) {
     counts.set(step.allowlistId, (counts.get(step.allowlistId) ?? 0) + 1)
     total += step.value
@@ -65,19 +126,20 @@ export function checkLadderPlan(
         if (step.value !== ctx.budgetWei) throw new PlanVerificationError(step.id, 'the split value differs from your budget')
         break
       case 'outcomeToken.approve':
-        if (lower(step.to) !== lower(ctx.yesToken)) throw new PlanVerificationError(step.id, 'the approval is not for this market’s YES token')
+        if (lower(step.to) !== yes) throw new PlanVerificationError(step.id, 'the approval is not for this market’s YES token')
         if (lower(a[0]) !== lower(ctx.manifest.amm.positionManager)) throw new PlanVerificationError(step.id, 'the approval spender is not the Swapr position manager')
+        if (!isUint(a[1]) || a[1] <= 0n || a[1] > ctx.maxYesAmount) throw new PlanVerificationError(step.id, 'the approval exceeds the YES amount you acknowledged')
+        approved = a[1]
         break
-      case 'positionManager.createAndInitializePoolIfNecessary': {
-        const pair = [lower(a[0]), lower(a[1])]
-        if (!pair.includes(lower(ctx.yesToken)) || !pair.includes(lower(ctx.manifest.seer.collateralToken))) throw new PlanVerificationError(step.id, 'the pool is not this market’s YES/sDAI pool')
+      case 'positionManager.createAndInitializePoolIfNecessary':
+        if (lower(a[0]) !== token0 || lower(a[1]) !== token1) throw new PlanVerificationError(step.id, 'the pool is not this market’s YES/sDAI pool')
+        initialSqrtPrice = { stepId: step.id, value: a[2] }
         break
-      }
       case 'positionManager.mint': {
-        const p = a[0] as { token0?: unknown; token1?: unknown; recipient?: unknown }
-        const pair = [lower(p.token0), lower(p.token1)]
-        if (!pair.includes(lower(ctx.yesToken)) || !pair.includes(lower(ctx.manifest.seer.collateralToken))) throw new PlanVerificationError(step.id, 'the position is not in this market’s YES/sDAI pool')
+        const p = a[0] as MintParams
+        if (lower(p.token0) !== token0 || lower(p.token1) !== token1) throw new PlanVerificationError(step.id, 'the position is not in this market’s YES/sDAI pool')
         if (lower(p.recipient) !== lower(ctx.account)) throw new PlanVerificationError(step.id, 'the position would be minted to another address')
+        mint = { stepId: step.id, params: p }
         break
       }
       default:
@@ -88,6 +150,46 @@ export function checkLadderPlan(
   if ((counts.get('gnosisRouter.splitFromBase') ?? 0) > 1 || (counts.get('positionManager.createAndInitializePoolIfNecessary') ?? 0) > 1) throw new PlanVerificationError(null, 'a ladder splits and creates the pool at most once')
   const expected = counts.has('gnosisRouter.splitFromBase') ? ctx.budgetWei : 0n
   if (total !== expected) throw new PlanVerificationError(null, 'the plan’s native value differs from your budget')
+  if (!mint) throw new PlanVerificationError(null, 'a ladder has exactly one approval and one mint')
+
+  const { stepId, params: p } = mint
+  // A single-sided YES position: nothing of sDAI is deposited.
+  const [yesDesired, yesMin, sdaiDesired, sdaiMin] = yesIsToken0
+    ? [p.amount0Desired, p.amount0Min, p.amount1Desired, p.amount1Min]
+    : [p.amount1Desired, p.amount1Min, p.amount0Desired, p.amount0Min]
+  if (!isUint(yesDesired) || !isUint(yesMin) || !isUint(sdaiDesired) || !isUint(sdaiMin)) throw new PlanVerificationError(stepId, 'the position amounts are malformed')
+  if (sdaiDesired !== 0n || sdaiMin !== 0n) throw new PlanVerificationError(stepId, 'the position would deposit sDAI; a ladder deposits YES only')
+  if (yesDesired <= 0n || yesDesired > ctx.maxYesAmount) throw new PlanVerificationError(stepId, 'the position deposits more YES than you acknowledged')
+  if (approved !== yesDesired) throw new PlanVerificationError(stepId, 'the approval differs from the YES the position deposits')
+  if (yesMin > yesDesired || yesMin < yesDesired - (yesDesired * SLIPPAGE_BPS) / 10_000n) throw new PlanVerificationError(stepId, 'the position’s minimum YES deposit is outside the 0.5% slippage bound')
+
+  // The range sells YES only between the requested prices.
+  if (!isValidTick(p.tickLower) || !isValidTick(p.tickUpper) || !(p.tickLower < p.tickUpper)) throw new PlanVerificationError(stepId, 'the position’s price range is malformed')
+  const sqrtLower = getSqrtRatioAtTick(p.tickLower)
+  const sqrtUpper = getSqrtRatioAtTick(p.tickUpper)
+  // Pool price at a tick = sqrt² / 2^192 (token1 per token0); YES price = that (YES = token0) or its inverse.
+  const inside = yesIsToken0
+    ? sqrtLower * sqrtLower * WAD >= lowerWad * Q192 && sqrtUpper * sqrtUpper * WAD <= upperWad * Q192
+    : Q192 * WAD >= lowerWad * sqrtUpper * sqrtUpper && Q192 * WAD <= upperWad * sqrtLower * sqrtLower
+  if (!inside) throw new PlanVerificationError(stepId, 'the position would sell YES outside the price range you chose')
+
+  // Maximum loss if YES resolves, S × (1 − √(p_a·p_b)) at the range's prices (proceeds rounded down, as the backend).
+  const proceeds = yesIsToken0 ? (yesDesired * sqrtLower * sqrtUpper) / Q192 : (yesDesired * Q192) / (sqrtLower * sqrtUpper)
+  const loss = proceeds >= yesDesired ? 0n : yesDesired - proceeds
+  if (loss > ctx.maxLossIfYesShares) throw new PlanVerificationError(stepId, 'the position’s maximum loss if YES resolves is above the figure you acknowledged')
+
+  const now = BigInt(Math.floor(ctx.now))
+  if (!isUint(p.deadline) || p.deadline <= now || p.deadline > now + BigInt(MAX_MINT_DEADLINE_SECONDS)) {
+    throw new PlanVerificationError(stepId, 'the position’s deadline has passed or is too far ahead')
+  }
+
+  // A new pool starts strictly on the YES-only side of the range (below it when YES = token0, above it otherwise), so
+  // the position holds YES only and sells it only as the price enters the range.
+  if (initialSqrtPrice) {
+    const v = initialSqrtPrice.value
+    const yesOnlySide = isUint(v) && v >= MIN_SQRT_RATIO && v < MAX_SQRT_RATIO && (yesIsToken0 ? v < sqrtLower : v > sqrtUpper)
+    if (!yesOnlySide) throw new PlanVerificationError(initialSqrtPrice.stepId, 'the new pool would start at a price inside or beyond your range')
+  }
   return plan
 }
 
@@ -119,6 +221,19 @@ export interface FundingFlowContext {
   account: Address
   claim: OnChainClaim
   manifest: DeploymentManifest
+  /** Unix seconds (the flow's clock). */
+  now: number
+}
+
+/** The earliest deadline (ms since the epoch) of a plan's position calls (mint, decreaseLiquidity), if any. */
+function positionDeadlineMs(wire: unknown): number | undefined {
+  let earliest: bigint | undefined
+  for (const step of planFromWire(wire).steps) {
+    if (step.allowlistId !== 'positionManager.mint' && step.allowlistId !== 'positionManager.decreaseLiquidity') continue
+    const deadline = (step.args[0] as { deadline?: unknown } | undefined)?.deadline
+    if (typeof deadline === 'bigint' && (earliest === undefined || deadline < earliest)) earliest = deadline
+  }
+  return earliest === undefined ? undefined : Number(earliest) * 1000
 }
 
 export interface FundingFlowOptions {
@@ -167,6 +282,7 @@ export function useFundingPlanFlow(
     clockRef.current = options.now
     latest.current = { action, account, claim, manifest }
   })
+  const nowMs = useCallback(() => (clockRef.current?.() ?? new Date()).getTime(), [])
 
   const keyOf = useCallback((a: StoredFundingAction | null) => (a && account ? `api-funding:${scope}:${m}:${account}:${a.kind}:${a.nonce}` : null), [account, m, scope])
   const plan = usePlanAction({
@@ -175,6 +291,7 @@ export function useFundingPlanFlow(
     markets: [m],
     limits: { maxTotalValueWei: action ? BigInt(action.valueWei) : 0n, maxApprovalAmount: action ? BigInt(action.approvalWei) : 0n },
     sleep: options.sleep,
+    now: nowMs,
     async create(idempotencyKey) {
       const client = requireWriteApi(api)
       const { action: act, account: acct, claim: c, manifest: pinned } = latest.current
@@ -190,15 +307,21 @@ export function useFundingPlanFlow(
         throw e
       }
       if (res.kind !== act.kind || lower(res.market) !== m || lower(res.account) !== acct) throw new PlanVerificationError(null, 'Pine answered with a plan for another action')
-      const expires = Date.parse(res.expiresAt)
-      if (!Number.isFinite(expires) || expires <= (clockRef.current?.() ?? new Date()).getTime()) throw new Error('This funding offer expired. Start again for fresh amounts.')
-      checkRef.current(res.plan, act, { market: m, account: acct, claim: c, manifest: pinned })
+      const now = nowMs()
+      const offer = Date.parse(res.expiresAt)
+      if (!Number.isFinite(offer) || offer <= now) throw new Error('This funding offer expired. Start again for fresh amounts.')
+      checkRef.current(res.plan, act, { market: m, account: acct, claim: c, manifest: pinned, now: Math.floor(now / 1000) })
       setView(res)
       setAction({ ...act, planId: res.planId })
-      return { wire: res.plan, planId: res.planId }
+      // Nothing of the plan is sent once its offer or a position deadline (e.g. the ladder mint's) has passed: a split
+      // whose mint can no longer succeed would only leave outcome tokens and an approval behind.
+      const deadline = positionDeadlineMs(res.plan)
+      return { wire: res.plan, planId: res.planId, expiresAt: deadline === undefined ? offer : Math.min(offer, deadline) }
     },
     async submitted(planId, stepId, txHash) {
-      setView(await requireWriteApi(api).reportFundingPlanTx(planId, stepId, txHash))
+      const view = await requireWriteApi(api).reportFundingPlanTx(planId, stepId, txHash)
+      // A run that continues after another action was started reports its own plan without replacing the view shown.
+      if (latest.current.action?.planId === planId) setView(view)
     },
   })
   const { runner } = plan
@@ -325,7 +448,21 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
     'ladder',
     options,
     (wire, action, ctx) => {
-      checkLadderPlan(wire, { market: ctx.market, account: ctx.account, budgetWei: BigInt(action.valueWei), yesToken: ctx.claim.yesToken, manifest: ctx.manifest })
+      // The request body the user acknowledged (stored with the action; re-validated by checkLadderPlan).
+      const body = action.body as { lowerPrice?: unknown; upperPrice?: unknown; riskAcknowledgement?: { maxLossIfYesShares?: unknown } }
+      const loss = body.riskAcknowledgement?.maxLossIfYesShares
+      checkLadderPlan(wire, {
+        market: ctx.market,
+        account: ctx.account,
+        budgetWei: BigInt(action.valueWei),
+        yesToken: ctx.claim.yesToken,
+        manifest: ctx.manifest,
+        lowerPrice: String(body.lowerPrice),
+        upperPrice: String(body.upperPrice),
+        maxYesAmount: BigInt(action.approvalWei),
+        maxLossIfYesShares: typeof loss === 'string' && UINT.test(loss) ? BigInt(loss) : -1n,
+        now: ctx.now,
+      })
     },
     (e) => {
       // The loss grew since the quote: show the new figures; the user acknowledges again (a new attempt and key).
@@ -374,9 +511,18 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
 
   const fund = useCallback(
     async ({ quote: q, spendingLimitWei }: { quote: LadderQuote; spendingLimitWei: bigint }) => {
-      const budget = BigInt(q.budgetWei)
       if (q.market !== m) {
         flow.setError({ code: 'UNKNOWN', action: 'none', message: 'These figures are for another market.' })
+        return
+      }
+      if (!UINT.test(q.budgetWei) || !UINT.test(q.sets) || !UINT.test(q.maxLossIfYesShares) || BigInt(q.sets) <= 0n) {
+        flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: 'Ask for the ladder figures again before funding.' })
+        return
+      }
+      const budget = BigInt(q.budgetWei)
+      const invalid = validLadder({ budgetWei: budget, lowerPrice: q.requestedLowerPrice, upperPrice: q.requestedUpperPrice })
+      if (invalid) {
+        flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: invalid })
         return
       }
       if (spendingLimitWei <= 0n || budget > spendingLimitWei) {
@@ -390,7 +536,10 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
         upperPrice: q.requestedUpperPrice,
         riskAcknowledgement: { budgetWei: q.budgetWei, maxLossIfYesShares: q.maxLossIfYesShares },
       }
-      const approval = spendingLimitWei < FUNDING_MAX_APPROVAL ? spendingLimitWei : FUNDING_MAX_APPROVAL
+      // The plan may approve and deposit at most the acknowledged sets (S), and never more than the spending limit. Pine
+      // recomputes S when it builds the plan; sDAI only appreciates, so the planned S is never above the quoted one.
+      const sets = BigInt(q.sets)
+      const approval = [sets, spendingLimitWei, FUNDING_MAX_APPROVAL].reduce((a, b) => (b < a ? b : a))
       await flow.start('ladder', body as unknown as Record<string, unknown>, { valueWei: budget, approvalWei: approval })
     },
     [m, flow],

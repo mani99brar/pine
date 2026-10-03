@@ -8,6 +8,7 @@ import { PineProviders, createPineQueryClient } from '../src/providers'
 import { useClaim, useClaims, usePolicies } from '../src/queries'
 import { useDemoWallet, useWallet, demoWalletStore } from '../src/wallet'
 import { useTxRunner, __resetTxRunners } from '../src/tx/use-tx-runner'
+import type { StepProgress, TxExecutor } from '../src/tx/machine'
 import { setDemoTxDelays } from '../src/tx/demo-executor'
 import { useClaimComposer } from '../src/composer/use-claim-composer'
 import { useDrafts } from '../src/composer/drafts'
@@ -150,6 +151,38 @@ describe('useTxRunner (demo)', () => {
     })
     expect(result.current.state).toBe('idle')
     expect(result.current.error).toMatch(/spending limit/)
+  })
+
+  it('SEC-TX-08 routes a machine’s confirmations to the options given for its own key after the hook moved on', async () => {
+    let release: (() => void) | null = null
+    const executor: TxExecutor = {
+      kind: 'live',
+      async execute(_step: TxStep, progress: StepProgress) {
+        progress.onAwaitingSignature()
+        progress.onSubmitted(`0x${'11'.repeat(32)}`)
+        await new Promise<void>((resolve) => (release = resolve))
+        return { txHash: `0x${'11'.repeat(32)}` }
+      },
+      async checkPending() {
+        return { status: 'pending' }
+      },
+    }
+    const calls: string[] = []
+    const { result, rerender } = renderHook(
+      ({ k }: { k: string }) =>
+        useTxRunner(k, steps.slice(0, 1), { executor, onConfirmed: (s) => void calls.push(`confirmed ${s.id} by ${k}`), onDone: () => void calls.push(`done by ${k}`) }),
+      { wrapper, initialProps: { k: 'hook-k1' } },
+    )
+    act(() => {
+      void result.current.start()
+    })
+    await waitFor(() => expect(result.current.steps[0]?.status).toBe('pending'))
+    // E.g. the wallet switched (the account is part of every key) while the first run's transaction is pending.
+    rerender({ k: 'hook-k2' })
+    await act(async () => {
+      release?.()
+    })
+    await waitFor(() => expect(calls).toEqual(['confirmed approve_collateral by hook-k1', 'done by hook-k1']))
   })
 })
 

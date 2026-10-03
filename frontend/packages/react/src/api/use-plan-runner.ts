@@ -19,6 +19,11 @@ export interface CreatedPlan {
   wire: unknown
   /** The backend plan id (`planState.id` / publication id) used for `/submitted` reports. */
   planId: string
+  /**
+   * When the offer ends, in ms since the epoch: the backend's offer expiry, or earlier (e.g. a mint deadline in the
+   * plan). No step of the plan is sent after it, and a plan without it is never run.
+   */
+  expiresAt?: number
 }
 
 export interface ApiPlanSpec {
@@ -30,15 +35,20 @@ export interface ApiPlanSpec {
   submitted(planId: string, stepId: string, txHash: Hex): Promise<void>
   /** Markets the plan may reference; read from ClaimRegistry on chain. */
   markets?: Address[]
+  /** Extra question ids derived on chain by the caller (never from the Pine API); see VerifyOptions. */
   reopenedQuestionIds?: Hex32[]
   limits: PlanLimits
   onDone?(): void | Promise<void>
+  /** Clock in ms since the epoch (tests); default Date.now. */
+  now?: () => number
 }
 
 interface StoredPlan {
   idempotencyKey: string
   wire?: unknown
   planId?: string
+  /** Offer expiry, ms since the epoch. */
+  expiresAt?: number
 }
 
 export type ApiPlanPhase = 'idle' | 'planning' | 'verified' | 'error'
@@ -49,18 +59,39 @@ export interface ApiPlanRunner {
   steps: TxStep[]
   runner: TxRunner
   error: string | null
+  /** Offer expiry of the loaded plan (ms since the epoch); null when no plan is loaded or it states none. */
+  expiresAt: number | null
   /** Creates and verifies the plan when needed, then starts (or resumes) the wallet steps. */
   run(): Promise<void>
   /** Forgets the stored plan and its progress (e.g. after it expired) so the next run creates a new one. */
   discard(): void
+  /** Forgets the plan shown, in memory only: its stored plan, idempotency key and progress stay. */
+  forget(): void
 }
 
 const STORE_PREFIX = 'pine:apiplan:'
 
+export const PLAN_OFFER_EXPIRED = 'This plan’s offer has expired, so its remaining steps are not sent. Nothing more was sent; start the action again for a fresh plan.'
+const PLAN_OFFER_UNKNOWN = 'This plan does not say when its offer ends, so its steps are not sent. Nothing was sent; start the action again.'
+
+const expiryOf = (value: unknown): number | undefined => (typeof value === 'number' && Number.isFinite(value) ? value : undefined)
+
+/** Why no further step of a plan may be sent (its offer ended, or it states no expiry); null while the offer runs. */
+function offerProblem(expiresAt: number | undefined, now: number): string | null {
+  if (expiresAt === undefined) return PLAN_OFFER_UNKNOWN
+  return expiresAt <= now ? PLAN_OFFER_EXPIRED : null
+}
+
+/** Steps that were never sent (no transaction hash) and are not done. */
+function hasUnsentSteps(steps: readonly TxRunnerStep[]): boolean {
+  return steps.some((s) => s.status !== 'confirmed' && s.status !== 'skipped' && !s.txHash)
+}
+
 /**
  * Runs one backend transaction plan: create (idempotent) → verify in the browser (pinned manifest, on-chain market
  * context, limits) → send each step from the user's wallet with the resumable runner → report each mined step.
- * Nothing reaches the wallet unless verification passed; a plan stored from an earlier visit is verified again.
+ * Nothing reaches the wallet unless verification passed; a plan stored from an earlier visit is verified again, and
+ * no step is sent after the plan's offer expired.
  */
 export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
   const { env } = usePine()
@@ -72,10 +103,12 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
   useEffect(() => {
     specRef.current = spec
   })
+  const clock = useCallback(() => (specRef.current.now ?? Date.now)(), [])
 
   const [phase, setPhase] = useState<ApiPlanPhase>('idle')
   const [plan, setPlan] = useState<TxPlan | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [expiresAt, setExpiresAt] = useState<number | null>(null)
 
   const manifest = useMemo(() => {
     try {
@@ -106,12 +139,17 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
     [manifest, publicClient, wallet.address, env.defaultChainId],
   )
 
-  // Another action (key): forget the plan loaded for the previous one.
-  useEffect(() => {
+  const forget = useCallback(() => {
     setPlan(null)
     setPhase('idle')
     setError(null)
-  }, [storeKey])
+    setExpiresAt(null)
+  }, [])
+
+  // Another action (key): forget the plan loaded for the previous one.
+  useEffect(() => {
+    forget()
+  }, [storeKey, forget])
 
   // A plan stored by an earlier visit is shown only after it verifies again.
   useEffect(() => {
@@ -122,6 +160,7 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
       (p) => {
         if (cancelled) return
         setPlan(p)
+        setExpiresAt(expiryOf(stored.expiresAt) ?? null)
         setPhase('verified')
       },
       () => undefined,
@@ -131,8 +170,10 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
     }
   }, [storage, storeKey, verify, plan])
 
+  // Reports go to the plan stored under this key, through this key's own spec (see useTxMachine): a step of a run that
+  // continues after the hook moved on to another action is never reported under that action's plan.
   const report = useCallback(
-    async (step: TxRunnerStep, outcome?: StepOutcome) => {
+    async (step: TxRunnerStep, outcome: StepOutcome | undefined, submitted: ApiPlanSpec['submitted']) => {
       const stepId = planStepIdOf(step.id)
       const stored = readJson<StoredPlan>(storage, storeKey)
       const txHash = outcome?.txHash ?? step.txHash
@@ -141,7 +182,7 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
       // from chain facts; retry a few times for prompt status.
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          await specRef.current.submitted(stored.planId, stepId, txHash)
+          await submitted(stored.planId, stepId, txHash)
           return
         } catch (e) {
           if (attempt === 2) console.warn(`Pine: could not report step ${stepId}: ${errorMessage(e)}`)
@@ -152,9 +193,21 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
     [storage, storeKey],
   )
 
+  // Checked right before every step is sent, whoever started the run (run(), runner.start() or runner.retry()).
+  const requireLiveOffer = useCallback(
+    (step: TxStep): TxStep => {
+      const stored = readJson<StoredPlan>(storage, storeKey)
+      const problem = offerProblem(expiryOf(stored?.expiresAt), clock())
+      if (problem) throw new Error(problem)
+      return step
+    },
+    [storage, storeKey, clock],
+  )
+
   const { runner, machine } = useTxMachine(`api:${spec.key}`, steps, {
-    onConfirmed: report,
-    onDone: () => specRef.current.onDone?.(),
+    onConfirmed: (step, outcome) => report(step, outcome, spec.submitted),
+    onDone: () => spec.onDone?.(),
+    prepare: requireLiveOffer,
   })
 
   const run = useCallback(async () => {
@@ -162,9 +215,11 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
     try {
       const stored = readJson<StoredPlan>(storage, storeKey)
       let current: TxPlan
+      let offer: number | undefined
       if (stored?.wire && stored.planId) {
         // Verified again on every run, against the wallet connected NOW (it may differ from when it was loaded).
         current = await verify(stored.wire)
+        offer = expiryOf(stored.expiresAt)
       } else {
         setPhase('planning')
         // The idempotency key is persisted BEFORE the request: a crash or reload retries with the same key.
@@ -172,27 +227,33 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
         writeJson(storage, storeKey, { ...stored, idempotencyKey } satisfies StoredPlan)
         const created = await specRef.current.create(idempotencyKey)
         current = await verify(created.wire)
-        writeJson(storage, storeKey, { idempotencyKey, wire: created.wire, planId: created.planId } satisfies StoredPlan)
+        offer = expiryOf(created.expiresAt)
+        writeJson(storage, storeKey, { idempotencyKey, wire: created.wire, planId: created.planId, expiresAt: offer } satisfies StoredPlan)
       }
       setPlan(current)
+      setExpiresAt(offer ?? null)
       setPhase('verified')
       if (!manifest) throw new Error('This build has no Pine deployment configured, so it cannot verify transactions.')
       // Hand the verified steps to the machine now (the render-time sync happens a tick later).
       machine.setSteps(planToTxSteps(current, manifest))
+      const problem = offerProblem(offer, clock())
+      if (problem) {
+        // An expired plan may still be followed to the end (pending receipts), but nothing new is sent from it.
+        await machine.hydrate()
+        if (hasUnsentSteps(machine.getSnapshot().steps)) throw new Error(problem)
+      }
       await machine.start()
     } catch (e) {
       setError(errorMessage(e))
       setPhase('error')
     }
-  }, [storage, storeKey, verify, machine, manifest])
+  }, [storage, storeKey, verify, machine, manifest, clock])
 
   const discard = useCallback(() => {
     removeKey(storage, storeKey)
     runner.reset()
-    setPlan(null)
-    setPhase('idle')
-    setError(null)
-  }, [storage, storeKey, runner])
+    forget()
+  }, [storage, storeKey, runner, forget])
 
-  return { phase, plan, steps, runner, error, run, discard }
+  return { phase, plan, steps, runner, error, expiresAt, run, discard, forget }
 }

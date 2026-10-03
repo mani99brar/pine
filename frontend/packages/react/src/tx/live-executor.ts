@@ -51,6 +51,15 @@ function replacementError(reason: ReplacementReason): Error {
   )
 }
 
+/** A step bound to an account (`request.from`) is never simulated or sent from another one. */
+function requireSender(config: Config, from: Hex | undefined): void {
+  if (!from) return
+  const connected = getAccount(config).address
+  if (connected?.toLowerCase() !== from.toLowerCase()) {
+    throw new Error(`Switch back to the wallet that signed in (${from}) to continue. Nothing was sent.`)
+  }
+}
+
 /** Real wallet executor: wagmi `sendTransaction` + `waitForTransactionReceipt`. */
 export function createLiveExecutor(config: Config, opts?: { receiptTimeoutMs?: number }): TxExecutor {
   const timeout = opts?.receiptTimeoutMs ?? 10 * 60_000
@@ -72,6 +81,7 @@ export function createLiveExecutor(config: Config, opts?: { receiptTimeoutMs?: n
       }
       const account = getAccount(config)
       if (!account.address) throw new Error('Connect a wallet to continue.')
+      requireSender(config, req.from)
       if (account.chainId !== req.chainId) {
         await switchChain(config, { chainId: req.chainId })
         if (getAccount(config).chainId !== req.chainId) {
@@ -89,13 +99,17 @@ export function createLiveExecutor(config: Config, opts?: { receiptTimeoutMs?: n
       // limit gets a 20% margin: an exact estimate can fall short when state moves before inclusion (e.g. a pool's tick).
       let estimate: bigint
       try {
-        estimate = await estimateGas(config, { account: account.address, to: req.to, data: req.data, value, chainId: req.chainId })
+        estimate = await estimateGas(config, { account: req.from ?? account.address, to: req.to, data: req.data, value, chainId: req.chainId })
       } catch (e) {
         const reason = (e as { shortMessage?: string }).shortMessage ?? errorMessage(e)
         throw new Error(`"${step.label}" would fail on-chain (${reason}). Nothing was sent.`)
       }
+      // The wallet may have switched accounts during the checks above. With `account` the request also names its
+      // sender, so the wallet cannot sign it from another account.
+      requireSender(config, req.from)
       progress.onAwaitingSignature()
       const hash = await sendTransaction(config, {
+        ...(req.from ? { account: req.from } : {}),
         to: req.to,
         data: req.data,
         value,

@@ -5,6 +5,7 @@ import {
   claimRegistryAbi,
   planFromWire,
   PlanVerificationError,
+  realityV3Abi,
   verifyPlan,
   type Address,
   type DeploymentManifest,
@@ -15,12 +16,13 @@ import {
   type TxStep as PlanStep,
 } from '@pine/core/pine-shared'
 import type { PineEnv } from '@pine/data'
+import { getSqrtRatioAtTick, isValidTick, Q192 } from './tick-math'
 
 // Client-side verification of backend transaction plans (SEC-TX-01..12). The backend proposes every transaction as a
 // plan; before any wallet prompt the browser decodes it from the wire with its own copy of @pine/shared, checks it
 // against the deployment manifest pinned at build time (never the one the server describes), against registered
-// markets read from ClaimRegistry on the user's own RPC, and against the user's limits, then derives every label it
-// shows from the decoded calldata (SEC-TX-10).
+// markets and their oracle questions read on the user's own RPC (ClaimRegistry, Reality), and against the user's
+// limits, then derives every label it shows from the decoded calldata (SEC-TX-10).
 
 /** The deployment manifest pinned in this build (NEXT_PUBLIC_PINE_*). Throws when unconfigured or not Gnosis. */
 export function pinnedManifest(env: Pick<PineEnv, 'deployment' | 'defaultChainId'>): DeploymentManifest {
@@ -30,9 +32,14 @@ export function pinnedManifest(env: Pick<PineEnv, 'deployment' | 'defaultChainId
   return buildDeploymentManifest(env.deployment, env.defaultChainId)
 }
 
-/** The subset of a viem public client used to read ClaimRegistry. */
+/** The reads plan verification makes on the user's RPC: ClaimRegistry, and Reality's reopened question of a claim. */
+export type RegistryRead =
+  | { address: Address; abi: typeof claimRegistryAbi; functionName: 'isRegistered' | 'getClaim'; args: readonly [Address] }
+  | { address: Address; abi: typeof realityV3Abi; functionName: 'reopened_questions'; args: readonly [Hex32] }
+
+/** The subset of a viem public client used to read ClaimRegistry and Reality. */
 export interface RegistryReader {
-  readContract(args: { address: Address; abi: typeof claimRegistryAbi; functionName: 'isRegistered' | 'getClaim'; args: readonly [Address] }): Promise<unknown>
+  readContract(args: RegistryRead): Promise<unknown>
 }
 
 interface OnChainClaim {
@@ -42,11 +49,30 @@ interface OnChainClaim {
   invalidToken: Address
 }
 
-/** Registered markets (outcome tokens) and their question ids, read from ClaimRegistry on chain. */
+const HEX32 = /^0x[0-9a-f]{64}$/
+const ZERO_HASH = `0x${'0'.repeat(64)}`
+
+/**
+ * The claim's current Reality question, read on the user's RPC: reopened_questions(original) when the original was
+ * reopened after settling "answered too soon" (Reality keeps the latest replacement there), else the original.
+ */
+export async function readCurrentQuestionId(reader: RegistryReader, manifest: DeploymentManifest, questionId: Hex32): Promise<Hex32> {
+  const original = questionId.toLowerCase() as Hex32
+  const raw = await reader.readContract({ address: manifest.seer.realitio, abi: realityV3Abi, functionName: 'reopened_questions', args: [original] })
+  const replacement = String(raw).toLowerCase()
+  if (!HEX32.test(replacement)) throw new PlanVerificationError(null, 'Reality returned a malformed question id')
+  return replacement === ZERO_HASH ? original : (replacement as Hex32)
+}
+
+/**
+ * Registered markets (outcome tokens) and their question ids, read from ClaimRegistry on chain. With
+ * `currentQuestions`, each market's current Reality question (after reopens) is read from Reality too.
+ */
 export async function buildPlanContext(
   reader: RegistryReader,
   manifest: DeploymentManifest,
   markets: readonly Address[],
+  opts: { currentQuestions?: boolean } = {},
 ): Promise<PlanContext & { questionIds: Set<Hex32> }> {
   const context = { markets: new Map<Address, readonly Address[]>(), questionIds: new Set<Hex32>() }
   for (const raw of new Set(markets.map((m) => m.toLowerCase() as Address))) {
@@ -54,21 +80,37 @@ export async function buildPlanContext(
     if (registered !== true) continue
     const claim = (await reader.readContract({ address: manifest.pine.claimRegistry, abi: claimRegistryAbi, functionName: 'getClaim', args: [raw] })) as OnChainClaim
     context.markets.set(raw, [claim.yesToken, claim.noToken, claim.invalidToken].map((t) => t.toLowerCase() as Address))
-    context.questionIds.add(claim.questionId.toLowerCase() as Hex32)
+    const questionId = claim.questionId.toLowerCase() as Hex32
+    context.questionIds.add(questionId)
+    if (opts.currentQuestions) context.questionIds.add(await readCurrentQuestionId(reader, manifest, questionId))
   }
   return context
 }
+
+/** Calls whose arguments name a Reality question (verifyPlan requires it to be a registered claim question). */
+const QUESTION_CALLS = new Set([
+  'realitio.submitAnswer',
+  'realitio.fundAnswerBounty',
+  'realitio.claimWinnings',
+  'realitio.reopenQuestion',
+  'klerosHomeProxy.handleNotifiedRequest',
+  'klerosHomeProxy.handleRejectedRequest',
+  'klerosHomeProxy.reportArbitrationAnswer',
+])
 
 export interface VerifyOptions {
   manifest: DeploymentManifest
   /** The connected wallet; every plan is built for exactly one sender. */
   account: Address
   reader: RegistryReader
-  /** Markets the action is about (their registration and outcome tokens are read on chain). */
+  /**
+   * Markets the action is about. Their registration, outcome tokens and question come from ClaimRegistry, and for plans
+   * that name a question, the current (reopened) question comes from Reality, all on the user's RPC.
+   */
   markets?: readonly Address[]
   /**
-   * Reality question ids that replaced a market's original question (reopened after "answered too soon"), as reported
-   * by the read model. Registered questions themselves always come from ClaimRegistry.
+   * Further question ids the caller derived ON CHAIN itself. Never pass ids from the Pine API (the oracle status): a
+   * compromised API could point answers and bounties at a question it controls.
    */
   reopenedQuestionIds?: readonly Hex32[]
   limits: PlanLimits
@@ -80,7 +122,8 @@ export async function verifyWirePlan(wire: unknown, opts: VerifyOptions): Promis
   if (plan.account !== opts.account.toLowerCase()) {
     throw new PlanVerificationError(null, 'the plan was built for another wallet; reconnect the wallet you signed in with')
   }
-  const context = await buildPlanContext(opts.reader, opts.manifest, opts.markets ?? [])
+  const currentQuestions = plan.steps.some((s) => QUESTION_CALLS.has(s.allowlistId))
+  const context = await buildPlanContext(opts.reader, opts.manifest, opts.markets ?? [], { currentQuestions })
   for (const id of opts.reopenedQuestionIds ?? []) context.questionIds.add(id.toLowerCase() as Hex32)
   const totalValue = verifyPlan(plan, opts.manifest, context, opts.limits)
   return { plan, totalValue }
@@ -102,6 +145,22 @@ function spenderName(manifest: DeploymentManifest, spender: unknown): string {
   if (s === manifest.seer.gnosisRouter.toLowerCase()) return 'the Seer router'
   if (s === manifest.amm.positionManager.toLowerCase()) return 'the Swapr position manager'
   return short(spender)
+}
+
+/** The outcome token's price in sDAI at a pool square-root price, for display (4 significant digits). */
+function outcomePrice(sqrtPriceX96: unknown, outcomeIsToken0: boolean): string {
+  if (typeof sqrtPriceX96 !== 'bigint' || sqrtPriceX96 <= 0n) return '?'
+  const squared = sqrtPriceX96 * sqrtPriceX96
+  const wad = outcomeIsToken0 ? (squared * 10n ** 18n) / Q192 : (Q192 * 10n ** 18n) / squared
+  return String(Number(Number(formatUnits(wad, 18)).toPrecision(4)))
+}
+
+/** The outcome-token price range (sDAI) a position over [tickLower, tickUpper] covers, lowest first. */
+function outcomePriceRange(tickLower: unknown, tickUpper: unknown, outcomeIsToken0: boolean): [string, string] {
+  if (!isValidTick(tickLower) || !isValidTick(tickUpper)) return ['?', '?']
+  const atLower = outcomePrice(getSqrtRatioAtTick(tickLower), outcomeIsToken0)
+  const atUpper = outcomePrice(getSqrtRatioAtTick(tickUpper), outcomeIsToken0)
+  return outcomeIsToken0 ? [atLower, atUpper] : [atUpper, atLower]
 }
 
 const ANSWERS: Record<string, string> = {
@@ -141,11 +200,22 @@ export function describePlanStep(step: PlanStep, manifest: DeploymentManifest): 
       return { label: `Merge ${amount(a[1])} of each outcome back to xDAI`, description: `Burns a full set of outcome tokens of market ${short(a[0])}.` }
     case 'gnosisRouter.redeemToBase':
       return { label: 'Redeem winning outcome tokens', description: `Redeems resolved tokens of market ${short(a[0])} for xDAI to your wallet.` }
-    case 'positionManager.createAndInitializePoolIfNecessary':
-      return { label: 'Create the Swapr pool if missing', description: `Initialises the ${short(a[0])}/${short(a[1])} pool at the planned price.` }
+    case 'positionManager.createAndInitializePoolIfNecessary': {
+      const outcomeIsToken0 = String(a[1]).toLowerCase() === manifest.seer.collateralToken.toLowerCase()
+      return {
+        label: 'Create the Swapr pool if missing',
+        description: `Initialises the ${short(a[0])}/${short(a[1])} pool, if it does not exist yet, with the outcome token at ${outcomePrice(a[2], outcomeIsToken0)} sDAI.`,
+      }
+    }
     case 'positionManager.mint': {
-      const p = a[0] as { amount0Desired?: bigint; amount1Desired?: bigint } | undefined
-      return { label: 'Add liquidity', description: `Deposits up to ${amount(p?.amount0Desired)} and ${amount(p?.amount1Desired)} tokens into a position owned by your wallet.` }
+      const p = a[0] as { token1?: unknown; tickLower?: unknown; tickUpper?: unknown; amount0Desired?: bigint; amount1Desired?: bigint } | undefined
+      const outcomeIsToken0 = String(p?.token1).toLowerCase() === manifest.seer.collateralToken.toLowerCase()
+      const [low, high] = outcomePriceRange(p?.tickLower, p?.tickUpper, outcomeIsToken0)
+      const [outcome, sdai] = outcomeIsToken0 ? [p?.amount0Desired, p?.amount1Desired] : [p?.amount1Desired, p?.amount0Desired]
+      return {
+        label: `Add liquidity: up to ${amount(outcome)} outcome tokens between ${low} and ${high} sDAI`,
+        description: `Deposits up to ${amount(outcome)} outcome tokens and ${amount(sdai)} sDAI into a position owned by your wallet; its outcome tokens are sold only while their price is between ${low} and ${high} sDAI.`,
+      }
     }
     case 'positionManager.decreaseLiquidity':
       return { label: 'Remove liquidity', description: 'Removes liquidity from your Swapr position.' }
@@ -189,7 +259,10 @@ export function planStepIdOf(id: string): string | null {
   return id.startsWith('plan:') ? id.slice(5) : null
 }
 
-/** Verified plan → runner steps (transactions in plan order; the machine runs them sequentially). */
+/**
+ * Verified plan → runner steps (transactions in plan order; the machine runs them sequentially). Every request names
+ * the plan account as `from`: the executor sends nothing from another account.
+ */
 export function planToTxSteps(plan: TxPlan, manifest: DeploymentManifest): TxStep[] {
   return plan.steps.map((step) => {
     const { label, description } = describePlanStep(step, manifest)
@@ -198,7 +271,7 @@ export function planToTxSteps(plan: TxPlan, manifest: DeploymentManifest): TxSte
       label,
       description,
       kind: 'transaction',
-      request: { chainId: step.chainId, to: step.to as Hex, data: step.data as Hex, value: step.value.toString(10) },
+      request: { chainId: step.chainId, to: step.to as Hex, data: step.data as Hex, value: step.value.toString(10), from: plan.account as Hex },
       freezesTerms: step.allowlistId === 'claimRegistry.createClaim' ? true : undefined,
       estimatedCost: step.value > 0n ? { amount: formatUnits(step.value, 18), currency: 'xDAI' } : undefined,
     } satisfies TxStep
