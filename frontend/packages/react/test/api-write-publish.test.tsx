@@ -327,6 +327,44 @@ describe('useApiPublish', () => {
     expect(result.current.publish.error?.action).toBe('fix_input')
     expect(result.current.publish.fieldErrors).toEqual([{ field: 'policyParameters.startingStates', composerPath: 'spec.parameters.startingStates', message: 'Required' }])
   })
+
+  it('drops Pine’s validation issues once the claim they were reported for is edited, so it can be saved again', async () => {
+    const issue = { path: ['policyParameters', 'simulatedAdapters'], message: 'Too big: expected array to have <=1 items' }
+    fake.on('POST', /^\/api\/v1\/drafts$/, (req) => {
+      const adapters = (req.json as DraftInput).policyParameters.simulatedAdapters
+      if (Array.isArray(adapters) && adapters.length > 1) return apiError(400, 'VALIDATION_FAILED', 'Policy parameters are invalid', { issues: [issue] })
+      state.input = req.json as DraftInput
+      state.revision = 1
+      return json(201, { draft: { id: BACKEND_DRAFT, revision: 1, input: state.input, valid: true, issues: [], createdAt: iso(NOW_S), updatedAt: iso(NOW_S) } })
+    })
+    const setAdapters = (result: ReturnType<typeof render>['result'], adapters: string[]) =>
+      act(() => result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, parameters: { ...d.spec.parameters, simulatedAdapters: adapters } } })))
+    const { result } = render()
+    await composeAndConnect(result)
+    setAdapters(result, ['lifi', 'across'])
+    await act(async () => {
+      expect(await result.current.publish.saveDraft()).toBe(false)
+    })
+    const refused = { field: 'policyParameters.simulatedAdapters', composerPath: 'spec.parameters.simulatedAdapters', message: issue.message }
+    expect(result.current.publish.fieldErrors).toEqual([refused])
+    expect(result.current.publish.error?.code).toBe('VALIDATION_FAILED')
+    expect(result.current.publish.status).toBe('invalid')
+
+    // The user fixes the field: Pine's issue and error no longer apply, so nothing blocks saving again.
+    setAdapters(result, ['lifi'])
+    await waitFor(() => expect(result.current.publish.fieldErrors).toEqual([]))
+    expect(result.current.publish.error).toBeNull()
+    expect(result.current.publish.status).toBe('idle')
+    // The exact refused terms again: the refusal holds again.
+    setAdapters(result, ['lifi', 'across'])
+    await waitFor(() => expect(result.current.publish.fieldErrors).toEqual([refused]))
+    setAdapters(result, ['lifi'])
+    await act(async () => {
+      expect(await result.current.publish.saveDraft()).toBe(true)
+    })
+    expect(result.current.publish.fieldErrors).toEqual([])
+    expect(result.current.publish.status).toBe('saved')
+  })
 })
 
 describe('useApiPublish: a preview is published only with the terms it was made from', () => {

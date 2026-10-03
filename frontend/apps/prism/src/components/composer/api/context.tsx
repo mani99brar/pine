@@ -25,8 +25,9 @@ export function publicationLocked(pub: ApiPublish): boolean {
 
 /**
  * The composer as the stages see it in api mode: frozen while a publication may land, and with the backend's own
- * refusals (the last save's VALIDATION_FAILED issues) next to the fields they name. A field that already shows a local
- * issue keeps only that one, so a message never appears twice in slightly different words.
+ * refusals (the last save's VALIDATION_FAILED issues, while the draft still has the refused terms: an edit drops them)
+ * next to the fields they name. A field that already shows a local issue keeps only that one, so a message never
+ * appears twice in slightly different words.
  */
 function withPublication(c: ClaimComposer, pub: ApiPublish): ClaimComposer {
   const locked = publicationLocked(pub)

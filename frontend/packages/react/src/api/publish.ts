@@ -75,7 +75,10 @@ export interface ApiPublish {
   draft: ClaimDraft | undefined
   /** The backend draft, preview and publication this draft is mirrored to. */
   backend: BackendDraftRef | undefined
-  /** Fields the backend would refuse (local checks of the current draft, plus the last backend validation issues). */
+  /**
+   * Fields the backend would refuse: local checks of the current draft, plus the issues of Pine's last refusal while
+   * the draft still has the terms Pine refused (an edit drops them, and the refusal's error, until the next save).
+   */
   fieldErrors: DraftFieldError[]
   /** The latest preview, verified in this browser (null when none). Render it only from these fields. */
   preview: VerifiedPreview | null
@@ -135,6 +138,18 @@ function termsOf(input: DraftInput): DraftTerms {
 
 const termsJson = (terms: DraftTerms): string => canonicalJson(terms as unknown as JsonValue)
 
+/** Clock-independent identity of what a save sends: the terms and the absolute evidence deadline chosen. */
+const termsKey = (terms: DraftTerms, deadline: number | undefined): string => `${termsJson(terms)}|${deadline ?? ''}`
+
+/** A VALIDATION_FAILED answer to a save, with the terms it was given for: it applies only while the draft still has them. */
+interface Refusal {
+  key: string
+  issues: DraftFieldError[]
+  error: WriteErrorInfo
+}
+
+const NO_ISSUES: DraftFieldError[] = []
+
 /**
  * SEC-CLAIM-04: a preview is publishable only while the current draft composes exactly the terms it was made from and
  * keeps its evidence deadline. Fails closed: a draft that cannot be mapped any more (for any reason but the evidence
@@ -179,7 +194,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
   const [stored, setStored] = useStoredRecord<StoredPreview>(`pine:api-preview:${draftId}`, isStoredPreview)
   const [op, setOp] = useState<'saving' | 'previewing' | null>(null)
   const [error, setError] = useState<WriteErrorInfo | null>(null)
-  const [backendIssues, setBackendIssues] = useState<DraftFieldError[]>([])
+  const [refusal, setRefusal] = useState<Refusal | null>(null)
   const [publication, setPublication] = useState<PublicationView | null>(null)
   const noPlanRef = useRef<PublicationView | null>(null)
 
@@ -204,13 +219,17 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
     () => (draft ? toDraftInput(draft, { defaultBranch: options.defaultBranch, chainId: env.defaultChainId, now: now() }) : null),
     [draft, options.defaultBranch, env.defaultChainId, now],
   )
-  const fieldErrors = useMemo(() => [...(live && !live.ok ? live.errors : []), ...backendIssues], [live, backendIssues])
   // What the preview is compared with: the current terms (clock-independent) and the absolute deadline chosen.
   const liveTerms = useMemo(
     () => (draft ? toDraftTerms(draft, { defaultBranch: options.defaultBranch, chainId: env.defaultChainId }) : null),
     [draft, options.defaultBranch, env.defaultChainId],
   )
   const liveDeadline = draft ? chosenEvidenceDeadline(draft) : undefined
+  // Pine's refusal of a save holds only for the terms it was given: any edit of them drops its issues (and its error),
+  // so the user can save again; the same terms bring it back.
+  const refusalApplies = refusal !== null && liveTerms !== null && liveTerms.ok && refusal.key === termsKey(liveTerms.terms, liveDeadline)
+  const backendIssues = refusalApplies ? refusal.issues : NO_ISSUES
+  const fieldErrors = useMemo(() => [...(live && !live.ok ? live.errors : []), ...backendIssues], [live, backendIssues])
 
   // The preview, verified again on every load and whenever the wallet changes. Until the draft is loaded there is
   // nothing to compare it with, so none is shown.
@@ -339,7 +358,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
 
   const saveDraftInternal = useCallback(async (): Promise<{ input: DraftInput; view: DraftView } | null> => {
     setError(null)
-    setBackendIssues([])
+    setRefusal(null)
     if (!draft) {
       setError({ code: 'UNKNOWN', action: 'none', message: 'The draft is not loaded yet.' })
       return null
@@ -376,8 +395,12 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
     } catch (e) {
       const info = describeWriteError(e)
       setError(info)
-      if (info.code === 'VALIDATION_FAILED' && info.issues) {
-        setBackendIssues(info.issues.map((i) => ({ field: i.path.map(String).filter((s) => s !== 'input').join('.'), composerPath: composerPathOf(i.path), message: i.message })))
+      if (info.code === 'VALIDATION_FAILED') {
+        setRefusal({
+          key: termsKey(termsOf(result.input), chosenEvidenceDeadline(draft)),
+          issues: (info.issues ?? []).map((i) => ({ field: i.path.map(String).filter((s) => s !== 'input').join('.'), composerPath: composerPathOf(i.path), message: i.message })),
+          error: info,
+        })
       }
       return null
     } finally {
@@ -486,7 +509,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
 
   const runnerError = runner.error ?? runner.runner.error ?? null
   const shownError =
-    error ??
+    (refusal !== null && error === refusal.error && !refusalApplies ? null : error) ??
     action.lastError ??
     (runnerError && !noPlanRef.current ? { code: 'UNKNOWN' as const, action: 'none' as const, message: runnerError } : null)
 
