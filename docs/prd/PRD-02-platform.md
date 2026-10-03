@@ -307,6 +307,20 @@ mismatch) before returning;
   enforced (markets lane). Coverage-matrix entries for security behaviour name a test that fails when the behaviour is removed
   (spot-check with a mutation).
 
+## 3b. platform-006 review fixes (carried by platform-007)
+- Redaction test (coverage P1): load the production env with EVERY secret set (database URLs including the migrator and the
+  read-model URL, both RPC URLs, GitHub client and webhook secrets, token-encryption keys, Kubo API URL, pinning-service URL and
+  token, Envio GraphQL URL and admin secret) and assert `createPlatformRedactor` masks each one in a log line, an error response
+  and an audit detail; removing any value from the secret list must fail the test.
+- Rate limits are all-or-nothing: one statement increments every key of a request only when all of them are below their
+  limits (CTE), so a refused request never consumes another window's budget; test it.
+- `src/main.ts` signal handling is testable: export the handler installation (or a `run(env, io)`) and test that SIGTERM/SIGINT
+  stop accepting, abort jobs, close every resource and exit 0 (1 when shutdown fails).
+- Timing tests assert ranges with ≥ 1 s of slack (including the renewal-period test: use a larger TTL and compare the observed
+  period with ttl/3 vs ttl/2 instead of a tight window).
+- Wording: the gateways run exactly three jobs (pin outbox, token re-encryption, OAuth-state purge); token refresh is on demand and
+  single-flight per user, not a job.
+
 ## 4. Required tests (each lane, vitest on PGlite; name the SEC id in negative tests)
 - core: config refusal cases per production rule; CSRF (missing/wrong Origin, cross-site fetch metadata, missing header, wrong
   content type, charset parameter accepted, multipart only where allowed); SIWE (replayed nonce, nonce from another pre-session,

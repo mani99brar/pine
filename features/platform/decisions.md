@@ -58,6 +58,8 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
   transaction; pin outbox per-target completion; tolerant timing tests; and the tests PRD-02 section 3a lists. Every lane's
   completion includes a coverage matrix: each required test of PRD-02 section 4/3a and each decision → the test file and test name
   that would fail if the behaviour were removed.
+- platform-006 review fixes (platform-007): full secret-redaction test, all-or-nothing rate-limit windows, testable signal
+  handling in main.ts, tolerant renewal-period test; gateway jobs are exactly pin outbox, re-encryption and OAuth-state purge.
 - Metrics use a dedicated prom-client `Registry`. Migrations always run as the migrator role (default privileges depend on it).
 - Metrics adapter: lazy, cached by name, label names fixed at first use, mismatching samples dropped with one warning.
 - Gateways I/O injection: `createGateways(deps)` wraps an exported `buildGateways(deps, io)` (`fetch` + two viem transports);
