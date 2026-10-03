@@ -116,6 +116,37 @@ describe('live executor: checkPending', () => {
   })
 })
 
+describe('live executor: the plan account sends (SEC-AUTH-13)', () => {
+  const PLAN_ACCOUNT = '0x2222222222222222222222222222222222222222' as const
+  const bound = () => step({ request: { chainId: 100, to: TO, data: '0xabcdef', value: '0', from: PLAN_ACCOUNT } })
+
+  it('SEC-AUTH-13 refuses to simulate or send a step from another account than the plan’s', async () => {
+    actions.getAccount.mockReturnValue({ address: TO, chainId: 100 })
+    await expect(createLiveExecutor(config).execute(bound(), progress)).rejects.toThrow(/Switch back to the wallet that signed in .*Nothing was sent/)
+    expect(actions.estimateGas).not.toHaveBeenCalled()
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+  })
+
+  it('SEC-AUTH-13 refuses to send when the wallet switched accounts during the checks', async () => {
+    actions.getAccount.mockReturnValue({ address: PLAN_ACCOUNT, chainId: 100 })
+    actions.estimateGas.mockImplementation(async () => {
+      actions.getAccount.mockReturnValue({ address: TO, chainId: 100 })
+      return 100_000n
+    })
+    await expect(createLiveExecutor(config).execute(bound(), progress)).rejects.toThrow(/Switch back to the wallet that signed in/)
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+  })
+
+  it('simulates and sends as the plan account, naming it as the sender', async () => {
+    actions.getAccount.mockReturnValue({ address: PLAN_ACCOUNT, chainId: 100 })
+    await createLiveExecutor(config).execute(bound(), progress)
+    expect(actions.estimateGas).toHaveBeenCalledWith(config, { account: PLAN_ACCOUNT, to: TO, data: '0xabcdef', value: 0n, chainId: 100 })
+    expect(actions.sendTransaction).toHaveBeenCalledWith(config, { account: PLAN_ACCOUNT, to: TO, data: '0xabcdef', value: 0n, chainId: 100, gas: 120_000n })
+  })
+})
+
 describe('live executor: simulation and gas (SEC-TX-07)', () => {
   it('SEC-TX-07 simulates before the wallet prompt and sends nothing when the call would revert', async () => {
     actions.estimateGas.mockRejectedValue(Object.assign(new Error('execution reverted'), { shortMessage: 'Execution reverted: ClaimExists()' }))

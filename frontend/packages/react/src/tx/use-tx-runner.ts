@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
 import { WagmiContext } from 'wagmi'
 import type { DecimalString, Hex, TxStep, TxStepId } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
@@ -79,11 +79,20 @@ function defaultLimitCurrency(steps: TxStep[]): string | undefined {
   return getChainOrDefault(chainId).collateral.symbol
 }
 
-/** Internal: returns the machine as well, for hooks that need to drive it imperatively. */
+/**
+ * Internal: returns the machine as well, for hooks that need to drive it imperatively.
+ *
+ * The callbacks a machine calls (onConfirmed, onDone, prepare, handlers, …) are bound to the machine's own key: they
+ * follow the options this hook passes while it shows that key, and keep the last of them once it moves on to another
+ * key. A machine still running for an earlier key therefore never reaches the callbacks of the key shown now (which
+ * would, e.g., report its transaction under another plan).
+ */
 export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOptions = {}): { runner: TxRunner; machine: TxMachine } {
   const pine = usePine()
   const wagmiConfig = useContext(WagmiContext)
-  const optsRef = useRef(opts)
+  // One holder per key (a new object whenever the key changes); only the current key's holder is updated.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const optsRef = useMemo(() => ({ current: opts }), [key])
   useIsomorphicLayoutEffect(() => {
     optsRef.current = opts
   })
@@ -109,7 +118,7 @@ export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOpti
       isManual: (s: TxStep) => (optsRef.current.isManual ? optsRef.current.isManual(s) : isManualStep(s)),
       manualUrl: (s: TxStep, r: Partial<Record<TxStepId, unknown>>) => optsRef.current.manualUrl?.(s, r),
     }),
-    [],
+    [optsRef],
   )
   const handlerIds = Object.keys(opts.handlers ?? {}).sort().join(',')
   const handlers = useMemo(() => {
@@ -122,7 +131,7 @@ export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOpti
       }
     }
     return out
-  }, [handlerIds])
+  }, [handlerIds, optsRef])
 
   const machine = useMemo(() => {
     let m = registry.get(key)

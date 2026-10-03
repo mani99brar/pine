@@ -700,8 +700,11 @@ export interface TxStep {
   label: string
   description: string
   kind: 'offchain' | 'transaction' | 'signature'
-  /** Present for transactions */
-  request?: { chainId: ChainId; to: Address; data: Hex; value: string /* wei */ }
+  /**
+   * Present for transactions. `from`, when set, is the only account the step may be sent from (the account a verified
+   * plan was built for): the executor refuses to simulate or send from any other.
+   */
+  request?: { chainId: ChainId; to: Address; data: Hex; value: string /* wei */; from?: Address }
   /** Estimated cost shown before the wallet prompt */
   estimatedCost?: { amount: DecimalString; currency: string }
   /** Collateral this step moves out of the wallet (e.g. the liquidity deposit); counts toward the spending limit */
