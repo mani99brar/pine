@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useSyncExternalStore } from 'react'
 import { ChevronDown } from 'lucide-react'
 import type { DepthSnapshot } from '@pine/core'
 import { COPY } from '@pine/core/copy'
@@ -26,36 +26,77 @@ const SAMPLE_DEPTH: DepthSnapshot = {
 }
 
 /** "How to read the board": a compact legend for the glyphs, expandable for detail. */
-export function BoardLegend({ className, defaultOpen = false }: { className?: string; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen)
+const LEGEND_KEY = 'pine-field:legend'
+
+function readLegend(): string | null {
+  try {
+    return localStorage.getItem(LEGEND_KEY)
+  } catch {
+    return null
+  }
+}
+
+function subscribeLegend(cb: () => void) {
+  window.addEventListener('storage', cb)
+  return () => window.removeEventListener('storage', cb)
+}
+
+const WIDE = '(min-width: 768px)'
+function subscribeWide(cb: () => void) {
+  const mq = window.matchMedia(WIDE)
+  mq.addEventListener('change', cb)
+  return () => mq.removeEventListener('change', cb)
+}
+
+export function BoardLegend({ className, defaultOpen = true }: { className?: string; defaultOpen?: boolean }) {
+  // Open for first-time visitors on wider screens (on phones it would push the board below the fold);
+  // once someone hides the guide it stays hidden for them.
+  const stored = useSyncExternalStore(subscribeLegend, readLegend, () => null)
+  const wide = useSyncExternalStore(subscribeWide, () => window.matchMedia(WIDE).matches, () => true)
+  const [override, setOverride] = useState<boolean | null>(null)
+  const open = override ?? (stored === 'hidden' ? false : defaultOpen && wide)
+  const setOpen = (fn: (o: boolean) => boolean) => {
+    const next = fn(open)
+    setOverride(next)
+    try {
+      localStorage.setItem(LEGEND_KEY, next ? 'open' : 'hidden')
+    } catch {
+      /* storage unavailable: the choice lasts for this view */
+    }
+  }
   return (
     <section aria-label="How to read the board" className={cn('rounded-[var(--radius-tile)] bg-fog-2/70', className)}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 text-left text-[0.84rem] text-ink-2"
-      >
-        <span className="font-[650] text-ink">How to read the board</span>
+      <div className="flex w-full flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5 text-[0.84rem] text-ink-2">
+        <p className="font-[650] text-ink">How to read the board</p>
+        <span className="inline-flex items-center gap-2">
+          <span aria-hidden className="t-figure text-[1rem] text-flare-ink">12%</span>
+          Market-implied chance of Yes
+        </span>
         <span className="inline-flex items-center gap-2">
           <span aria-hidden className="hatch-yes inline-block h-2.5 w-5" />
           Yes: counterexample demonstrated
         </span>
         <span className="inline-flex items-center gap-2">
           <span aria-hidden className="inline-block h-2.5 w-5 bg-cobalt" />
-          No: none submitted
+          No: no qualifying counterexample submitted
         </span>
         <span className="hidden items-center gap-2 md:inline-flex">
           <span aria-hidden className="hatch-invalid inline-block h-2.5 w-2" />
           Invalid result token
         </span>
-        <span className="ml-auto inline-flex items-center gap-1 font-[600] text-ink">
-          {open ? 'Hide' : 'Explain'}
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls="board-legend-detail"
+          className="ml-auto inline-flex items-center gap-1 rounded-[4px] px-1 font-[600] text-ink hover:underline"
+        >
+          {open ? 'Hide the glyph guide' : 'Explain the glyphs'}
           <ChevronDown size={14} aria-hidden className={cn('transition-transform', open && 'rotate-180')} />
-        </span>
-      </button>
+        </button>
+      </div>
       {open && (
-        <div className="grid gap-6 border-t border-line px-4 pb-5 pt-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div id="board-legend-detail" className="grid gap-6 border-t border-line px-4 pb-5 pt-4 sm:grid-cols-2 lg:grid-cols-4">
           <div>
             <p className="font-[650] text-ink">Tension bar</p>
             <TensionBar yes={0.23} yes24hAgo={0.18} invalid={0.02} className="mt-4 max-w-[14rem]" />

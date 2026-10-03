@@ -6,7 +6,8 @@ import { formatDate, formatPrice } from '@pine/core'
 import { useWidth } from './useSize'
 import { cn } from '@/lib/cn'
 
-const M = { top: 34, right: 14, bottom: 28, left: 42 }
+const MARGIN = { top: 34, right: 14, bottom: 28, left: 42 }
+const PIN_ROW = 23
 
 const EVENT_MARK: Partial<Record<TimelineEvent['kind'], { letter: string; label: string }>> = {
   market_created: { letter: 'M', label: 'Market created' },
@@ -49,7 +50,7 @@ export function TensionChart({
   points,
   events,
   range,
-  height = 300,
+  height: baseHeight = 300,
   loading,
   fit = true,
 }: {
@@ -69,7 +70,27 @@ export function TensionChart({
   const data = useMemo(() => [...points].sort((a, b) => a.t - b.t), [points])
   const t0 = data[0]?.t ?? 0
   const t1 = data[data.length - 1]?.t ?? 1
-  const iw = Math.max(10, width - M.left - M.right)
+  const iw = Math.max(10, width - MARGIN.left - MARGIN.right)
+
+  // Pins that would overlap are stacked into extra rows above the plot (up to three).
+  const pinnedRows = useMemo(() => {
+    const list = events
+      .filter((e) => EVENT_MARK[e.kind])
+      .map((e) => ({ ...e, ts: new Date(e.at).getTime() }))
+      .filter((e) => e.ts >= t0 && e.ts <= t1)
+      .sort((a, b) => a.ts - b.ts)
+    const rowEnds: number[] = []
+    return list.map((e) => {
+      const left = MARGIN.left + ((e.ts - t0) / Math.max(1, t1 - t0)) * iw
+      let row = rowEnds.findIndex((end) => left - end >= 24)
+      if (row === -1) row = rowEnds.length < 3 ? rowEnds.length : rowEnds.indexOf(Math.min(...rowEnds))
+      rowEnds[row] = left
+      return { ...e, row }
+    })
+  }, [events, t0, t1, iw])
+  const pinRows = pinnedRows.reduce((m, e) => Math.max(m, e.row + 1), 1)
+  const M = { ...MARGIN, top: MARGIN.top + (pinRows - 1) * PIN_ROW }
+  const height = baseHeight + (pinRows - 1) * PIN_ROW
   const ih = height - M.top - M.bottom
   const dataMax = data.reduce((m, d) => Math.max(m, d.yes), 0)
   const dataMin = data.reduce((m, d) => Math.min(m, d.yes), 1)
@@ -87,15 +108,12 @@ export function TensionChart({
   const yesArea = data.length ? `${line}L${x(t1).toFixed(1)},${y(bottom)}L${x(t0).toFixed(1)},${y(bottom)}Z` : ''
   const noArea = data.length ? `${line}L${x(t1).toFixed(1)},${y(top)}L${x(t0).toFixed(1)},${y(top)}Z` : ''
 
-  const pinned = useMemo(
-    () =>
-      events
-        .filter((e) => EVENT_MARK[e.kind])
-        .map((e) => ({ ...e, ts: new Date(e.at).getTime() }))
-        .filter((e) => e.ts >= t0 && e.ts <= t1),
-    [events, t0, t1],
-  )
+  const pinned = pinnedRows
   const ticks = niceTicks(t0, t1, range, width)
+  const pinLegend = Object.entries(EVENT_MARK)
+    .filter(([kind]) => pinned.some((e) => e.kind === kind))
+    .map(([, m]) => `${m!.letter} ${m!.label.toLowerCase()}`)
+    .join(', ')
 
   const hp = hover !== null ? data[hover] : undefined
   const first = data[0]
@@ -228,10 +246,10 @@ export function TensionChart({
                 onPointerLeave={() => setActiveEvent(null)}
                 aria-label={`${e.title}, ${formatDate(e.at, 'long')}`}
                 className={cn(
-                  'absolute top-[6px] flex h-[19px] min-w-[19px] -translate-x-1/2 items-center justify-center rounded-[3px] px-1 text-[0.68rem] font-[750] leading-none',
+                  'absolute flex h-[19px] min-w-[19px] -translate-x-1/2 items-center justify-center rounded-[3px] px-1 text-[0.68rem] font-[750] leading-none',
                   e.kind === 'evidence_submitted' ? 'bg-ink text-on-ink' : e.kind === 'evidence_deadline' ? 'bg-lumen text-[#161a33] shadow-[0_0_0_1.5px_var(--ink)]' : 'bg-sheet text-ink shadow-[0_0_0_1.5px_var(--ink)]',
                 )}
-                style={{ left }}
+                style={{ left, top: 6 + e.row * PIN_ROW }}
               >
                 {mark.letter}
               </button>
@@ -244,7 +262,7 @@ export function TensionChart({
               if (!e) return null
               const left = Math.min(Math.max(x(e.ts), 120), width - 120)
               return (
-                <div role="tooltip" className="pointer-events-none absolute top-[30px] z-10 w-[15rem] -translate-x-1/2 rounded-[4px] bg-ink px-3 py-2 text-[0.8rem] text-on-ink" style={{ left }}>
+                <div role="tooltip" className="pointer-events-none absolute z-10 w-[15rem] -translate-x-1/2 rounded-[4px] bg-ink px-3 py-2 text-[0.8rem] text-on-ink" style={{ left, top: 30 + e.row * PIN_ROW }}>
                   <p className="font-[650]">{e.title}</p>
                   <p className="mt-0.5 opacity-80">{formatDate(e.at, 'long')}</p>
                 </div>
@@ -280,7 +298,10 @@ export function TensionChart({
           )}
         </div>
       )}
-      <p className="mt-2 text-[0.75rem] text-ink-3">{fit && (top < 1 || bottom > 0) ? `Vertical axis zoomed to ${Math.round(bottom * 100)}–${Math.round(top * 100)}%. ` : ''}Times in UTC. Pins: M market created, E evidence, D evidence deadline, A answer, C challenge, K arbitration, R ruling, F finalized.</p>
+      <p className="mt-2 text-[0.75rem] text-ink-3">
+        {fit && (top < 1 || bottom > 0) ? `Vertical axis zoomed to ${Math.round(bottom * 100)}–${Math.round(top * 100)}%. ` : ''}Times in UTC.
+        {pinLegend ? ` Pins: ${pinLegend}. Hover or focus a pin for details.` : ''}
+      </p>
     </div>
   )
 }

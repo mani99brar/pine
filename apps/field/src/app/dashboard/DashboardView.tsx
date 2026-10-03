@@ -185,7 +185,7 @@ export function DashboardView() {
 
       {/* Positions */}
       <section className="mt-12" aria-labelledby="redeemable">
-        <SectionHeading id="redeemable" title="Outcome positions" description="Tokens held by the connected wallet. Redeemable once the market resolves in your favour." />
+        <SectionHeading id="redeemable" title="Outcome positions" description="Tokens held by the connected wallet. After resolution, only the resolved outcome's tokens redeem for collateral; the others pay nothing." />
         {!wallet.isConnected ? (
           <Button className="mt-4" variant="secondary" onClick={() => wallet.connect()} icon={<Wallet size={16} aria-hidden />}>
             Connect a wallet to see positions
@@ -229,7 +229,7 @@ export function DashboardView() {
                     <td className="t-figure px-4 py-3 text-right text-[1rem]">{formatAmount(pos.value, { maxDecimals: 2 })}</td>
                     <td className="px-4 py-3">
                       {pos.redeemable ? (
-                        <Link href={`/claims/${pos.claimId}`} className="inline-flex items-center gap-1 rounded-full bg-ink px-2.5 py-1 text-[0.75rem] font-[650] text-on-ink">
+                        <Link href={`/claims/${pos.claimId}#position`} className="inline-flex items-center gap-1 rounded-full bg-ink px-2.5 py-1 text-[0.75rem] font-[650] text-on-ink">
                           Redeem {formatAmount(pos.redeemableAmount ?? pos.value, { maxDecimals: 2 })}
                         </Link>
                       ) : (

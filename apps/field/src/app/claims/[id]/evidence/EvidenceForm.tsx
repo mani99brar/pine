@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { EvidenceDraft, EvidenceKind } from '@pine/core'
 import { LIMITS, formatClaimNumber, formatDate } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
@@ -49,6 +49,8 @@ export function EvidenceForm({ id }: { id: string }) {
   const [attachments, setAttachments] = useState<EvidenceDraft['attachments']>([])
   const [checks, setChecks] = useState<Record<number, boolean>>({})
   const [touched, setTouched] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const formRef = useRef<HTMLFormElement | null>(null)
 
   if (claimQ.isLoading) {
     return (
@@ -71,13 +73,17 @@ export function EvidenceForm({ id }: { id: string }) {
   const reqs = policyQ.data?.evidenceRequirements ?? []
   const allChecked = reqs.every((_, i) => checks[i])
   const isCounter = kind === 'counterexample'
+  // The evidence package needs a complete reproduction (command, expected, actual) whenever one is given,
+  // and a counterexample always needs one. An empty environment means "as pinned".
+  const hasRepro = isCounter || !!(command.trim() || expected.trim() || actual.trim())
   const arb = getChainOrDefault(claim.chainId).arbitration
   const evChain = getChainOrDefault(sub.chainId)
   const errors = {
     title: !title.trim() ? 'Give the evidence a title.' : title.length > LIMITS.evidenceTitleMax ? `Keep the title under ${LIMITS.evidenceTitleMax} characters.` : undefined,
     summary: !summary.trim() ? 'Explain what you found and how it violates the requirement.' : undefined,
-    command: isCounter && !command.trim() ? 'A counterexample needs a reproduction command.' : undefined,
-    actual: isCounter && !actual.trim() ? 'Describe the actual behaviour you observed.' : undefined,
+    command: hasRepro && !command.trim() ? (isCounter ? 'A counterexample needs a reproduction command.' : 'Add the command, or clear the other reproduction fields.') : undefined,
+    expected: hasRepro && !expected.trim() ? 'State the behaviour the requirement expects.' : undefined,
+    actual: hasRepro && !actual.trim() ? 'Describe the actual behaviour you observed.' : undefined,
     checks: isCounter && reqs.length > 0 && !allChecked ? 'Confirm each admissibility requirement.' : undefined,
   }
   const valid = !Object.values(errors).some(Boolean)
@@ -86,17 +92,30 @@ export function EvidenceForm({ id }: { id: string }) {
 
   const submit = async () => {
     setTouched(true)
-    if (!valid) return
+    setSubmitError(null)
+    if (!valid) {
+      // Move focus to the first field that needs attention.
+      requestAnimationFrame(() => {
+        const first = formRef.current?.querySelector<HTMLElement>('[aria-invalid="true"]')
+        first?.focus()
+        first?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      })
+      return
+    }
     const draft: EvidenceDraft = {
       claimId: id,
       kind,
       title: title.trim(),
       summary: summary.trim(),
-      reproduction: command.trim() || actual.trim() ? { command: command.trim(), environment: environment.trim(), expected: expected.trim(), actual: actual.trim(), steps } : undefined,
+      reproduction: hasRepro ? { command: command.trim(), environment: environment.trim() || 'as pinned', expected: expected.trim(), actual: actual.trim(), steps } : undefined,
       attachments,
       mode,
     }
-    await sub.submit(draft)
+    try {
+      await sub.submit(draft)
+    } catch (e) {
+      setSubmitError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   return (
@@ -140,7 +159,23 @@ export function EvidenceForm({ id }: { id: string }) {
           <TxSteps runner={sub.runner} className="mt-6" chainId={sub.chainId} />
           <div className="mt-6 flex flex-wrap gap-3">
             <ButtonLink href={`/claims/${id}`}>Back to the claim</ButtonLink>
-            <Button variant="secondary" onClick={() => sub.reset()}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                sub.reset()
+                setTitle('')
+                setSummary('')
+                setCommand('')
+                setEnvironment('')
+                setExpected('')
+                setActual('')
+                setSteps([])
+                setAttachments([])
+                setChecks({})
+                setTouched(false)
+                setSubmitError(null)
+              }}
+            >
               Submit something else
             </Button>
           </div>
@@ -148,6 +183,7 @@ export function EvidenceForm({ id }: { id: string }) {
       ) : (
         <div className="mt-8 grid gap-10 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
           <form
+            ref={formRef}
             className="grid min-w-0 content-start gap-7"
             onSubmit={(e) => {
               e.preventDefault()
@@ -212,21 +248,33 @@ export function EvidenceForm({ id }: { id: string }) {
               <p className="-mt-1 text-[0.84rem] text-ink-2">
                 Against commit <code className="t-code">{claim.source.commitSha.slice(0, 7)}</code> with the pinned environment. Screenshots and logs support evidence but do not replace reproducibility.
               </p>
-              <Field label="Command" htmlFor="ev-cmd" optional={!isCounter} error={touched ? errors.command : undefined}>
-                <Textarea id="ev-cmd" value={command} onChange={(e) => setCommand(e.target.value)} className="min-h-[3.5rem] font-mono text-[0.84rem]" placeholder={claim.manifest.claim.environment.reproductionCommand} />
+              <Field
+                label="Command"
+                htmlFor="ev-cmd"
+                optional={!hasRepro}
+                error={touched ? errors.command : undefined}
+                help={
+                  claim.manifest.claim.environment.reproductionCommand && command.trim() !== claim.manifest.claim.environment.reproductionCommand.trim() ? (
+                    <button type="button" onClick={() => setCommand(claim.manifest.claim.environment.reproductionCommand)} className="font-[620] text-ink-2 underline underline-offset-2 hover:text-ink">
+                      Start from the claim&apos;s reproduction command
+                    </button>
+                  ) : undefined
+                }
+              >
+                <Textarea id="ev-cmd" value={command} onChange={(e) => setCommand(e.target.value)} className="min-h-[3.5rem] font-mono text-[0.84rem]" placeholder="The command that shows the violation on the pinned commit" aria-invalid={touched && !!errors.command} />
               </Field>
               <Field label="Steps" htmlFor="ev-steps" optional>
-                <ListEditor label="Step" value={steps} onChange={setSteps} placeholder="Seed the journal with the reachable state from fixtures/state-17.json" addLabel="Add a step" />
+                <ListEditor label="Step" value={steps} onChange={setSteps} placeholder="e.g. Seed the journal with a reachable state" addLabel="Add a step" />
               </Field>
-              <Field label="Environment" htmlFor="ev-env" optional help="Anything that differs from the pinned environment, or 'as pinned'.">
-                <Input id="ev-env" value={environment} onChange={(e) => setEnvironment(e.target.value)} placeholder="as pinned" />
+              <Field label="Environment" htmlFor="ev-env" optional help="Anything that differs from the pinned environment. Left empty, it is recorded as “as pinned”.">
+                <Input id="ev-env" value={environment} onChange={(e) => setEnvironment(e.target.value)} placeholder="As pinned" />
               </Field>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Expected" htmlFor="ev-exp" optional>
-                  <Textarea id="ev-exp" value={expected} onChange={(e) => setExpected(e.target.value)} />
+                <Field label="Expected" htmlFor="ev-exp" optional={!hasRepro} error={touched ? errors.expected : undefined}>
+                  <Textarea id="ev-exp" value={expected} onChange={(e) => setExpected(e.target.value)} aria-invalid={touched && !!errors.expected} placeholder="What the requirement says should happen" />
                 </Field>
-                <Field label="Actual" htmlFor="ev-act" optional={!isCounter} error={touched ? errors.actual : undefined}>
-                  <Textarea id="ev-act" value={actual} onChange={(e) => setActual(e.target.value)} />
+                <Field label="Actual" htmlFor="ev-act" optional={!hasRepro} error={touched ? errors.actual : undefined}>
+                  <Textarea id="ev-act" value={actual} onChange={(e) => setActual(e.target.value)} aria-invalid={touched && !!errors.actual} placeholder="What happened instead" />
                 </Field>
               </div>
             </fieldset>
@@ -273,7 +321,13 @@ export function EvidenceForm({ id }: { id: string }) {
                   {reqs.map((r, i) => (
                     <li key={i}>
                       <label className="flex cursor-pointer items-start gap-3 text-[0.88rem]">
-                        <input type="checkbox" checked={!!checks[i]} onChange={(e) => setChecks({ ...checks, [i]: e.target.checked })} className="mt-1 h-4 w-4 shrink-0 accent-[var(--ink)]" />
+                        <input
+                          type="checkbox"
+                          checked={!!checks[i]}
+                          onChange={(e) => setChecks({ ...checks, [i]: e.target.checked })}
+                          aria-invalid={touched && !!errors.checks && !checks[i]}
+                          className="mt-1 h-4 w-4 shrink-0 accent-[var(--ink)]"
+                        />
                         <span className="text-ink-2">{r}</span>
                       </label>
                     </li>
@@ -281,6 +335,17 @@ export function EvidenceForm({ id }: { id: string }) {
                 </ul>
                 {touched && errors.checks && <p className="mt-2 text-[0.82rem] font-[550] text-flare-ink">{errors.checks}</p>}
               </fieldset>
+            )}
+
+            {sub.runner.steps.length > 0 && sub.runner.state !== 'idle' && (
+              <section className="rounded-[var(--radius-tile)] border-[1.5px] border-ink bg-sheet p-5" aria-label="Submission progress">
+                <TxSteps runner={sub.runner} chainId={sub.chainId} />
+              </section>
+            )}
+            {(submitError ?? sub.runner.error) && (
+              <p role="alert" className="untrusted rounded-[3px] bg-flare-wash px-3 py-2 text-[0.86rem] text-flare-ink [white-space:normal]">
+                {submitError ?? sub.runner.error}
+              </p>
             )}
 
             <div className="flex flex-wrap items-center gap-3 border-t border-line pt-5">
@@ -305,7 +370,7 @@ export function EvidenceForm({ id }: { id: string }) {
             )}
           </form>
 
-          <aside className="grid min-w-0 content-start gap-5">
+          <aside className="order-first grid min-w-0 content-start gap-5 lg:order-none">
             <section className="rounded-[var(--radius-tile)] border border-line bg-sheet p-5" aria-labelledby="mode-title">
               <h2 id="mode-title" className="t-h3">
                 How it is submitted
@@ -346,12 +411,6 @@ export function EvidenceForm({ id }: { id: string }) {
               </ol>
               <p className="mt-3 text-[0.8rem] text-ink-3">The block timestamp of that transaction is the timeliness proof.</p>
             </section>
-
-            {sub.runner.steps.length > 0 && sub.runner.state !== 'idle' && (
-              <section className="rounded-[var(--radius-tile)] border-[1.5px] border-ink bg-sheet p-5" aria-label="Submission progress">
-                <TxSteps runner={sub.runner} chainId={sub.chainId} />
-              </section>
-            )}
 
             <Note tone="boundary">{COPY.evidenceIsNotPayment}</Note>
             <Note tone="boundary">{COPY.noAttackAuthorization}</Note>

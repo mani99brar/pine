@@ -4,6 +4,7 @@ import Link from 'next/link'
 import type { ClaimSummary, DepthSnapshot } from '@pine/core'
 import { formatClaimNumber, formatPrice, shortSha } from '@pine/core'
 import { FileSearch, Sparkles } from 'lucide-react'
+import { COPY } from '@pine/core/copy'
 import { TensionBar, formatMove, movePts } from '@/components/glyphs/TensionBar'
 import { TimeRing } from '@/components/glyphs/TimeRing'
 import { DepthBars } from '@/components/glyphs/DepthBars'
@@ -95,7 +96,9 @@ export function ClaimTile({ claim, depth, depthLoading, settleDelay, className, 
         ) : hasMarket ? (
           <div className="mb-2.5 flex items-end justify-between gap-2">
             <span className="flex items-baseline gap-2">
-              <span className="t-figure text-[1.65rem] text-flare-ink">{formatPrice(claim.yesPrice!)}</span>
+              <span className="t-figure text-[1.65rem] text-flare-ink" title={COPY.priceLabel}>
+                {formatPrice(claim.yesPrice!)}
+              </span>
               <MoveFigure yes={claim.yesPrice} yes24hAgo={claim.yesPrice24hAgo} />
             </span>
           </div>

@@ -10,6 +10,7 @@ import { Lock } from 'lucide-react'
 import { Field, Input } from '@/components/ui/form'
 import { Note } from '@/components/ui/primitives'
 import { useNowMs } from '@/lib/now'
+import { cn } from '@/lib/cn'
 import { StageHeader, StageIssues, StageNav, issueFor } from './shared'
 
 const HOUR = 3_600_000
@@ -162,17 +163,24 @@ export function StageDeadlines({ c }: { c: ClaimComposer }) {
             Evidence deadline
           </h3>
           <div className="mt-3 flex flex-wrap gap-2">
-            {presets.map((p) => (
-              <button
-                key={p.days}
-                type="button"
-                disabled={c.frozen}
-                onClick={() => setDeadline(roundUpToHourUtc(new Date(Date.now() + p.days * DAY)).toISOString().replace('.000Z', 'Z'))}
-                className="rounded-full border-[1.5px] border-line-strong bg-sheet px-3 py-1 text-[0.84rem] font-[600] hover:border-ink"
-              >
-                {p.label}
-              </button>
-            ))}
+            {presets.map((p) => {
+              const active = nowMs !== null && !!deadline && Math.abs(Date.parse(deadline) - roundUpToHourUtc(new Date(nowMs + p.days * DAY)).getTime()) <= HOUR
+              return (
+                <button
+                  key={p.days}
+                  type="button"
+                  disabled={c.frozen}
+                  aria-pressed={active}
+                  onClick={() => setDeadline(roundUpToHourUtc(new Date(Date.now() + p.days * DAY)).toISOString().replace('.000Z', 'Z'))}
+                  className={cn(
+                    'rounded-full border-[1.5px] px-3 py-1 text-[0.84rem] font-[600]',
+                    active ? 'border-ink bg-ink text-on-ink' : 'border-line-strong bg-sheet hover:border-ink',
+                  )}
+                >
+                  {p.label}
+                </button>
+              )
+            })}
           </div>
           <div className="mt-4 grid grid-cols-[1.3fr_1fr_auto] items-end gap-2">
             <Field label="Date (UTC)" htmlFor="dl-date" className="min-w-0">

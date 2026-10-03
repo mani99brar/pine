@@ -6,6 +6,7 @@ import type { ClaimSummary, DepthSnapshot } from '@pine/core'
 import { formatAmount, formatClaimNumber, formatDuration, formatPrice } from '@pine/core'
 import { depthWithin5 } from '@/lib/depth'
 import { useNowMs } from '@/lib/now'
+import { useWidth } from '@/components/charts/useSize'
 import { cn } from '@/lib/cn'
 
 const DAY = 86_400_000
@@ -40,6 +41,42 @@ export function FieldMap({
   }, [open, now])
   const xOf = (days: number) => Math.sqrt(Math.max(0, Math.min(days, maxDays)) / maxDays)
   const ticks = TICKS.filter((t) => t <= maxDays)
+  const [plotRef, plotW] = useWidth<HTMLDivElement>(640)
+
+  // Marker geometry in pixels, then a greedy label placement: right of the ring, else left, else above,
+  // else below; a label that would still collide is dropped (the ring keeps its tooltip and label).
+  const placed = useMemo(() => {
+    if (now === null) return []
+    const h = Math.min(height, typeof window === 'undefined' ? height : window.innerWidth * 1.05)
+    const pts = open.map((c) => {
+      const days = (new Date(c.evidenceDeadline).getTime() - now) / DAY
+      const d = depthWithin5(depths[c.id])
+      const r = Math.round(6 + Math.min(1, Math.log10(1 + d) / Math.log10(2001)) * (compact ? 9 : 13))
+      const x = xOf(days)
+      const y = c.yesPrice ?? 0
+      return { c, days, d, r, x, y, px: 18 + (plotW - 36) * x, py: 14 + (h - 28) * (1 - y) }
+    })
+    type Box = { l: number; t: number; r: number; b: number }
+    const hit = (a: Box, b: Box) => a.l < b.r && a.r > b.l && a.t < b.b && a.b > b.t
+    const rings: Box[] = pts.map((p) => ({ l: p.px - p.r, r: p.px + p.r, t: p.py - p.r - 4, b: p.py + p.r + 4 }))
+    const labels: Box[] = []
+    const LW = 44
+    const LH = 16
+    return pts.map((p, i) => {
+      const options: { side: 'right' | 'left' | 'top' | 'bottom'; box: Box }[] = [
+        { side: 'right', box: { l: p.px + p.r + 4, r: p.px + p.r + 4 + LW, t: p.py - LH / 2, b: p.py + LH / 2 } },
+        { side: 'left', box: { l: p.px - p.r - 4 - LW, r: p.px - p.r - 4, t: p.py - LH / 2, b: p.py + LH / 2 } },
+        { side: 'top', box: { l: p.px - LW / 2, r: p.px + LW / 2, t: p.py - p.r - 6 - LH, b: p.py - p.r - 6 } },
+        { side: 'bottom', box: { l: p.px - LW / 2, r: p.px + LW / 2, t: p.py + p.r + 6, b: p.py + p.r + 6 + LH } },
+      ]
+      const fits = options.find(
+        (o) => o.box.l >= 2 && o.box.r <= plotW - 2 && o.box.t >= 0 && o.box.b <= h && !labels.some((b) => hit(b, o.box)) && !rings.some((b, j) => j !== i && hit(b, o.box)),
+      )
+      if (fits) labels.push(fits.box)
+      return { ...p, side: fits?.side ?? null }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, now, depths, plotW, height, compact, maxDays])
 
   return (
     <figure className={cn('relative', className)}>
@@ -54,7 +91,7 @@ export function FieldMap({
           <span className="absolute left-[5px] right-[5px] bg-cobalt" style={{ top: 'calc(50% + 2px)', bottom: 4 }} />
           <span className="absolute bottom-0 left-0 right-0 h-[2px] bg-ink" />
         </div>
-        <div className="relative min-w-0 rounded-[var(--radius-tile)] border border-line bg-sheet" style={{ height: `min(${height}px, 105vw)` }}>
+        <div ref={plotRef} className="relative min-w-0 rounded-[var(--radius-tile)] border border-line bg-sheet" style={{ height: `min(${height}px, 105vw)` }}>
           {/* gridlines */}
           <svg className="absolute inset-0 h-full w-full" preserveAspectRatio="none" aria-hidden>
             {[0.25, 0.5, 0.75].map((y) => (
@@ -77,12 +114,7 @@ export function FieldMap({
           ))}
           {/* markers */}
           {now !== null &&
-            open.map((c, i) => {
-              const days = (new Date(c.evidenceDeadline).getTime() - now) / DAY
-              const x = xOf(days)
-              const y = c.yesPrice ?? 0
-              const d = depthWithin5(depths[c.id])
-              const r = Math.round(6 + Math.min(1, Math.log10(1 + d) / Math.log10(2001)) * (compact ? 9 : 13))
+            placed.map(({ c, days, d, r, x, y, side }, i) => {
               const urgent = days < 1
               const label = `${formatClaimNumber(c.number)}: ${c.title}. ${formatPrice(y)} implied chance of accepted counterexample, ${formatDuration(days * DAY)} left, ${formatAmount(d, { maxDecimals: 0 })} ${c.collateralSymbol} executable within 5 points.`
               return (
@@ -106,10 +138,16 @@ export function FieldMap({
                     style={{ width: r * 2, height: r * 2 }}
                   />
                   <span aria-hidden className="absolute left-1/2 top-1/2 h-[calc(100%+8px)] w-[3px] -translate-x-1/2 -translate-y-1/2 bg-ink" />
-                  {!compact && (
+                  {!compact && side && (
                     <span
                       aria-hidden
-                      className="t-figure pointer-events-none absolute left-[calc(100%+6px)] top-1/2 -translate-y-1/2 whitespace-nowrap rounded-[2px] bg-sheet/90 px-1 text-[0.78rem] text-ink-2 group-hover:text-ink"
+                      className={cn(
+                        't-figure pointer-events-none absolute z-[2] whitespace-nowrap rounded-[2px] bg-sheet/90 px-1 text-[0.78rem] text-ink-2 group-hover:text-ink',
+                        side === 'right' && 'left-[calc(100%+4px)] top-1/2 -translate-y-1/2',
+                        side === 'left' && 'right-[calc(100%+4px)] top-1/2 -translate-y-1/2',
+                        side === 'top' && 'bottom-[calc(100%+6px)] left-1/2 -translate-x-1/2',
+                        side === 'bottom' && 'left-1/2 top-[calc(100%+6px)] -translate-x-1/2',
+                      )}
                     >
                       {formatClaimNumber(c.number).replace('PINE-', '#')}
                     </span>

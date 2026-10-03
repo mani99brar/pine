@@ -1,4 +1,4 @@
-import { forwardRef, type InputHTMLAttributes, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
+import { cloneElement, forwardRef, isValidElement, type InputHTMLAttributes, type ReactElement, type ReactNode, type SelectHTMLAttributes, type TextareaHTMLAttributes } from 'react'
 import { cn } from '@/lib/cn'
 
 const control =
@@ -37,6 +37,7 @@ export function Field({
   children,
   className,
   optional,
+  errorTone = 'error',
 }: {
   label: ReactNode
   htmlFor: string
@@ -45,22 +46,44 @@ export function Field({
   children: ReactNode
   className?: string
   optional?: boolean
+  /** "needed" renders a still-empty required field calmly instead of as an error. */
+  errorTone?: 'error' | 'needed'
 }) {
+  // Link the message to the control it describes, so screen readers read it with the field.
+  const describedBy = [help ? `${htmlFor}-help` : '', error ? `${htmlFor}-error` : ''].filter(Boolean).join(' ') || undefined
+  let control = children
+  if (describedBy && isValidElement(children)) {
+    const el = children as ReactElement<{ id?: string; 'aria-describedby'?: string; 'aria-invalid'?: boolean | 'true' | 'false' }>
+    if (el.props.id === htmlFor) {
+      control = cloneElement(el, {
+        'aria-describedby': [el.props['aria-describedby'], describedBy].filter(Boolean).join(' '),
+        ...(error && errorTone === 'error' && el.props['aria-invalid'] === undefined ? { 'aria-invalid': true } : {}),
+      })
+    }
+  }
   return (
     <div className={cn('min-w-0', className)}>
       <label htmlFor={htmlFor} className="mb-1.5 flex items-baseline gap-2 text-[0.88rem] font-[620] text-ink">
         {label}
         {optional && <span className="text-[0.78rem] font-[450] text-ink-3">optional</span>}
       </label>
-      {children}
-      {error ? (
-        <p id={`${htmlFor}-error`} className="mt-1.5 text-[0.82rem] font-[550] text-flare-ink" role="alert">
-          {error}
-        </p>
-      ) : help ? (
+      {control}
+      {help ? (
         <p id={`${htmlFor}-help`} className="mt-1.5 text-[0.82rem] text-ink-3">
           {help}
         </p>
+      ) : null}
+      {error ? (
+        errorTone === 'needed' ? (
+          <p id={`${htmlFor}-error`} className="mt-1 flex items-center gap-1.5 text-[0.82rem] font-[550] text-ink-2">
+            <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-lumen shadow-[0_0_0_1.5px_var(--ink)]" />
+            {error}
+          </p>
+        ) : (
+          <p id={`${htmlFor}-error`} className="mt-1 text-[0.82rem] font-[550] text-flare-ink">
+            {error}
+          </p>
+        )
       ) : null}
     </div>
   )

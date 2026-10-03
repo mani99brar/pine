@@ -12,7 +12,7 @@ import { MoveFigure } from './ClaimTile'
 import { cn } from '@/lib/cn'
 
 const GRID =
-  'lg:grid lg:grid-cols-[minmax(0,2.4fr)_7.5rem_minmax(11rem,1.3fr)_6.5rem_8rem_9.5rem_5.5rem] lg:items-center lg:gap-x-5'
+  'lg:grid lg:grid-cols-[minmax(0,2.3fr)_7.5rem_minmax(11rem,1.3fr)_6.5rem_8rem_10.75rem_5.5rem] lg:items-center lg:gap-x-5'
 
 export function ClaimListHeader() {
   return (
@@ -79,7 +79,10 @@ export function ClaimRow({ claim, depth, depthLoading }: { claim: ClaimSummary; 
         <div>{hasMarket && !outcome ? <DepthBars depth={depth} loading={depthLoading} symbol={claim.collateralSymbol} size="sm" /> : <span className="text-ink-3">—</span>}</div>
         <div className="text-right">
           <span className="t-figure text-[1rem]">{formatAmount(claim.liquidity, { compact: true, maxDecimals: 1 })}</span>{' '}
-          <span className="text-[0.78rem] text-ink-3">{claim.collateralSymbol}</span>
+          <span className="text-[0.78rem] text-ink-3">
+            {claim.collateralSymbol}
+            <span className="lg:hidden"> liquidity</span>
+          </span>
         </div>
       </Link>
     </li>

@@ -67,11 +67,11 @@ export function EvidenceCard({ e, deadline }: { e: Evidence; deadline: string })
           Submitted by <code className="t-code">{shortHash(e.submitter)}</code>
         </p>
         {e.summary && (
-          <div className="relative mt-3">
-            <div className={long && !expanded ? 'max-h-[14rem] overflow-hidden' : undefined}>
+          <div className="mt-3">
+            <div className={cn('relative', long && !expanded && 'max-h-[14rem] overflow-hidden')}>
               <SafeMarkdown className="text-[0.92rem] text-ink-2">{e.summary}</SafeMarkdown>
+              {long && !expanded && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--sheet)] to-transparent" />}
             </div>
-            {long && !expanded && <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-[var(--sheet)] to-transparent" />}
             {long && (
               <button type="button" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded} className="mt-2 text-[0.84rem] font-[650] underline underline-offset-2">
                 {expanded ? 'Collapse' : `Show the full text (${e.summary.length.toLocaleString('en-US')} characters)`}

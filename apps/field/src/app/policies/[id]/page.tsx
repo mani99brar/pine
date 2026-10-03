@@ -86,14 +86,16 @@ export default async function PolicyPage({ params, searchParams }: Props) {
             <h2 id="ev" className="t-h2">
               What counts as evidence
             </h2>
-            <ul className="mt-3 grid gap-2">
+            <ol className="mt-3 grid gap-2">
               {p.evidenceRequirements.map((r, i) => (
                 <li key={i} className="flex gap-3 text-ink-2">
-                  <span aria-hidden className="mt-[0.45em] h-3 w-3 shrink-0 rounded-[2px] border-[1.5px] border-ink" />
+                  <span aria-hidden className="t-figure mt-[0.1em] w-4 shrink-0 text-right text-[1rem] text-ink-3">
+                    {i + 1}
+                  </span>
                   {r}
                 </li>
               ))}
-            </ul>
+            </ol>
           </section>
           <section aria-labelledby="ex">
             <h2 id="ex" className="t-h2">

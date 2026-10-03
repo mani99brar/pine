@@ -64,7 +64,7 @@ export function TimeRing({ start, end, size = 44, variant = 'evidence', labelPos
   const inside = labelPosition === 'inside' && size >= 40
 
   return (
-    <span role="img" aria-label={aria} className={cn('inline-flex items-center gap-2', className)}>
+    <span role="img" aria-label={aria} title={aria} className={cn('inline-flex items-center gap-2', className)}>
       <span className="relative inline-block shrink-0" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden className="block">
           <circle

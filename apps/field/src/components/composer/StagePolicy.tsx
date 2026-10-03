@@ -24,6 +24,18 @@ function PolicyCard({ p, selected, onSelect, disabled }: { p: PolicyVersion; sel
         if ((e.key === 'Enter' || e.key === ' ') && !gated && !disabled) {
           e.preventDefault()
           onSelect()
+          return
+        }
+        // Radio-group arrows: move to the next or previous selectable card and select it.
+        const dir = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+        if (!dir) return
+        e.preventDefault()
+        const radios = Array.from(e.currentTarget.parentElement?.querySelectorAll<HTMLElement>('[role="radio"]:not([aria-disabled="true"])') ?? [])
+        const i = radios.indexOf(e.currentTarget)
+        const next = radios[(i + dir + radios.length) % radios.length]
+        if (next && next !== e.currentTarget) {
+          next.focus()
+          next.click()
         }
       }}
       className={cn(

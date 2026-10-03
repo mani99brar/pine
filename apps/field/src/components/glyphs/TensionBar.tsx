@@ -85,7 +85,7 @@ export function TensionBar({
 
   if (outcome) {
     return (
-      <div role="img" aria-label={label} className={cn('relative', className)} style={{ height: h }}>
+      <div role="img" aria-label={label} title={label} className={cn('relative', className)} style={{ height: h }}>
         <Anchor side="left" overhang={anchorOverhang} />
         <span
           className={cn(
@@ -102,7 +102,7 @@ export function TensionBar({
 
   if (yes === undefined) {
     return (
-      <div role="img" aria-label={label} className={cn('relative', className)} style={{ height: h }}>
+      <div role="img" aria-label={label} title={label} className={cn('relative', className)} style={{ height: h }}>
         <Anchor side="left" overhang={anchorOverhang} muted />
         <span className="absolute inset-y-0 left-[3px] right-[3px] rounded-[1px] border border-dashed border-line-strong" />
         <Anchor side="right" overhang={anchorOverhang} muted />
@@ -128,7 +128,7 @@ export function TensionBar({
   const trailGap = size === 'lg' ? 9 : 6
 
   return (
-    <div role="img" aria-label={label} className={cn('tension relative', className)} style={style}>
+    <div role="img" aria-label={label} title={label} className={cn('tension relative', className)} style={style}>
       <Anchor side="left" overhang={anchorOverhang} />
       {/* YES side */}
       <span

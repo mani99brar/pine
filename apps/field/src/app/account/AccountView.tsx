@@ -139,6 +139,9 @@ export function AccountView() {
   const theme = useTheme()
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [email, setEmail] = useState<string | null>(null)
+  const [limitError, setLimitError] = useState<string | null>(null)
+  const [saved, setSaved] = useState<string | null>(null)
+  const [exported, setExported] = useState(false)
 
   if (a.status === 'loading') {
     return (
@@ -152,7 +155,23 @@ export function AccountView() {
 
   const acc = a.account
   const p = acc.preferences
-  const update = (patch: Partial<AccountPreferences>) => prefs.mutate(patch)
+  const update = (patch: Partial<AccountPreferences>, what?: string) =>
+    prefs.mutate(patch, {
+      onSuccess: () => {
+        setSaved(what ?? 'Saved')
+        window.setTimeout(() => setSaved((cur) => (cur === (what ?? 'Saved') ? null : cur)), 2400)
+      },
+    })
+  const saveLimit = (raw: string) => {
+    const v = raw.trim().replace(',', '.')
+    if (v === p.defaultSpendingLimit) return setLimitError(null)
+    if (!/^\d+(\.\d{1,6})?$/.test(v) || Number(v) <= 0) {
+      setLimitError('Enter a positive amount, for example 50 or 120.5.')
+      return
+    }
+    setLimitError(null)
+    update({ defaultSpendingLimit: v }, `Default spending limit saved: ${v} ${getChainOrDefault(p.defaultChainId).collateral.symbol}`)
+  }
   const connectedLinked = wallet.address && acc.wallets.some((w) => w.address.toLowerCase() === wallet.address!.toLowerCase())
 
   return (
@@ -248,13 +267,17 @@ export function AccountView() {
                 ))}
               </Select>
             </Field>
-            <Field label="Default spending limit" htmlFor="pref-limit" help={COPY.spendingLimit}>
+            <Field label="Default spending limit" htmlFor="pref-limit" help={`${COPY.spendingLimit} New claims start with this limit; saved when you leave the field or press Enter.`} error={limitError ?? undefined}>
               <div className="flex items-center gap-2">
                 <Input
                   id="pref-limit"
                   inputMode="decimal"
                   defaultValue={p.defaultSpendingLimit}
-                  onBlur={(e) => e.target.value !== p.defaultSpendingLimit && update({ defaultSpendingLimit: e.target.value.replace(',', '.') })}
+                  aria-invalid={!!limitError}
+                  onBlur={(e) => saveLimit(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveLimit(e.currentTarget.value)
+                  }}
                   className="t-figure text-right text-[1.1rem]"
                 />
                 <span className="font-[650]">{getChainOrDefault(p.defaultChainId).collateral.symbol}</span>
@@ -280,7 +303,9 @@ export function AccountView() {
               />
             </div>
           </div>
-          {prefs.isError && <p className="mt-3 text-[0.84rem] font-[550] text-flare-ink">Could not save: {prefs.error?.message}</p>}
+          <p className="mt-3 min-h-[1.3em] text-[0.84rem] font-[600]" role="status" aria-live="polite">
+            {prefs.isError ? <span className="text-flare-ink">Could not save: {prefs.error?.message}</span> : saved ? <span className="text-ink-2">✓ {saved}</span> : null}
+          </p>
         </Panel>
 
         <Panel id="notify" title="Notifications" description="About claims you published. Delivery needs an email address and a configured backend.">
@@ -291,7 +316,7 @@ export function AccountView() {
             <Field label="Email" htmlFor="n-email" optional>
               <div className="flex gap-2">
                 <Input id="n-email" type="email" value={email ?? p.notificationEmail ?? ''} onChange={(e) => setEmail(e.target.value)} placeholder="you@example.com" />
-                <Button variant="secondary" onClick={() => email !== null && update({ notificationEmail: email || undefined })} disabled={email === null}>
+                <Button variant="secondary" onClick={() => email !== null && update({ notificationEmail: email || undefined }, 'Notification email saved')} disabled={email === null}>
                   Save
                 </Button>
               </div>
@@ -301,14 +326,24 @@ export function AccountView() {
 
         <Panel id="data" title="Your data" description="Export everything Pine stores about your account, or delete it.">
           <div className="flex flex-wrap gap-3">
-            <Button variant="secondary" onClick={() => void data.exportData()} icon={<Download size={15} aria-hidden />}>
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setExported(true)
+                void data.exportData()
+              }}
+              icon={<Download size={15} aria-hidden />}
+            >
               Export as JSON
             </Button>
             <Button variant="secondary" onClick={() => void a.signOut()} icon={<LogOut size={15} aria-hidden />}>
               Sign out
             </Button>
           </div>
-          <div className="mt-6 rounded-[var(--radius-tile)] border border-dashed border-flare-ink p-4">
+          <p className="mt-2 min-h-[1.3em] text-[0.84rem] text-ink-2" role="status" aria-live="polite">
+            {exported ? 'Your export is downloading as a JSON file with your profile, linked wallets and preferences. Drafts and transaction progress stay in this browser.' : ''}
+          </p>
+          <div className="mt-4 rounded-[var(--radius-tile)] border border-dashed border-flare-ink p-4">
             <p className="font-[650]">Delete account</p>
             <p className="mt-1 text-[0.88rem] text-ink-2">
               Removes your linked wallets, preferences and drafts stored with the account. Published claims, markets and on-chain history cannot be deleted; they are public and immutable.

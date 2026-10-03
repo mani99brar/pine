@@ -28,7 +28,7 @@ export default function OgImage() {
           <div style={{ width: 6, height: 64, background: '#161A33', marginLeft: 6 }} />
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 20, fontSize: 24, color: '#474D6B' }}>
-          <span>Pinned commits, bounded claims, live market odds</span>
+          <span>Pinned commits, bounded claims, live market prices</span>
           <span>Seer, Reality.eth, Kleros</span>
         </div>
       </div>

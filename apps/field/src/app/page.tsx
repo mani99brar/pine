@@ -16,7 +16,7 @@ export default function LandingPage() {
           <h1 className="t-display-xl order-1 max-w-[20ch]">Every claim here is an open challenge.</h1>
           <div className="order-3 mt-6 grid gap-6 sm:order-2 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
             <p className="max-w-[62ch] text-[1.08rem] leading-[1.55] text-ink-2">
-              Each one pins an exact commit and one bounded requirement, with live odds on whether anyone demonstrates a reproducible counterexample before an absolute UTC
+              Each one pins an exact commit and one bounded requirement, with a live market price on whether anyone demonstrates a reproducible counterexample before an absolute UTC
               deadline. Teams put claims up; investigators and agents try to break them.
             </p>
             <div className="flex flex-wrap gap-3">

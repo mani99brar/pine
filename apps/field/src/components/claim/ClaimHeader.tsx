@@ -86,6 +86,16 @@ export function ClaimHeader({ claim }: { claim: ClaimDetail }) {
 
         <h1 className="t-h1 mt-3 max-w-[38ch] [overflow-wrap:anywhere]">{claim.title}</h1>
 
+        {/* On phones the header actions sit under the title instead of beside the status row. */}
+        <div className="mt-4 flex flex-wrap items-center gap-2 md:hidden">
+          {claim.status === 'open' && (
+            <ButtonLink href={`/claims/${claim.id}/evidence`} size="sm" icon={<Plus size={14} aria-hidden />}>
+              Submit evidence
+            </ButtonLink>
+          )}
+          <AgentBriefActions claim={claim} compact />
+        </div>
+
         <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-[0.88rem] text-ink-2">
           <ExternalLink href={`https://github.com/${src.owner}/${src.repo}`}>
             {src.owner}/{src.repo}

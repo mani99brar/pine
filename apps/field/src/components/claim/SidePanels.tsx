@@ -58,7 +58,7 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
   const symbol = claim.collateralSymbol
 
   return (
-    <section aria-labelledby="pos-title" className="rounded-[var(--radius-tile)] border border-line bg-sheet p-5">
+    <section id="position" aria-labelledby="pos-title" className="scroll-mt-24 rounded-[var(--radius-tile)] border border-line bg-sheet p-5">
       <h2 id="pos-title" className="t-h3 flex items-center gap-2">
         <Coins size={17} aria-hidden /> Your position
       </h2>
@@ -92,7 +92,7 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
                   <span className="text-right">
                     <span className="t-figure text-[1.05rem]">{formatAmount(p.value, { maxDecimals: 2 })}</span>{' '}
                     <span className="text-[0.75rem] text-ink-3">{symbol}</span>
-                    {p.redeemable && <span className="block text-[0.72rem] font-[650] text-ink">redeemable</span>}
+                    {p.redeemable && redeem.runner.state !== 'done' && <span className="block text-[0.72rem] font-[650] text-ink">redeemable</span>}
                   </span>
                 </li>
               ))}
@@ -139,6 +139,11 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
                 {redeem.runner.state === 'failed' ? 'Retry redemption' : 'Redeem'}
               </Button>
               {redeem.blockers.length > 0 && <p className="mt-2 text-[0.8rem] text-ink-2">{redeem.blockers[0]}</p>}
+              {redeem.runner.error && (
+                <p role="alert" className="untrusted mt-2 rounded-[3px] bg-flare-wash px-2.5 py-1.5 text-[0.82rem] text-flare-ink [white-space:normal]">
+                  {redeem.runner.error}
+                </p>
+              )}
             </>
           ) : redeem.runner.state === 'done' ? (
             <p className="text-[0.88rem] font-[620]">Redeemed. The collateral is in your wallet.</p>

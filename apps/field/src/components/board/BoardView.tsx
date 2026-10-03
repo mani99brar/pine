@@ -75,7 +75,9 @@ export function BoardView() {
     return [...m.entries()].sort((a, b) => b[1] - a[1])
   }, [allQ.data])
 
-  const famCount = (f: PolicyFamilyId) => (allQ.data?.items ?? []).filter((c) => c.policy.family === f).length
+  // Policy counts follow the chosen status group, so a chip's number is what clicking it shows.
+  const inStatus = (c: ClaimSummary) => status.statuses.length === 0 || status.statuses.includes(c.status)
+  const famCount = (f: PolicyFamilyId) => (allQ.data?.items ?? []).filter((c) => inStatus(c) && c.policy.family === f).length
   const statusCount = (g: (typeof STATUS_GROUPS)[number]) =>
     (allQ.data?.items ?? []).filter((c) => g.statuses.length === 0 || g.statuses.includes(c.status)).length
 
@@ -108,7 +110,7 @@ export function BoardView() {
       </div>
 
       {/* Controls */}
-      <div className="sticky top-16 z-30 -mx-4 mt-8 border-y border-line-strong bg-fog px-4 py-3 sm:-mx-6 sm:px-6">
+      <div className="z-30 -mx-4 mt-8 border-y border-line-strong bg-fog px-4 py-3 sm:sticky sm:top-16 sm:-mx-6 sm:px-6">
         <div className="flex flex-wrap items-center gap-2.5">
           <form
             role="search"

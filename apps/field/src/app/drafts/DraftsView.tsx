@@ -53,7 +53,8 @@ function DraftRow({ d, onRemove }: { d: ClaimDraft; onRemove: (id: string) => vo
           {pub && (
             <span className={cn('inline-flex items-center gap-1.5 text-[0.8rem] font-[600]', failed ? 'text-flare-ink' : 'text-ink-2')}>
               {frozen && <Lock size={12} aria-hidden />}
-              {confirmed} of {Math.max(pub.steps.length, confirmed)} publication steps confirmed{failed ? `, ${failed.id.replace(/_/g, ' ')} failed` : ''}
+              {confirmed} publication {confirmed === 1 ? 'step' : 'steps'} confirmed
+              {failed ? `, ${failed.id.replace(/_/g, ' ')} failed` : pub.steps.length > confirmed ? ` of ${pub.steps.length}` : ', the rest still to do'}
             </span>
           )}
         </div>

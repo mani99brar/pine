@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { PriceRange } from '@pine/core'
 import { useActivity, useClaim, useDepth, useEvidence, usePriceHistory } from '@pine/react'
 import { ClaimHeader } from './ClaimHeader'
@@ -35,6 +35,14 @@ export function ClaimView({ id }: { id: string }) {
   const activityQ = useActivity(claim ? { claimId: id, limit: 50 } : undefined)
   const [tabState, setTab] = useState<string | null>(null)
   const tab = tabState ?? (claim?.status === 'open' ? 'investigate' : claim?.status === 'publishing' || claim?.status === 'failed' ? 'terms' : 'evidence')
+
+  // Deep links such as #position land once the claim has rendered (it loads on the client).
+  const loadedId = claim?.id
+  useEffect(() => {
+    if (!loadedId || typeof window === 'undefined' || !window.location.hash) return
+    const el = document.getElementById(decodeURIComponent(window.location.hash.slice(1)))
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }))
+  }, [loadedId])
 
   if (claimQ.isLoading) return <ClaimSkeleton />
   if (claimQ.isError) {
@@ -94,7 +102,7 @@ export function ClaimView({ id }: { id: string }) {
                     <h2 id="chart-title" className="t-h3">
                       Tension over time
                     </h2>
-                    <p className="text-[0.8rem] text-ink-3">Hatched: implied chance of an accepted counterexample. Solid: none submitted.</p>
+                    <p className="text-[0.8rem] text-ink-3">Hatched: market-implied chance of Yes (counterexample demonstrated). Solid: No (no qualifying counterexample submitted).</p>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Segmented

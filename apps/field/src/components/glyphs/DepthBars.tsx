@@ -67,7 +67,7 @@ export function DepthBars({ depth, symbol, size = 'md', caption = true, loading,
         })}
       </svg>
       {caption && (
-        <span className={cn('leading-none', size === 'lg' ? 'text-sm' : 'text-[0.78rem]')}>
+        <span className={cn('leading-none', size === 'lg' ? 'text-sm' : 'text-[0.78rem]', size === 'sm' && 'whitespace-nowrap')}>
           {loading ? (
             <span className="text-ink-3">depth…</span>
           ) : unavailable ? (

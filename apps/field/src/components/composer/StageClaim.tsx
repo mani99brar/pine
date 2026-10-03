@@ -112,7 +112,7 @@ function ViolationSlot({ c }: { c: ClaimComposer }) {
             value={v}
             maxLength={LIMITS.violationMax}
             onChange={(e) => c.update({ spec: { violation: e.target.value.replace(/[\r\n]+/g, ' ') } })}
-            placeholder="that reporter-deposit principal can consume the arbitration allocation or the operator gas reserve"
+            placeholder="e.g. that reporter-deposit principal can consume the arbitration allocation or the operator gas reserve"
             className="mt-3 min-h-[5.5rem]"
             aria-invalid={!!err}
             aria-describedby="violation-help"
@@ -223,6 +223,28 @@ function DetailCard({ title, summary, status, onOpen }: { title: string; summary
   )
 }
 
+/** Placeholder text that reads as an example, never as a value that is already filled in. */
+function eg(v: string | undefined): string | undefined {
+  return v ? `e.g. ${v}` : undefined
+}
+
+/** Issue for a field, shown calmly while the field is still empty and as an error once it has content. */
+function fieldIssue(c: ClaimComposer, path: string, value: unknown): { error?: string; errorTone: 'error' | 'needed' } {
+  const error = issueFor(c, path)
+  const empty = value === undefined || value === null || (typeof value === 'string' && !value.trim()) || (Array.isArray(value) && value.length === 0)
+  return { error, errorTone: empty ? 'needed' : 'error' }
+}
+
+function exampleText(p: PolicyParameterSpec): string {
+  const ex = p.example
+  if (Array.isArray(ex)) {
+    const labels = p.options ? ex.map((v) => p.options!.find((o) => o.value === v)?.label ?? v) : ex
+    return labels.join('; ')
+  }
+  if (typeof ex === 'boolean') return ex ? 'Yes' : 'No'
+  return ex === undefined ? '' : String(ex)
+}
+
 function setSpec(c: ClaimComposer, patch: Partial<ClaimSpec>) {
   c.update((d: ClaimDraft) => ({ ...d, spec: { ...d.spec, ...patch } }))
 }
@@ -234,13 +256,45 @@ function setEnv(c: ClaimComposer, patch: Partial<EnvironmentPin>) {
   })
 }
 
-function ParamInput({ p, value, onChange }: { p: PolicyParameterSpec; value: unknown; onChange: (v: string | string[] | boolean) => void }) {
+function ParamInput({
+  p,
+  value,
+  onChange,
+  issue,
+  policyId,
+}: {
+  p: PolicyParameterSpec
+  value: unknown
+  onChange: (v: string | string[] | boolean) => void
+  issue?: string
+  policyId: string
+}) {
   const id = `param-${p.key}`
+  const empty = value === undefined || value === '' || (Array.isArray(value) && value.length === 0)
   if (p.kind === 'boolean') {
     return <Switch id={id} checked={value === true} onChange={onChange} label={p.label} description={p.help} />
   }
+  const example = exampleText(p)
+  const help = (
+    <>
+      {p.help}
+      {example && empty && p.example !== undefined && (
+        <span className="mt-1.5 block rounded-[3px] bg-fog-2/80 px-2.5 py-1.5 text-ink-2">
+          <span className="font-[620]">{policyId} example:</span> <span className="[overflow-wrap:anywhere]">{example}</span>{' '}
+          <button
+            type="button"
+            onClick={() => onChange(p.example as string | string[] | boolean)}
+            className="font-[650] text-ink underline underline-offset-2"
+            aria-label={`Use the example for ${p.label}`}
+          >
+            Use the example
+          </button>
+        </span>
+      )}
+    </>
+  )
   return (
-    <Field label={p.label} htmlFor={id} help={p.help} optional={!p.required}>
+    <Field label={p.label} htmlFor={id} help={help} optional={!p.required} error={issue} errorTone={empty ? 'needed' : 'error'}>
       {p.kind === 'select' ? (
         <Select id={id} value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)}>
           <option value="">Choose…</option>
@@ -269,15 +323,15 @@ function ParamInput({ p, value, onChange }: { p: PolicyParameterSpec; value: unk
           })}
         </div>
       ) : p.kind === 'list' ? (
-        <ListEditor label={p.label} value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} placeholder={p.placeholder} />
+        <ListEditor label={p.label} value={Array.isArray(value) ? (value as string[]) : []} onChange={onChange} placeholder={eg(p.placeholder)} />
       ) : p.kind === 'longtext' ? (
-        <Textarea id={id} value={typeof value === 'string' ? value : ''} maxLength={p.maxLength} placeholder={p.placeholder} onChange={(e) => onChange(e.target.value)} />
+        <Textarea id={id} value={typeof value === 'string' ? value : ''} maxLength={p.maxLength} placeholder={eg(p.placeholder)} onChange={(e) => onChange(e.target.value)} />
       ) : (
         <Input
           id={id}
           value={typeof value === 'string' ? value : ''}
           maxLength={p.maxLength}
-          placeholder={p.placeholder}
+          placeholder={eg(p.placeholder)}
           onChange={(e) => onChange(e.target.value)}
           className={p.kind === 'address' || p.kind === 'hash' ? 'font-mono text-[0.85rem]' : undefined}
         />
@@ -413,10 +467,10 @@ export function StageClaim({ c }: { c: ClaimComposer }) {
       {/* Drawers */}
       <Drawer open={drawer === 'basics'} onOpenChange={(o) => setDrawer(o ? 'basics' : null)} title="Title and requirement" description="The title is how the claim appears on the board. The requirement is the one exact behaviour the claim is about.">
         <div className="grid gap-5">
-          <Field label="Title" htmlFor="title" help={`Up to ${LIMITS.titleMax} characters. Name the behaviour, not a verdict.`} error={issueFor(c, 'spec.title')}>
-            <Input id="title" value={spec.title ?? ''} maxLength={LIMITS.titleMax} onChange={(e) => setSpec(c, { title: e.target.value })} placeholder="Reporter deposits never draw principal from arbitration or gas reserves" />
+          <Field label="Title" htmlFor="title" help={`Up to ${LIMITS.titleMax} characters. Name the behaviour, not a verdict.`} {...fieldIssue(c, 'spec.title', spec.title)}>
+            <Input id="title" value={spec.title ?? ''} maxLength={LIMITS.titleMax} onChange={(e) => setSpec(c, { title: e.target.value })} placeholder="e.g. Reporter deposits never draw principal from reserves" />
           </Field>
-          <Field label="Requirement" htmlFor="requirement" help="One exact requirement or invariant, precise enough that a reproducible test can violate it." error={issueFor(c, 'spec.requirement')}>
+          <Field label="Requirement" htmlFor="requirement" help="One exact requirement or invariant, precise enough that a reproducible test can violate it." {...fieldIssue(c, 'spec.requirement', spec.requirement)}>
             <Textarea id="requirement" value={spec.requirement ?? ''} onChange={(e) => setSpec(c, { requirement: e.target.value })} className="min-h-[9rem]" />
           </Field>
           <Field label="Source requirement document" htmlFor="specref" optional help="A link to the spec or issue the requirement comes from.">
@@ -430,11 +484,11 @@ export function StageClaim({ c }: { c: ClaimComposer }) {
 
       <Drawer open={drawer === 'scope'} onOpenChange={(o) => setDrawer(o ? 'scope' : null)} title="Scope" description="Name components, files, endpoints or functions. Anything not in scope cannot support a counterexample.">
         <div className="grid gap-6">
-          <Field label="In scope" htmlFor="in-scope" error={issueFor(c, 'spec.scope.inScope')}>
-            <ListEditor label="In scope" value={spec.scope?.inScope ?? []} onChange={(v) => setSpec(c, { scope: { inScope: v, outOfScope: spec.scope?.outOfScope ?? [] } })} placeholder="src/planner/reporter-funding.ts" />
+          <Field label="In scope" htmlFor="in-scope" {...fieldIssue(c, 'spec.scope.inScope', spec.scope?.inScope)}>
+            <ListEditor label="In scope" value={spec.scope?.inScope ?? []} onChange={(v) => setSpec(c, { scope: { inScope: v, outOfScope: spec.scope?.outOfScope ?? [] } })} placeholder="e.g. src/planner/reporter-funding.ts" />
           </Field>
           <Field label="Out of scope" htmlFor="out-scope" optional>
-            <ListEditor label="Out of scope" value={spec.scope?.outOfScope ?? []} onChange={(v) => setSpec(c, { scope: { inScope: spec.scope?.inScope ?? [], outOfScope: v } })} placeholder="LI.FI bridge execution" />
+            <ListEditor label="Out of scope" value={spec.scope?.outOfScope ?? []} onChange={(v) => setSpec(c, { scope: { inScope: spec.scope?.inScope ?? [], outOfScope: v } })} placeholder="e.g. LI.FI bridge execution" />
           </Field>
         </div>
       </Drawer>
@@ -454,29 +508,29 @@ export function StageClaim({ c }: { c: ClaimComposer }) {
         <div className="grid gap-5">
           <Note tone="caution">Never pin secrets. This configuration is published with the claim. Use placeholders and describe how to supply real values.</Note>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Field label="Runtime" htmlFor="runtime" error={issueFor(c, 'spec.environment.runtime')}>
-              <Input id="runtime" value={env.runtime ?? ''} onChange={(e) => setEnv(c, { runtime: e.target.value })} placeholder="node 22.14.0" />
+            <Field label="Runtime" htmlFor="runtime" {...fieldIssue(c, 'spec.environment.runtime', env.runtime)}>
+              <Input id="runtime" value={env.runtime ?? ''} onChange={(e) => setEnv(c, { runtime: e.target.value })} placeholder="e.g. node 22.14.0" />
             </Field>
             <Field label="Package manager" htmlFor="pm" optional>
-              <Input id="pm" value={env.packageManager ?? ''} onChange={(e) => setEnv(c, { packageManager: e.target.value || undefined })} placeholder="pnpm 10.9.2" />
+              <Input id="pm" value={env.packageManager ?? ''} onChange={(e) => setEnv(c, { packageManager: e.target.value || undefined })} placeholder="e.g. pnpm 10.9.2" />
             </Field>
           </div>
-          <Field label="Reproduction command" htmlFor="repro" error={issueFor(c, 'spec.environment.reproductionCommand')} help="What investigators run against the pinned commit.">
-            <Textarea id="repro" value={env.reproductionCommand ?? ''} onChange={(e) => setEnv(c, { reproductionCommand: e.target.value })} className="min-h-[4.5rem] font-mono text-[0.85rem]" placeholder="pnpm vitest run test/reporter-funding.spec.ts" />
+          <Field label="Reproduction command" htmlFor="repro" {...fieldIssue(c, 'spec.environment.reproductionCommand', env.reproductionCommand)} help="What investigators run against the pinned commit.">
+            <Textarea id="repro" value={env.reproductionCommand ?? ''} onChange={(e) => setEnv(c, { reproductionCommand: e.target.value })} className="min-h-[4.5rem] font-mono text-[0.85rem]" placeholder="e.g. pnpm vitest run test/reporter-funding.spec.ts" />
           </Field>
           <Field label="Setup steps" htmlFor="setup" optional>
-            <ListEditor label="Setup step" mono value={env.setupSteps ?? []} onChange={(v) => setEnv(c, { setupSteps: v })} placeholder="pnpm install --frozen-lockfile" addLabel="Add a step" />
+            <ListEditor label="Setup step" mono value={env.setupSteps ?? []} onChange={(v) => setEnv(c, { setupSteps: v })} placeholder="e.g. pnpm install --frozen-lockfile" addLabel="Add a step" />
           </Field>
           <div className="grid gap-4 sm:grid-cols-[1fr_1.4fr]">
             <Field label="Lockfile path" htmlFor="lockpath" optional>
-              <Input id="lockpath" value={env.dependencyLock?.path ?? ''} onChange={(e) => setEnv(c, { dependencyLock: e.target.value || env.dependencyLock?.hash ? { path: e.target.value, hash: env.dependencyLock?.hash ?? ('' as `0x${string}`) } : undefined })} placeholder="pnpm-lock.yaml" />
+              <Input id="lockpath" value={env.dependencyLock?.path ?? ''} onChange={(e) => setEnv(c, { dependencyLock: e.target.value || env.dependencyLock?.hash ? { path: e.target.value, hash: env.dependencyLock?.hash ?? ('' as `0x${string}`) } : undefined })} placeholder="e.g. pnpm-lock.yaml" />
             </Field>
             <Field label="Lockfile hash" htmlFor="lockhash" optional error={issueFor(c, 'spec.environment.dependencyLock')}>
               <Input id="lockhash" value={env.dependencyLock?.hash ?? ''} onChange={(e) => setEnv(c, { dependencyLock: e.target.value || env.dependencyLock?.path ? { path: env.dependencyLock?.path ?? '', hash: e.target.value as `0x${string}` } : undefined })} placeholder="0x…" className="font-mono text-[0.82rem]" />
             </Field>
           </div>
           <Field label="Container image" htmlFor="image" optional>
-            <Input id="image" value={env.containerImage ?? ''} onChange={(e) => setEnv(c, { containerImage: e.target.value || undefined })} placeholder="ghcr.io/org/image@sha256:…" className="font-mono text-[0.82rem]" />
+            <Input id="image" value={env.containerImage ?? ''} onChange={(e) => setEnv(c, { containerImage: e.target.value || undefined })} placeholder="e.g. ghcr.io/org/image@sha256:…" className="font-mono text-[0.82rem]" />
           </Field>
           <Field label="External state" htmlFor="extstate" optional help='For example "Gnosis block 41,200,000 fork" or "none".'>
             <Input id="extstate" value={env.externalState ?? ''} onChange={(e) => setEnv(c, { externalState: e.target.value || undefined })} />
@@ -501,10 +555,10 @@ export function StageClaim({ c }: { c: ClaimComposer }) {
       <Drawer open={drawer === 'lists'} onOpenChange={(o) => setDrawer(o ? 'lists' : null)} title="Assumptions and exclusions">
         <div className="grid gap-6">
           <Field label="Assumptions" htmlFor="assumptions" optional>
-            <ListEditor label="Assumption" value={spec.assumptions ?? []} onChange={(v) => setSpec(c, { assumptions: v })} placeholder="The operator EOA holds funds for all categories" />
+            <ListEditor label="Assumption" value={spec.assumptions ?? []} onChange={(v) => setSpec(c, { assumptions: v })} placeholder="e.g. The operator EOA holds funds for all categories" />
           </Field>
           <Field label="Exclusions" htmlFor="exclusions" optional help={policy ? `${policy.id} already excludes: ${policy.exclusions.slice(0, 2).join('; ')}…` : undefined}>
-            <ListEditor label="Exclusion" value={spec.exclusions ?? []} onChange={(v) => setSpec(c, { exclusions: v })} placeholder="Legitimate gas paid by the operator reserve" />
+            <ListEditor label="Exclusion" value={spec.exclusions ?? []} onChange={(v) => setSpec(c, { exclusions: v })} placeholder="e.g. Legitimate gas paid by the operator reserve" />
           </Field>
           <div className="rounded-[3px] border border-line p-4">
             <Switch
@@ -523,14 +577,14 @@ export function StageClaim({ c }: { c: ClaimComposer }) {
         <Drawer open={drawer === 'params'} onOpenChange={(o) => setDrawer(o ? 'params' : null)} title={`${policy.id} parameters`} description="The policy template asks for these to bound the claim.">
           <div className="grid gap-5">
             {policy.parameters.map((p) => (
-              <div key={p.key}>
-                <ParamInput
-                  p={p}
-                  value={spec.parameters?.[p.key]}
-                  onChange={(v) => setSpec(c, { parameters: { ...(spec.parameters ?? {}), [p.key]: v } })}
-                />
-                {issueFor(c, `spec.parameters.${p.key}`) && <p className="mt-1 text-[0.8rem] font-[550] text-flare-ink">{issueFor(c, `spec.parameters.${p.key}`)}</p>}
-              </div>
+              <ParamInput
+                key={p.key}
+                p={p}
+                policyId={policy.id}
+                value={spec.parameters?.[p.key]}
+                issue={issueFor(c, `spec.parameters.${p.key}`)}
+                onChange={(v) => c.update((d: ClaimDraft) => ({ ...d, spec: { ...d.spec, parameters: { ...(d.spec.parameters ?? {}), [p.key]: v } } }))}
+              />
             ))}
           </div>
         </Drawer>

@@ -23,6 +23,33 @@ function StatusNode({ s, active }: { s: TxRunnerStep; active: boolean }) {
   return <span className={cn(base, 'border-2 bg-sheet', active ? 'border-ink' : 'border-line-strong')} />
 }
 
+/** Step descriptions can carry raw deep links; show them as short, safe links instead of long URLs. */
+function StepDescription({ text }: { text: string }) {
+  const parts = text.split(/(https:\/\/[^\s]+)/g)
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (!/^https:\/\//.test(part)) return <span key={i}>{part}</span>
+        const url = part.replace(/[.,;)]+$/, '')
+        let label = url
+        try {
+          const u = new URL(url)
+          const path = u.pathname.length > 22 ? `${u.pathname.slice(0, 14)}…${u.pathname.slice(-6)}` : u.pathname
+          label = `${u.host}${path}`
+        } catch {
+          /* keep the raw text */
+        }
+        return (
+          <a key={i} href={url} target="_blank" rel="noopener noreferrer nofollow" className="inline-flex items-center gap-0.5 underline underline-offset-2" title={url}>
+            {label}
+            <ExtIcon size={11} aria-hidden />
+          </a>
+        )
+      })}
+    </>
+  )
+}
+
 const STATUS_TEXT: Record<string, string> = {
   idle: 'Waiting',
   awaiting_signature: 'Confirm in your wallet',
@@ -103,7 +130,9 @@ export function TxSteps({ runner, className, chainId }: { runner: TxRunner; clas
                   {awaitingManual ? 'Waiting for you' : STATUS_TEXT[s.status]}
                 </p>
               </div>
-              <p className="mt-0.5 text-[0.84rem] text-ink-2 [overflow-wrap:anywhere]">{s.description}</p>
+              <p className="mt-0.5 text-[0.84rem] text-ink-2 [overflow-wrap:anywhere]">
+                <StepDescription text={s.description} />
+              </p>
               {((s.estimatedCost && Number(s.estimatedCost.amount) > 0) || (s.collateralCost && Number(s.collateralCost.amount) > 0)) && (
                 <p className="mt-1 flex flex-wrap gap-x-4 text-[0.78rem] text-ink-3">
                   {s.collateralCost && Number(s.collateralCost.amount) > 0 && (

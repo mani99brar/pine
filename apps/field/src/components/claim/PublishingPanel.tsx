@@ -1,17 +1,24 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useQueryClient } from '@tanstack/react-query'
 import type { Address, ClaimDetail, TxStep } from '@pine/core'
 import { buildPublishSteps, formatDate } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { DEFAULT_INITIAL_YES_PRICE, DEFAULT_PRICE_RANGE, useTxRunner, usePine, useWallet } from '@pine/react'
+import { DEFAULT_INITIAL_YES_PRICE, DEFAULT_PRICE_RANGE, useAccount, useDrafts, useTxRunner, usePine, useWallet } from '@pine/react'
 import { CircleSlash, RotateCw, Wrench } from 'lucide-react'
 import { TxSteps } from '@/components/tx/TxSteps'
 import { Button, ButtonLink } from '@/components/ui/Button'
+import { Input } from '@/components/ui/form'
 import { DemoFailToggle } from '@/components/tx/DemoFailToggle'
 import { cn } from '@/lib/cn'
+
+/** A usable spending limit: a positive decimal string, or undefined. */
+function usableLimit(v: string | undefined | null): string | undefined {
+  const t = v?.trim()
+  return t && /^\d+(\.\d+)?$/.test(t) && Number(t) > 0 ? t : undefined
+}
 
 interface MockWriter {
   updateClaim?: (id: string, patch: Partial<ClaimDetail>) => void
@@ -31,6 +38,25 @@ export function PublishingPanel({ claim }: { claim: ClaimDetail }) {
   const isCreator = !!wallet.address && wallet.address.toLowerCase() === claim.creator.toLowerCase()
   const canAct = isCreator || (pine.demo && wallet.isConnected)
 
+  // The runner enforces the spending limit only when it is given one, so never pass undefined: use the
+  // claim's own limit, else the draft it was published from, else the account default, else ask.
+  const account = useAccount()
+  const { drafts } = useDrafts()
+  const draftLimit = drafts.find((d) => d.publication?.claimId === claim.id)?.funding?.spendingLimit
+  const [customLimit, setCustomLimit] = useState('')
+  const [chosenLimit, setChosenLimit] = useState<string | undefined>(undefined)
+  const limitSource = usableLimit(claim.funding?.spendingLimit)
+    ? 'claim'
+    : usableLimit(draftLimit)
+      ? 'draft'
+      : usableLimit(account.account?.preferences.defaultSpendingLimit)
+        ? 'account'
+        : chosenLimit
+          ? 'custom'
+          : null
+  const spendingLimit =
+    usableLimit(claim.funding?.spendingLimit) ?? usableLimit(draftLimit) ?? usableLimit(account.account?.preferences.defaultSpendingLimit) ?? chosenLimit
+
   const remaining: TxStep[] = useMemo(() => {
     try {
       const all = buildPublishSteps({
@@ -42,7 +68,7 @@ export function PublishingPanel({ claim }: { claim: ClaimDetail }) {
         funding: {
           chainId: claim.chainId,
           liquidity: claim.funding?.liquidity ?? '25',
-          spendingLimit: claim.funding?.spendingLimit ?? '50',
+          spendingLimit: spendingLimit ?? '0',
           initialYesPrice: DEFAULT_INITIAL_YES_PRICE,
           priceRange: [...DEFAULT_PRICE_RANGE] as [number, number],
         },
@@ -55,14 +81,33 @@ export function PublishingPanel({ claim }: { claim: ClaimDetail }) {
       return []
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [claim.id, pine.demo, pub?.steps?.length])
+  }, [claim.id, pine.demo, pub?.steps?.length, spendingLimit])
 
   const runner = useTxRunner(`finish:${claim.id}`, remaining, {
-    spendingLimit: claim.funding?.spendingLimit,
+    // '0' blocks every collateral step until a limit is set; the button below is disabled too.
+    spendingLimit: spendingLimit ?? '0',
     onDone: async () => {
       const w = pine.data as unknown as MockWriter
       if (pine.demo && typeof w.updateClaim === 'function') {
-        w.updateClaim(claim.id, { status: 'open', publication: undefined })
+        // The pools now hold liquidity, so the market opens at the planned starting price.
+        const yes = DEFAULT_INITIAL_YES_PRICE
+        const liquidity = claim.funding?.liquidity ?? '25'
+        const half = String(Math.round((Number(liquidity) / 2) * 100) / 100)
+        w.updateClaim(claim.id, {
+          status: 'open',
+          publication: undefined,
+          yesPrice: yes,
+          yesPrice24hAgo: yes,
+          liquidity,
+          market: claim.market
+            ? {
+                ...claim.market,
+                liquidity,
+                outcomes: claim.market.outcomes.map((o) => ({ ...o, price: o.index === 0 ? yes : o.index === 1 ? Math.round((1 - yes) * 10000) / 10000 : 0 })),
+                pools: claim.market.pools.map((pl) => ({ ...pl, tvl: half })),
+              }
+            : claim.market,
+        })
       }
       await qc.invalidateQueries({ queryKey: ['pine'] })
     },
@@ -124,6 +169,35 @@ export function PublishingPanel({ claim }: { claim: ClaimDetail }) {
         </p>
       )}
 
+      {!spendingLimit && runner.state !== 'done' && (
+        <div className="mt-5 rounded-[3px] border-l-[3px] border-lumen bg-lumen-wash px-4 py-3" role="status">
+          <p className="text-[0.9rem] font-[700]">Set a spending limit first</p>
+          <p className="mt-1 text-[0.86rem] text-ink-2">
+            This claim has no recorded spending limit, and no account default is set. Every remaining step is checked against the limit, so choose one before continuing.
+          </p>
+          <form
+            className="mt-3 flex flex-wrap items-center gap-2"
+            onSubmit={(e) => {
+              e.preventDefault()
+              const v = usableLimit(customLimit.replace(',', '.'))
+              if (v) setChosenLimit(v)
+            }}
+          >
+            <label htmlFor="finish-limit" className="sr-only">
+              Spending limit in {claim.collateralSymbol}
+            </label>
+            <Input id="finish-limit" inputMode="decimal" value={customLimit} onChange={(e) => setCustomLimit(e.target.value)} placeholder="e.g. 300" className="h-9 w-32 text-right" />
+            <span className="font-[650]">{claim.collateralSymbol}</span>
+            <Button type="submit" size="sm" disabled={!usableLimit(customLimit.replace(',', '.'))}>
+              Use this limit
+            </Button>
+            <Link href="/account#prefs" className="text-[0.84rem] font-[620] underline underline-offset-2">
+              Or set an account default
+            </Link>
+          </form>
+        </div>
+      )}
+
       <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-line pt-5">
         {!wallet.isConnected ? (
           <Button onClick={() => wallet.connect()}>{wallet.isDemo ? 'Connect demo wallet to continue' : 'Connect wallet to continue'}</Button>
@@ -133,7 +207,7 @@ export function PublishingPanel({ claim }: { claim: ClaimDetail }) {
           <Button
             onClick={() => void (runner.state === 'failed' ? runner.retry() : runner.start())}
             loading={runner.state === 'running'}
-            disabled={!canAct || runner.state === 'paused' || remaining.length === 0}
+            disabled={!canAct || !spendingLimit || runner.state === 'paused' || remaining.length === 0}
             icon={runner.state === 'failed' ? <RotateCw size={15} aria-hidden /> : undefined}
           >
             {runner.state === 'failed' ? 'Retry the failed step' : 'Finish publishing'}
@@ -142,7 +216,15 @@ export function PublishingPanel({ claim }: { claim: ClaimDetail }) {
         <DemoFailToggle />
         {!canAct && wallet.isConnected && <p className="text-[0.84rem] text-ink-2">Only the creator&apos;s wallet can finish this publication.</p>}
         <p className="w-full text-[0.8rem] text-ink-3">
-          {COPY.spendingLimit} Spending limit for this claim: {claim.funding?.spendingLimit ?? '—'} {claim.collateralSymbol}.{' '}
+          {COPY.spendingLimit}{' '}
+          {spendingLimit ? (
+            <>
+              Spending limit for these steps: {spendingLimit} {claim.collateralSymbol}
+              {limitSource === 'draft' ? ' (from your draft)' : limitSource === 'account' ? ' (your account default)' : limitSource === 'custom' ? ' (set here)' : ''}.
+            </>
+          ) : (
+            'No spending limit set yet.'
+          )}{' '}
           <Link href="/drafts" className="underline underline-offset-2">
             All in-progress publications
           </Link>

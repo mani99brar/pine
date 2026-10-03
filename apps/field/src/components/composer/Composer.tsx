@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClaimDraft, ClaimSummary } from '@pine/core'
 import { formatDate } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
-import { defaultDeadline, defaultOracle, useClaimComposer, usePine, useWallet, type ClaimComposer } from '@pine/react'
+import { DEFAULT_SPENDING_LIMIT, defaultDeadline, defaultOracle, useAccount, useClaimComposer, usePine, useWallet, type ClaimComposer } from '@pine/react'
 import { Check, Eye } from 'lucide-react'
 import { StepRail } from './StepRail'
 import { StageSource } from './StageSource'
@@ -97,6 +97,20 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
     })
   }, [fromClaimId, c, data])
 
+  // A new draft can be created before the account has loaded, so it starts with the package default
+  // spending limit. Apply the account's default once, as long as funding has not been reached yet.
+  const account = useAccount()
+  const prefLimit = account.account?.preferences.defaultSpendingLimit
+  const limitApplied = useRef(false)
+  useEffect(() => {
+    if (limitApplied.current || c.isLoading || !prefLimit || c.frozen) return
+    const early = c.draft.stage === 'source' || c.draft.stage === 'policy' || c.draft.stage === 'claim' || c.draft.stage === 'deadlines'
+    const current = c.draft.funding?.spendingLimit
+    limitApplied.current = true
+    if (!early || c.draft.publication?.steps.length || (current !== undefined && current !== DEFAULT_SPENDING_LIMIT) || prefLimit === current) return
+    c.update((d: ClaimDraft) => ({ ...d, funding: { ...d.funding, spendingLimit: prefLimit } }))
+  }, [prefLimit, c])
+
   // Preselect a policy (from a policy page's "Put a … claim on the board").
   const policySet = useRef(false)
   useEffect(() => {
@@ -107,6 +121,26 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
 
   const stage = c.draft.stage
   const summary = useMemo(() => previewSummary(c), [c])
+
+  // On a stage change, bring the step rail back into view and move focus to the new stage heading,
+  // so "Continue" never leaves people halfway down the next stage.
+  const railRef = useRef<HTMLDivElement | null>(null)
+  const lastStage = useRef<string | null>(null)
+  useEffect(() => {
+    if (c.isLoading) return
+    const prev = lastStage.current
+    lastStage.current = stage
+    if (prev === null || prev === stage) return
+    const rail = railRef.current
+    if (rail) {
+      const top = rail.getBoundingClientRect().top + window.scrollY - 96
+      if (window.scrollY > top) {
+        const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        window.scrollTo({ top: Math.max(0, top), behavior: reduce ? 'auto' : 'smooth' })
+      }
+    }
+    requestAnimationFrame(() => document.getElementById('stage-heading')?.focus({ preventScroll: true }))
+  }, [stage, c.isLoading])
   const f = c.fundingInput
   const pDepth = useMemo(() => previewDepth(Number(f.liquidity) || 0, f.initialYesPrice, f.priceRange[0], f.priceRange[1]), [f.liquidity, f.initialYesPrice, f.priceRange])
   const showPreview = stage === 'source' || stage === 'policy' || stage === 'claim' || stage === 'deadlines'
@@ -142,7 +176,7 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
         {c.frozen && <p className="rounded-full bg-ink px-3 py-1 text-[0.78rem] font-[650] text-on-ink">Market created: terms frozen</p>}
       </div>
 
-      <div className="mt-6">
+      <div className="mt-6" ref={railRef}>
         <StepRail c={c} />
       </div>
 

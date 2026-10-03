@@ -185,14 +185,16 @@ export function InvestigatePanel({ claim }: { claim: ClaimDetail }) {
             <CheckSquare size={18} aria-hidden /> What counts as evidence
           </h3>
           {policy ? (
-            <ul className="mt-3 space-y-2 text-[0.88rem]">
+            <ol className="mt-3 space-y-2 text-[0.88rem]">
               {policy.evidenceRequirements.map((r, i) => (
                 <li key={i} className="flex gap-2.5">
-                  <span aria-hidden className="mt-[3px] h-3.5 w-3.5 shrink-0 rounded-[2px] border-[1.5px] border-ink" />
+                  <span aria-hidden className="t-figure mt-[1px] w-4 shrink-0 text-right text-[0.95rem] text-ink-3">
+                    {i + 1}
+                  </span>
                   <span className="text-ink-2">{r}</span>
                 </li>
               ))}
-            </ul>
+            </ol>
           ) : (
             <div className="mt-3 grid gap-2">
               <span className="skeleton h-4 w-full" />

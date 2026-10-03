@@ -98,7 +98,9 @@ export function StageHeader({ stage, children }: { stage: ComposerStage; childre
       <p className="t-figure text-[0.95rem] text-ink-3">
         Step {stageIndex(stage) + 1} of {STAGES.length}
       </p>
-      <h2 className="t-h1 mt-1">{s.title}</h2>
+      <h2 id="stage-heading" tabIndex={-1} className="t-h1 mt-1 outline-none">
+        {s.title}
+      </h2>
       {children && <div className="mt-2 max-w-[62ch] text-ink-2">{children}</div>}
     </div>
   )
