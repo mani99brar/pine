@@ -118,7 +118,7 @@ export default defineConfig({
       { find: /^next\/dynamic$/, replacement: shim('next-dynamic.tsx') },
       { find: /^next\/font\/google$/, replacement: shim('next-font-google.ts') },
       { find: /^next\/og$/, replacement: shim('empty.ts') },
-      { find: /^next\/headers$/, replacement: shim('empty.ts') },
+      { find: /^next\/headers$/, replacement: shim('next-headers.ts') },
       { find: /^next\/server$/, replacement: shim('next-server.ts') },
       { find: /^server-only$/, replacement: shim('empty.ts') },
       { find: /^next-auth\/react$/, replacement: shim('next-auth-react.tsx') },

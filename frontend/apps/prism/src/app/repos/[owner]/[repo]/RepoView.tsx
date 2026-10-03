@@ -101,7 +101,9 @@ export function RepoView({ owner, repo }: { owner: string; repo: string }) {
   const pulls = useGitHubPulls(owner, repo, prState)
   const prCommits = useGitHubPullCommits(owner, repo, prNumber)
   const branch = useGitHubCommits(owner, repo)
-  const claimsQ = useClaims({ repo: `${owner}/${repo}`, limit: 50 })
+  // The backend's GitHub route resolved the repository: filter claims by its numeric id (the on-chain identity), not
+  // by the owner/name a claim document states.
+  const claimsQ = useClaims({ repo: `${owner}/${repo}`, repositoryId: repoQ.data?.id, limit: 50 })
   const claims = useMemo(() => claimsQ.data?.items ?? [], [claimsQ.data])
   const bySha = useMemo(() => new Map(claims.map((c) => [c.source.commitSha.toLowerCase(), { id: c.id, number: c.number }])), [claims])
   const r = repoQ.data
