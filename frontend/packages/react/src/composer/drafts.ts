@@ -7,6 +7,8 @@ import type { ClaimDraft } from '@pine/core'
 import type { DraftStore } from '@pine/data'
 import { usePine } from '../providers/context'
 import { pineKeys } from '../queries/keys'
+import { usePineSession } from '../api/session'
+import { useSessionReplacement } from '../account'
 import { getBrowserStorage, removeKey } from '../internal/storage'
 import { isoNow } from '../internal/util'
 import { txStorageKey } from '../tx/machine'
@@ -19,9 +21,16 @@ interface SessionUserLike {
   name?: string | null
 }
 
-/** Draft owner: the signed-in GitHub login, or "local" when signed out. */
+/**
+ * Draft owner: the signed-in GitHub login, or "local" when signed out. In `api` mode the owner is the backend session's
+ * wallet (lowercase), since a wallet signs in there and GitHub is only linked to it.
+ */
 export function useDraftOwner(): string {
+  const { env } = usePine()
   const session = useSession()
+  const backend = usePineSession()
+  useSessionReplacement()
+  if (env.dataSource === 'api') return backend.session?.wallet.toLowerCase() ?? LOCAL_DRAFT_OWNER
   const user = session.data?.user as SessionUserLike | undefined
   return user?.login ?? LOCAL_DRAFT_OWNER
 }

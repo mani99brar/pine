@@ -1,7 +1,8 @@
 'use client'
 
+import Link from 'next/link'
 import { Popover } from 'radix-ui'
-import { useWallet } from '@pine/react'
+import { usePine, usePineSession, useWallet } from '@pine/react'
 import { formatAmount, shortHash } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { Wallet } from 'lucide-react'
@@ -9,9 +10,33 @@ import { useMounted } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 import { HashChip } from '@/components/ui/interactive'
 
+/** `api` mode: whether this wallet is the one signed in to Pine (connecting a wallet does not sign in). */
+function PineSessionLine({ address }: { address: string }) {
+  const session = usePineSession()
+  if (session.status === 'loading' || session.status === 'disabled') return null
+  if (!session.session) {
+    return (
+      <p className="mt-3 text-[0.8125rem] text-lumen-2">
+        Not signed in to Pine.{' '}
+        <Popover.Close asChild>
+          <Link href="/account" className="link">
+            Sign in
+          </Link>
+        </Popover.Close>
+      </p>
+    )
+  }
+  return session.session.wallet.toLowerCase() === address.toLowerCase() ? (
+    <p className="mt-3 text-[0.8125rem] text-lumen-2">Signed in to Pine with this wallet.</p>
+  ) : (
+    <p className="mt-3 text-[0.8125rem] text-na">This is not the wallet you signed in with, so Pine is signing you out.</p>
+  )
+}
+
 export function WalletButton({ className, block }: { className?: string; block?: boolean }) {
   const mounted = useMounted()
   const w = useWallet()
+  const { env } = usePine()
   if (!mounted) {
     return <span className={cn('skeleton inline-block h-9 w-32', block && 'w-full', className)} aria-hidden />
   }
@@ -48,6 +73,7 @@ export function WalletButton({ className, block }: { className?: string; block?:
             </div>
           </dl>
           <p className="mt-3 text-[0.8125rem] text-lumen-3">Network: {chain.name}</p>
+          {env.dataSource === 'api' && <PineSessionLine address={w.address} />}
           <button type="button" onClick={() => w.disconnect()} className="btn btn-ghost btn-sm mt-3 w-full">
             Disconnect
           </button>

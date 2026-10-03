@@ -7,6 +7,10 @@ import { DemoBanner } from '@/components/shell/DemoBanner'
 import { SiteFooter } from '@/components/shell/SiteFooter'
 import { RouteProgress } from '@/components/shell/RouteProgress'
 import { APP_DESCRIPTION, APP_NAME, siteUrl } from '@/lib/site'
+import { readPineEnv } from '@pine/data'
+
+// `api` mode: the agent endpoints are the Pine backend's (/.well-known/pine.json and /api/v1/agents/*, same origin).
+const backendAgentLinks = readPineEnv().dataSource === 'api'
 
 const geologica = Geologica({ subsets: ['latin'], axes: ['SHRP', 'CRSV'], variable: '--font-geologica', display: 'swap' })
 const instrument = Instrument_Sans({ subsets: ['latin'], axes: ['wdth'], variable: '--font-instrument', display: 'swap' })
@@ -25,11 +29,19 @@ export const metadata: Metadata = {
   },
   twitter: { card: 'summary_large_image', title: APP_NAME, description: APP_DESCRIPTION },
   alternates: {
-    types: {
-      'text/plain': '/llms.txt',
-      'application/atom+xml': '/api/agent/v1/feed.xml',
-      'application/json': '/.well-known/pine.json',
-    },
+    types: backendAgentLinks
+      ? {
+          'text/plain': '/llms.txt',
+          'application/json': [
+            { url: '/.well-known/pine.json', title: 'Pine deployment and agent conventions' },
+            { url: '/api/v1/agents/claims', title: 'Claim feed' },
+          ],
+        }
+      : {
+          'text/plain': '/llms.txt',
+          'application/atom+xml': '/api/agent/v1/feed.xml',
+          'application/json': '/.well-known/pine.json',
+        },
   },
 }
 

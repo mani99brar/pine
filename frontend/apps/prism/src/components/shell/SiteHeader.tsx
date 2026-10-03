@@ -5,13 +5,15 @@ import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { DropdownMenu, Dialog as RDialog } from 'radix-ui'
 import { AnimatePresence, motion } from 'motion/react'
-import { Menu, Plus, X } from 'lucide-react'
-import { useAccount } from '@pine/react'
+import { ChevronDown, Menu, Plus, Wallet, X } from 'lucide-react'
+import { useAccount, type BackendIdentity } from '@pine/react'
 import { PrismMark } from '@/components/icons'
 import { NAV, SECONDARY_NAV } from '@/lib/site'
 import { useMounted, useReduceMotion } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
+import { SessionWalletGuard } from './SessionWalletGuard'
 import { WalletButton } from './WalletButton'
+import { shortAddress } from './wallet-display'
 
 function isActive(pathname: string, href: string) {
   if (href === '/') return pathname === '/'
@@ -32,9 +34,75 @@ export function Initials({ name, size = 32 }: { name: string; size?: number }) {
   )
 }
 
+const MENU_ITEM = 'block rounded-[4px] px-3 py-2 text-[0.9rem] text-lumen-2 outline-none data-[highlighted]:bg-smoke-3 data-[highlighted]:text-lumen'
+
+/** `api` mode: the session wallet is the account; GitHub is linked to it. The glyph links to /account, the chevron opens the menu. */
+function BackendAccountMenu({ backend, signOut }: { backend: BackendIdentity; signOut: () => Promise<void> }) {
+  const wallet = backend.wallet ? shortAddress(backend.wallet) : 'your wallet'
+  const login = backend.github?.login
+  const terms = backend.termsAccepted ? '' : ', terms need accepting'
+  return (
+    <div className="flex items-center">
+      <Link
+        href="/account"
+        className="cut-sm relative inline-flex items-center rounded-sm p-0.5 hover:bg-smoke-3"
+        aria-label={`Account, signed in as ${wallet}${login ? `, GitHub @${login}` : ''}${terms}`}
+      >
+        {login ? (
+          <Initials name={login} />
+        ) : (
+          <span aria-hidden className="cut-sm inline-flex h-8 w-8 items-center justify-center bg-[linear-gradient(135deg,#ffb648,#ff6b83_55%,#b79aff)] text-umbra">
+            <Wallet size={16} />
+          </span>
+        )}
+        {!backend.termsAccepted && <span aria-hidden className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-umbra bg-na" />}
+      </Link>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger className="inline-flex h-8 w-6 items-center justify-center rounded-[4px] text-lumen-3 hover:bg-smoke-3 hover:text-lumen" aria-label="Open the account menu">
+          <ChevronDown size={15} aria-hidden />
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content align="end" sideOffset={8} className="glass-float cut-lg z-[80] min-w-[14rem] p-1.5">
+            <DropdownMenu.Label className="px-3 pb-2 pt-1.5 text-[0.8125rem] text-lumen-3">
+              Signed in as <span className="t-code text-lumen">{wallet}</span>
+              <span className="mt-0.5 block">
+                {login ? (
+                  <>
+                    GitHub <span className="font-semibold text-lumen">@{login}</span>
+                  </>
+                ) : (
+                  'GitHub not linked'
+                )}
+              </span>
+            </DropdownMenu.Label>
+            {!backend.termsAccepted && (
+              <DropdownMenu.Item asChild>
+                <Link href="/account" className={cn(MENU_ITEM, 'text-na')}>
+                  Accept the updated terms
+                </Link>
+              </DropdownMenu.Item>
+            )}
+            {SECONDARY_NAV.map((n) => (
+              <DropdownMenu.Item key={n.href} asChild>
+                <Link href={n.href} className={MENU_ITEM}>
+                  {n.label}
+                </Link>
+              </DropdownMenu.Item>
+            ))}
+            <DropdownMenu.Separator className="my-1 h-px bg-edge" />
+            <DropdownMenu.Item onSelect={() => void signOut().catch(() => undefined)} className={cn(MENU_ITEM, 'cursor-pointer')}>
+              Sign out
+            </DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+    </div>
+  )
+}
+
 function AccountMenu() {
   const mounted = useMounted()
-  const { status, account, user, signOut } = useAccount()
+  const { status, account, user, signOut, backend } = useAccount()
   if (!mounted || status === 'loading') return <span className="skeleton inline-block h-8 w-8" aria-hidden />
   if (status === 'signed_out') {
     return (
@@ -43,6 +111,7 @@ function AccountMenu() {
       </Link>
     )
   }
+  if (backend) return <BackendAccountMenu backend={backend} signOut={() => signOut()} />
   const login = account?.github.login ?? user?.login ?? 'account'
   return (
     <DropdownMenu.Root>
@@ -143,6 +212,7 @@ export function SiteHeader() {
   const reduce = useReduceMotion()
   return (
     <header className="glass-float sticky top-0 z-[60] border-x-0 border-t-0">
+      <SessionWalletGuard />
       <div className="mx-auto flex h-16 max-w-[1440px] items-center gap-4 px-4 sm:px-6 lg:px-8">
         <Link href="/" className="group mr-2 flex shrink-0 items-center gap-2.5" aria-label="Pine Prism home">
           <PrismMark size={30} className="transition-transform duration-300 group-hover:rotate-[-6deg]" />
