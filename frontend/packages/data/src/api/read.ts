@@ -2,6 +2,13 @@
 export { ApiDataProvider, planClaimQuery, type ApiDataProviderOptions } from './provider'
 export type { CreateDataProviderOptions } from '../provider'
 export {
+  ApiGitHubSource,
+  commitFromApi,
+  pullFromApi,
+  repoFromApi,
+  type ApiGitHubSourceOptions,
+} from './github'
+export {
   API_CHAIN_ID,
   API_READ_GAPS,
   HIDDEN_CLAIM_TITLE,
