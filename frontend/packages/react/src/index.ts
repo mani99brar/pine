@@ -145,6 +145,19 @@ export {
   type PineSessionState,
   type SiweStep,
 } from './api/session'
+export {
+  pinnedManifest,
+  buildPlanContext,
+  verifyWirePlan,
+  describePlanStep,
+  planToTxSteps,
+  planStepId,
+  planStepIdOf,
+  type RegistryReader,
+  type VerifyOptions,
+} from './api/plans'
+export { useApiPlanRunner, type ApiPlanSpec, type ApiPlanRunner, type ApiPlanPhase, type CreatedPlan } from './api/use-plan-runner'
+export * from './api/actions'
 
 // misc
 export { useNow, useCopy, useHotkeys } from './misc'

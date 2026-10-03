@@ -140,6 +140,18 @@ export interface RequestOptions {
   /** Resolve `null` on 404 instead of throwing. */
   nullOn404?: boolean
   signal?: AbortSignal
+  /**
+   * `Idempotency-Key` of a plan-creating POST (SEC-TX-08): 1..64 of [A-Za-z0-9_-]. Retrying with the same key and body
+   * returns the stored plan instead of a new one, so a crash or double click never creates two plans.
+   */
+  idempotencyKey?: string
+}
+
+const IDEMPOTENCY_KEY = /^[A-Za-z0-9_-]{1,64}$/
+
+/** A fresh idempotency key (122 random bits). Persist it with the action so a retry reuses it. */
+export function newIdempotencyKey(): string {
+  return crypto.randomUUID()
 }
 
 export class PineApiClient {
@@ -176,6 +188,10 @@ export class PineApiClient {
     const headers: Record<string, string> = { accept: 'application/json' }
     let body: BodyInit | undefined
     if (method !== 'GET') headers[CSRF_HEADER] = '1'
+    if (opts.idempotencyKey !== undefined) {
+      if (!IDEMPOTENCY_KEY.test(opts.idempotencyKey)) throw new PineBackendError('Invalid idempotency key', 0, 'BAD_REQUEST')
+      headers['idempotency-key'] = opts.idempotencyKey
+    }
     if (opts.form) {
       body = opts.form // the browser sets multipart/form-data with its boundary
     } else if (opts.body !== undefined) {
@@ -225,8 +241,8 @@ export class PineApiClient {
     return this.request('GET', path, schema, { query, nullOn404: true })
   }
 
-  async post<S extends z.ZodType>(path: string, schema: S, body?: unknown): Promise<z.output<S>> {
-    const r = await this.request('POST', path, schema, { body: body ?? {} })
+  async post<S extends z.ZodType>(path: string, schema: S, body?: unknown, opts: { idempotencyKey?: string } = {}): Promise<z.output<S>> {
+    const r = await this.request('POST', path, schema, { body: body ?? {}, idempotencyKey: opts.idempotencyKey })
     if (r === null) throw new PineBackendError(`Empty response (POST ${path})`, 204, 'BAD_RESPONSE')
     return r
   }

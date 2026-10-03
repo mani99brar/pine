@@ -687,6 +687,9 @@ export type TxStepId =
   | 'submit_evidence'
   | 'redeem_positions'
   | 'approve_outcome_tokens'
+  // additive (api mode): one step of a backend transaction plan, `plan:<plan step id>`, plus the offchain step that
+  // creates and verifies the plan
+  | `plan:${string}`
 
 export type TxStepStatus = 'idle' | 'awaiting_signature' | 'pending' | 'confirmed' | 'failed' | 'skipped'
 

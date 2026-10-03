@@ -8,6 +8,7 @@ export {
   PineApiClient,
   PineBackendError,
   CSRF_HEADER,
+  newIdempotencyKey,
   seg,
   type PineApiClientOptions,
   type PineApiErrorCode,
@@ -15,6 +16,8 @@ export {
   type RequestOptions as PineApiRequestOptions,
 } from './api/http'
 export { pineSessionSchema, siweChallengeSchema, githubStartSchema, anyBodySchema, type PineSession } from './api/auth'
+export * from './api/read'
+export * from './api/plan-schemas'
 export { DEMO_WALLET_ADDRESS, DEMO_GITHUB_USER } from './demo'
 export { parseGitHubRef } from '@pine/core'
 
