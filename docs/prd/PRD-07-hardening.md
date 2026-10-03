@@ -39,18 +39,34 @@ Contracts are immutable once deployed, so every contract change here lands befor
 - funding/reconcile.ts: when a step compare-and-set returns no row because another run already confirmed the step, re-read the
   step and count it as confirmed, so expiry never records a partial execution as `expired` with confirmedSteps 0. Test with a
   step confirmed between read and CAS (injected pre-existing confirmation).
-- Audit atomicity (SEC-OPS-07, both lanes): the audit entry for a plan insert, a new tx-hash hint and every state transition is
-  never lost. If `ctx.audit.record` can join the same database transaction (check the frozen gateway), write it in that
-  transaction; otherwise store an `audit_pending` marker column/row in the same transaction as the write and clear it after
-  `ctx.audit.record` succeeds, and have the module's reconcile job re-record pending entries (idempotent per entry id). A
-  same-key replay of a plan whose creation audit is still pending re-records it. Tests: audit gateway throws once → entry
-  recorded by the next reconcile or replay, exactly once.
+- Audit atomicity (SEC-OPS-07, both modules; operator decisions after the design challenge):
+  - Audited events are exactly the existing ones: plan created, a NEW tx-hash hint (`tx_reported`, which is also the audit of
+    the planned→submitted move; no separate `submitted` entry), and the reconcile transitions confirmed, failed and expired.
+    Existing audit tests stay as they are.
+  - `ctx.audit` is record-only (frozen `AuditLog.record`); never cast or duck-type it to reach a platform method.
+  - One outbox table per module in a new migration (`markets_audit_outbox`, `funding_audit_outbox`: id uuid PK, entry jsonb,
+    created_at). Each audited write inserts its outbox row in the SAME SQL statement as the write (an extra CTE:
+    `WITH moved AS (UPDATE … RETURNING …) INSERT INTO …_audit_outbox SELECT … FROM moved`), so no multi-statement transaction
+    is needed. A `flushAudit(ctx, signal)` helper claims rows with `DELETE … RETURNING`, calls `ctx.audit.record` with the outbox
+    id in `details`, and re-inserts a row whose record throws. It runs after each audited write, on a same-key replay, and at
+    the START of every reconcile run (before any early return for "no open plans"), checking `signal.aborted` between entries.
+  - The guarantee is at-least-once (a crash between record and claim can duplicate an entry; the outbox id in details lets an
+    operator de-duplicate); document it so in the coverage matrix.
+  - Tests: the audit gateway throws once → the entry is recorded by the next flush (after a later write, a replay, or a
+    reconcile run with no open plans), with its outbox id; several pending entries for one plan all survive an outage.
 - Public RPC/gateway fan-out caps: `GET /api/v1/markets/:market/liquidity` (funding) and the markets evidence detail route's
-  `contentStore.retrieve` cache misses use the same non-blocking concurrency cap as positions/oracle (at most 4 in flight per
-  process, a 5th miss refused immediately with ApiError RATE_LIMITED 429 and retryAfterSeconds). Deterministic tests.
-- SEC-EVID-11: the evidence listing never serves manifest text of blocked evidence or content. Re-check moderation state for the
-  cached entries at serve time (or drop cache entries on block) and send `Cache-Control: no-store` for listing responses that
-  embed manifest text. Test: block after a cached listing → next listing omits the manifest.
+  `contentStore.retrieve` cache misses each get their OWN per-route limiter (at most 4 in flight per route per process; do not
+  share the oracle limiter), refusing a 5th concurrent miss immediately with ApiError RATE_LIMITED 429 and retryAfterSeconds.
+  The limiter wraps the call OUTSIDE any try/catch that converts errors into `retrievable: false`; a refused call writes
+  nothing to the cache. Deterministic tests (hold 4 promises, the 5th gets 429, the cache holds no false entry, release).
+- SEC-EVID-11: the evidence listing caches only the read-model page (ids and on-chain fields), never rendered manifest text;
+  moderation states and manifests are computed at serve time for each response. `sendPublic` takes a cache-control parameter
+  and the listing is sent with `Cache-Control: no-store`. Tests: block evidence, and separately block content, after a cached
+  listing → the next listing omits the manifest; the header is no-store.
+- Cooperative abort is largely present (markets reconcile, watch notifications, funding reconcile check `signal.aborted` per
+  item): the work is tests. "Before" aborts the signal before the run; "during" aborts from inside a fake (a scripted chain
+  response or read-model call of the first item) and asserts the second item is untouched. Each existing check is shown
+  necessary by a mutation run (delete it → the test fails), recorded in the coverage matrix.
 - Tests: funding history items show reconciled plan state, step states and confirmedTxHash; loadOracle accepts a replacement
   linked only through the original's `reopenedBy` and refuses otherwise.
 - Claims items (job abort for claims reconcile/integrity, catalog policy-text pinning) are carried by a later claims-hardening
