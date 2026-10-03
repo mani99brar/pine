@@ -15,10 +15,10 @@ import { pinnedManifest, type RegistryReader } from './plans'
 // action at a time per hook, run through useApiPlanRunner, then followed until the backend reports a final state.
 //
 // useApiPlanRunner keeps its verified plan in component state that is not keyed, so when the action key changes the
-// previous plan would still be shown and run under the new key. usePlanAction clears it (discard) in a layout effect
-// before anything is painted, and never starts a run while a stale plan is visible. Keys are content-addressed or carry
-// a per-attempt nonce, and the hooks refuse to switch away from an action whose transactions are in flight, so a key
-// is only ever cleared while its own storage is empty.
+// previous plan would still be shown and run under the new key. usePlanAction forgets it (in memory only) in a layout
+// effect before anything is painted, and never starts a run while a stale plan is visible. Switching keys never touches
+// storage: the key being entered may be an earlier action (keys are content-addressed or carry a per-attempt nonce)
+// whose idempotency key, plan and progress must survive, or it would be planned and sent a second time.
 
 const useIsomorphicLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect
 
@@ -42,6 +42,8 @@ export interface PlanActionSpec {
   notReadyRetries?: number
   /** Injectable wait (tests). */
   sleep?(ms: number): Promise<void>
+  /** Clock in ms since the epoch for offer expiry (tests); default Date.now. */
+  now?: () => number
 }
 
 export interface PlanAction {
@@ -94,21 +96,24 @@ export function usePlanAction(spec: PlanActionSpec): PlanAction {
         }
       }
     },
-    submitted: (planId, stepId, txHash) => specRef.current.submitted(planId, stepId, txHash),
+    // This render's callbacks, not the latest ones: the runner binds them to this key, so a run that continues after the
+    // key changed still reports to (and finishes) its own action.
+    submitted: (planId, stepId, txHash) => spec.submitted(planId, stepId, txHash),
     markets: spec.markets,
     reopenedQuestionIds: spec.reopenedQuestionIds,
     limits: spec.limits,
-    onDone: () => specRef.current.onDone?.(),
+    onDone: () => spec.onDone?.(),
+    now: spec.now,
   })
 
   // A plan still in state after the key changed belongs to the previous key (the runner loads a stored plan only
-  // while its state is empty): clear it before paint.
+  // while its state is empty): forget it before paint. Memory only: the entered key's stored plan stays.
   const shownKey = useRef(key)
   const stale = shownKey.current !== key && runner.plan !== null
   useIsomorphicLayoutEffect(() => {
     if (shownKey.current === key) return
     shownKey.current = key
-    if (runner.plan !== null) runner.discard()
+    if (runner.plan !== null) runner.forget()
   })
 
   // The runner of the last committed render, and whether it shows its own key's plan.

@@ -252,6 +252,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
     limits: PUBLICATION_LIMITS,
     notReadyRetries: 0, // NOT_READY here usually means "being created": follow the publication instead
     sleep: options.sleep,
+    now: () => now().getTime(),
     async create() {
       const client = requireWriteApi(api)
       const { preview: p, verifyIssues: issues, account: acct, manifest: m } = latest.current
@@ -272,7 +273,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
       }
       // SEC-TX-02: the single createClaim step must encode exactly the previewed document, byte for byte.
       checkCreateClaimPlan(res.plan, { document: p.document, documentSha256: p.documentSha256, account: acct, manifest: m })
-      return { wire: res.plan, planId: view.id }
+      return { wire: res.plan, planId: view.id, expiresAt: Math.min(view.planExpiresAt, p.planExpiresAt) * 1000 }
     },
     async submitted(publicationId, _stepId, txHash) {
       // The publication route takes the hash only; the step is implied (one createClaim per publication).

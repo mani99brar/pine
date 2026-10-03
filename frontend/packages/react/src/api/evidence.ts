@@ -37,6 +37,7 @@ import { useWallet } from '../wallet'
 import { getBrowserStorage, readJson, writeJson, type KeyValueStorage } from '../internal/storage'
 import { isoNow } from '../internal/util'
 import type { ApiPlanRunner } from './use-plan-runner'
+import { verifyWirePlan } from './plans'
 import {
   requireWriteApi,
   runnerIsBusy,
@@ -44,6 +45,7 @@ import {
   usePinnedManifest,
   usePlanAction,
   usePolledStatus,
+  useRegistryReader,
   useStoredRecord,
   useWriteApi,
   type OnChainClaim,
@@ -53,7 +55,8 @@ import {
 // - direct: upload the artifacts and the manifest to Pine, then publish the manifest digest on chain (public at once);
 // - sealed: commit keccak256(…, contentSha256, salt) on chain, reveal before the reveal deadline.
 // Sealed evidence stays on this device until the reveal (SEC-EVID-13): the manifest and the artifacts are uploaded to
-// Pine only in the reveal step, and the salt is never sent to Pine at all — it lives only in this browser's
+// Pine only in the reveal step, once the commitment is indexed and the reveal template and the reveal plan have been
+// checked, right before the reveal transaction; the salt is never sent to Pine at all — it lives only in this browser's
 // localStorage (keyed by market, content digest and submitter) and in the reveal transaction itself. The commit plan is
 // checked to commit exactly the locally computed commitment; the reveal plan is built and verified locally.
 
@@ -440,6 +443,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
   const api = useWriteApi()
   const wallet = useWallet()
   const manifest = usePinnedManifest()
+  const reader = useRegistryReader()
   const { claim } = useOnChainClaim(market)
   const m = market.toLowerCase() as Address
   const account = wallet.address?.toLowerCase() as Address | undefined
@@ -448,7 +452,8 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
   useEffect(() => {
     clockRef.current = options.now
   })
-  const nowSec = useCallback(() => Math.floor((clockRef.current?.() ?? new Date()).getTime() / 1000), [])
+  const nowMs = useCallback(() => (clockRef.current?.() ?? new Date()).getTime(), [])
+  const nowSec = useCallback(() => Math.floor(nowMs() / 1000), [nowMs])
 
   const [prepared, setPrepared] = useState<PreparedEvidence | null>(null)
   const [fieldErrors, setFieldErrors] = useState<EvidenceFieldError[]>([])
@@ -458,16 +463,15 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
   const [revealWarnings, setRevealWarnings] = useState<{ code: string; text: string }[]>([])
   const [action, setAction] = useStoredRecord<StoredEvidenceAction>(account ? `pine:api-evidence-action:${m}:${account}` : null, isStoredEvidenceAction)
 
-  const latest = useRef({ action, account, claim, manifest, prepared })
+  const latest = useRef({ action, account, claim, manifest, prepared, reader })
   useEffect(() => {
-    latest.current = { action, account, claim, manifest, prepared }
+    latest.current = { action, account, claim, manifest, prepared, reader }
   })
 
+  /** Updates the seal of `submitter` (always named: a run may finish after the wallet switched). */
   const updateSeal = useCallback(
-    (contentSha256: Hex32, patch: Partial<EvidenceSeal>) => {
-      const acct = latest.current.account
-      if (!acct) return
-      const seal = readSeal(storage, m, contentSha256, acct)
+    (submitter: Address, contentSha256: Hex32, patch: Partial<EvidenceSeal>) => {
+      const seal = readSeal(storage, m, contentSha256, submitter)
       if (!seal) return
       writeSeal(storage, { ...seal, ...patch })
       setSealVersion((v) => v + 1)
@@ -492,9 +496,10 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
     markets: [m],
     limits: EVIDENCE_LIMITS,
     sleep: options.sleep,
+    now: nowMs,
     async create(idempotencyKey) {
       const client = requireWriteApi(api)
-      const { action: act, account: acct, manifest: pinned } = latest.current
+      const { action: act, account: acct, manifest: pinned, claim: c } = latest.current
       if (!act || !acct || !pinned) throw new Error('Connect the wallet you signed in with.')
       if (act.kind === 'commit') {
         const seal = readSeal(storage, m, act.contentSha256, acct)
@@ -502,9 +507,9 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
         const res = await client.commitPlan({ market: m, commitment: seal.commitment }, idempotencyKey)
         if (res.planState.offerExpired) throw new Error('This commit offer expired; the evidence window is closing.')
         checkCommitPlan(res.plan, { market: m, commitment: seal.commitment, account: acct })
-        updateSeal(act.contentSha256, { commitPlanId: res.planState.id })
+        updateSeal(acct, act.contentSha256, { commitPlanId: res.planState.id })
         recordPlan(res.planState.id)
-        return { wire: res.plan, planId: res.planState.id }
+        return { wire: res.plan, planId: res.planState.id, expiresAt: res.planState.expiresAt * 1000 }
       }
       if (act.kind === 'publish') {
         const manifestBody = act.manifest
@@ -514,30 +519,31 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
         if (res.planState.offerExpired) throw new Error('This publish offer expired; the evidence window is closing.')
         checkPublishEvidencePlan(res.plan, { market: m, contentSha256: act.contentSha256, account: acct })
         recordPlan(res.planState.id)
-        return { wire: res.plan, planId: res.planState.id }
+        return { wire: res.plan, planId: res.planState.id, expiresAt: res.planState.expiresAt * 1000 }
       }
-      // Reveal: built locally from the seal; Pine sees neither the plan nor the salt before the transaction.
+      // Reveal: built locally from the seal; Pine sees neither the plan nor the salt before the transaction. It is
+      // offered until Pine's margin before the on-chain reveal deadline.
       const seal = readSeal(storage, m, act.contentSha256, acct)
       const submissionId = act.submissionId ?? seal?.submissionId
       if (!seal || !submissionId) throw new Error('Start the reveal again.')
-      return { wire: buildRevealWire(pinned, acct, submissionId, seal), planId: `reveal-${submissionId}` }
+      if (!c) throw new Error('The claim is not loaded from the chain yet.')
+      return { wire: buildRevealWire(pinned, acct, submissionId, seal), planId: `reveal-${submissionId}`, expiresAt: (c.revealDeadline - SUBMISSION_MARGIN_SECONDS) * 1000 }
     },
+    // This render's action and wallet: a run that finishes after the hook moved on records its own seal.
     async submitted(planId, stepId, txHash) {
-      const act = latest.current.action
-      if (!act) return
-      if (act.kind === 'reveal') {
+      if (!action || !account) return
+      if (action.kind === 'reveal') {
         // No backend report for reveals: the read model sees the EvidenceRevealed event.
-        updateSeal(act.contentSha256, { revealTxHash: txHash.toLowerCase() as Hex })
+        updateSeal(account, action.contentSha256, { revealTxHash: txHash.toLowerCase() as Hex })
         return
       }
-      if (act.kind === 'commit') updateSeal(act.contentSha256, { commitTxHash: txHash.toLowerCase() as Hex })
+      if (action.kind === 'commit') updateSeal(account, action.contentSha256, { commitTxHash: txHash.toLowerCase() as Hex })
       await requireWriteApi(api).reportMarketsPlanTx(planId, stepId, txHash)
     },
     onDone() {
-      const act = latest.current.action
-      if (!act) return
-      if (act.kind === 'commit') updateSeal(act.contentSha256, { committedAt: isoNow() })
-      if (act.kind === 'reveal') updateSeal(act.contentSha256, { revealedAt: isoNow() })
+      if (!action || !account) return
+      if (action.kind === 'commit') updateSeal(account, action.contentSha256, { committedAt: isoNow() })
+      if (action.kind === 'reveal') updateSeal(account, action.contentSha256, { revealedAt: isoNow() })
     },
   })
   const { runner } = plan
@@ -646,7 +652,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
     async (contentSha256: Hex32, opts: { files?: Blob[]; acknowledgeUnavailableContent?: boolean } = {}) => {
       setError(null)
       setRevealWarnings([])
-      const { account: acct, claim: c, manifest: pinned } = latest.current
+      const { account: acct, claim: c, manifest: pinned, reader: rpc } = latest.current
       const client = api
       if (!acct || !pinned || !client) {
         setError({ code: 'UNKNOWN', action: 'none', message: 'Connect the wallet that committed this evidence.' })
@@ -683,26 +689,29 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
           })
           return
         }
-        if (missing.length === 0) await uploadEvidence(client, seal.manifest, seal.contentSha256)
+        // SEC-EVID-13: nothing of the sealed evidence reaches Pine unless the reveal can go ahead now: the commitment is
+        // indexed, the reveal template describes this seal, and the reveal plan verifies. Only then is it uploaded,
+        // right before the reveal transaction.
         const submission = seal.submissionId ? { submissionId: seal.submissionId } : await findCommittedSubmission(client, m, acct, seal.commitment)
         if (!submission) {
           setError({ code: 'NOT_READY', action: 'retry_later', message: 'Pine has not indexed your commitment yet. Try again in a minute.' })
           return
         }
-        const template = await client.revealTemplate({
-          submissionId: submission.submissionId,
-          contentSha256: seal.contentSha256,
-          unavailableContentAcknowledged: missing.length > 0 ? true : undefined,
-        })
+        // Nothing is uploaded yet, so the template is requested without stored content.
+        const template = await client.revealTemplate({ submissionId: submission.submissionId, contentSha256: seal.contentSha256, unavailableContentAcknowledged: true })
         checkRevealTemplate(template, { seal, submissionId: submission.submissionId, manifest: pinned, account: acct })
-        setRevealWarnings(template.warnings)
-        updateSeal(seal.contentSha256, { submissionId: submission.submissionId })
+        if (!rpc) throw new Error(`No RPC is configured for chain ${env.defaultChainId}, so the reveal cannot be checked.`)
+        await verifyWirePlan(buildRevealWire(pinned, acct, submission.submissionId, seal), { manifest: pinned, account: acct, reader: rpc, markets: [m], limits: EVIDENCE_LIMITS })
+        if (missing.length === 0) await uploadEvidence(client, seal.manifest, seal.contentSha256)
+        // The "manifest unavailable" warning answered the pre-upload request; it holds only when nothing was uploaded.
+        setRevealWarnings(missing.length === 0 ? template.warnings.filter((w) => w.code !== 'manifest_unavailable') : template.warnings)
+        updateSeal(acct, seal.contentSha256, { submissionId: submission.submissionId })
         await start({ v: 1, kind: 'reveal', contentSha256: seal.contentSha256, submissionId: submission.submissionId })
       } catch (e) {
         setError(describeWriteError(e))
       }
     },
-    [api, inFlight, storage, m, checkOpen, updateSeal, start],
+    [api, env.defaultChainId, inFlight, storage, m, checkOpen, updateSeal, start],
   )
 
   const abandon = useCallback(() => {

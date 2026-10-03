@@ -26,6 +26,20 @@ export interface WriteErrorInfo {
   status?: number
 }
 
+/**
+ * A refusal by this app that clears up by itself, e.g. Pine's view of the chain is behind what the user's RPC reads.
+ * Nothing was sent; the action can be tried again later.
+ */
+export class RetryLaterError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfter?: number,
+  ) {
+    super(message)
+    this.name = 'RetryLaterError'
+  }
+}
+
 /** "45 s", "3 min", "2 h 5 min". */
 export function formatWait(seconds: number): string {
   const s = Math.max(1, Math.ceil(seconds))
@@ -131,6 +145,7 @@ export function describeWriteError(e: unknown): WriteErrorInfo {
         message: `Pine proposed a transaction that this app could not verify, so nothing was sent to your wallet (${e.message}).`,
       }
     }
+    if (e instanceof RetryLaterError) return { code: 'UNKNOWN', action: 'retry_later', message: e.message, retryAfter: e.retryAfter }
     if (e.name === 'AbortError') return { code: 'UNKNOWN', action: 'none', message: 'Cancelled.' }
     return { code: 'UNKNOWN', action: 'none', message: e.message || 'Something went wrong.' }
   }

@@ -37,6 +37,10 @@ interface FakeState {
   tamperCommitment?: Hex32
   commitFailures: Response[]
   manifests: unknown[]
+  /** The read model has not indexed any commitment yet. */
+  hideCommitments?: boolean
+  /** The reveal template names another commitment. */
+  tamperTemplate?: boolean
 }
 
 function planView(id: string, kind: string, route: string, wire: ReturnType<typeof wirePlan>, state = 'planned') {
@@ -93,7 +97,7 @@ function backend(state: FakeState): FakePine {
         market: MARKET,
         evidenceDeadline: EVIDENCE_DEADLINE,
         revealDeadline: REVEAL_DEADLINE,
-        items: state.commitments.map((commitment, i) => ({
+        items: (state.hideCommitments ? [] : state.commitments).map((commitment, i) => ({
           registry: PINE.evidenceRegistry,
           submissionId: String(7 + i),
           market: MARKET,
@@ -119,7 +123,7 @@ function backend(state: FakeState): FakePine {
     })
     .on('POST', /^\/api\/v1\/evidence\/reveal-template$/, (req) => {
       const body = req.json as { submissionId: string; contentSha256: Hex32 }
-      const commitment = state.commitments[Number(body.submissionId) - 7] ?? `0x${'00'.repeat(32)}`
+      const commitment = state.tamperTemplate ? `0x${'42'.repeat(32)}` : (state.commitments[Number(body.submissionId) - 7] ?? `0x${'00'.repeat(32)}`)
       return json(200, {
         template: {
           chainId: 100,
@@ -272,12 +276,71 @@ describe('useApiEvidence', () => {
     ])
     expect(upload?.headers['content-type']).toBeUndefined()
     expect(state.manifests).toEqual([prepared?.manifest])
-    expect(fake.of(/\/reveal-template$/).map((r) => r.text)).toEqual([JSON.stringify({ submissionId: '7', contentSha256: sha })])
+    // The template is checked before anything is uploaded, so it is asked for without stored content.
+    expect(fake.of(/\/reveal-template$/).map((r) => r.text)).toEqual([JSON.stringify({ submissionId: '7', contentSha256: sha, unavailableContentAcknowledged: true })])
     // The reveal transaction (built here) carries the salt; Pine never saw it and gets no report for it.
     expect(result.current.ev.runner.plan?.steps[0]?.allowlistId).toBe('evidenceRegistry.revealEvidence')
     expect(result.current.ev.runner.plan?.steps[0]?.args).toEqual([7n, sha, salt])
     expect(fake.of(/\/submitted$/)).toHaveLength(1)
     expect(allText(fake.requests)).not.toContain(salt.slice(2))
+  })
+
+  it('SEC-EVID-13 uploads the sealed evidence only after the commitment is indexed and the template and reveal plan check out', async () => {
+    const { result } = render()
+    await ready(result)
+    const sha = result.current.ev.prepared?.contentSha256 as Hex32
+    await act(async () => {
+      void result.current.ev.commit()
+    })
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('committed'))
+    const from = fake.requests.length
+    await act(async () => {
+      void result.current.ev.reveal(sha)
+    })
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('revealed'))
+    const order = fake.requests
+      .slice(from)
+      .map((r) => `${r.method} ${r.path}`)
+      .filter((r) => !r.includes('/markets/plans/'))
+    expect(order).toEqual([`GET /api/v1/markets/${MARKET}/evidence`, 'POST /api/v1/evidence/reveal-template', 'POST /api/v1/evidence/artifacts', 'POST /api/v1/evidence/manifests'])
+    // The pre-upload "manifest unavailable" warning does not outlive the upload.
+    expect(result.current.ev.revealWarnings).toEqual([])
+  })
+
+  it('SEC-EVID-13 uploads nothing of the sealed evidence while its commitment is not indexed', async () => {
+    const { result } = render()
+    await ready(result)
+    const sha = result.current.ev.prepared?.contentSha256 as Hex32
+    await act(async () => {
+      void result.current.ev.commit()
+    })
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('committed'))
+    state.hideCommitments = true
+    await act(async () => {
+      await result.current.ev.reveal(sha)
+    })
+    expect(result.current.ev.error).toMatchObject({ code: 'NOT_READY', action: 'retry_later' })
+    expect(fake.of(/^\/api\/v1\/evidence\/(artifacts|manifests)$/)).toEqual([])
+    expect(fake.of(/\/reveal-template$/)).toEqual([])
+    expect(result.current.ev.seals[0]?.state).toBe('committed')
+  })
+
+  it('SEC-EVID-13 uploads nothing of the sealed evidence when the reveal template does not describe the seal', async () => {
+    const { result } = render()
+    await ready(result)
+    const sha = result.current.ev.prepared?.contentSha256 as Hex32
+    await act(async () => {
+      void result.current.ev.commit()
+    })
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('committed'))
+    state.tamperTemplate = true
+    await act(async () => {
+      await result.current.ev.reveal(sha)
+    })
+    expect(result.current.ev.error?.code).toBe('PLAN_REJECTED')
+    expect(fake.of(/^\/api\/v1\/evidence\/(artifacts|manifests)$/)).toEqual([])
+    // The reveal never started: the runner still shows the commit.
+    expect(result.current.ev.action?.kind).toBe('commit')
   })
 
   it('asks for the committed files again after a reload before revealing', async () => {
@@ -349,6 +412,75 @@ describe('useApiEvidence', () => {
     expect(fake.of(/\/evidence\/plans\/publish$/)[0]?.text).toBe(JSON.stringify({ market: MARKET, contentSha256: sha }))
     const step = result.current.ev.runner.runner.steps[0]
     expect(fake.of(/\/submitted$/).map((r) => r.text)).toEqual([JSON.stringify({ stepId: 'publish', txHash: step?.txHash?.toLowerCase() })])
+  })
+
+  it('SEC-TX-08 switching between actions keeps each one’s stored plan: revisiting a published one never plans or sends it again', async () => {
+    const { result } = render()
+    await ready(result)
+    const shaA = result.current.ev.prepared?.contentSha256 as Hex32
+    const keyA = `api-evidence:publish:${MARKET}:${ACCOUNT}:${shaA}`
+    await act(async () => {
+      void result.current.ev.publish()
+    })
+    await waitFor(() => expect(result.current.ev.runner.runner.state).toBe('done'))
+
+    await act(async () => {
+      expect(await result.current.ev.prepare({ ...composition(), title: 'A second, unrelated finding' })).not.toBeNull()
+    })
+    const shaB = result.current.ev.prepared?.contentSha256 as Hex32
+    expect(shaB).not.toBe(shaA)
+    await act(async () => {
+      void result.current.ev.publish()
+    })
+    await waitFor(() => expect(result.current.ev.action?.contentSha256).toBe(shaB))
+    await waitFor(() => expect(result.current.ev.runner.runner.state).toBe('done'))
+    expect(localStorage.getItem(`pine:apiplan:${keyA}`)).toContain('"planId"')
+    expect(localStorage.getItem(`pine:tx:api:${keyA}`)).not.toBeNull()
+
+    await act(async () => {
+      expect(await result.current.ev.prepare(composition())).not.toBeNull()
+    })
+    expect(result.current.ev.prepared?.contentSha256).toBe(shaA)
+    await act(async () => {
+      void result.current.ev.publish()
+    })
+    await waitFor(() => expect(result.current.ev.action?.contentSha256).toBe(shaA))
+    await waitFor(() => expect(result.current.ev.runner.runner.state).toBe('done'))
+    // One plan and one transaction per evidence: A's stored plan and progress survived both switches.
+    expect(fake.of(/\/evidence\/plans\/publish$/).map((r) => (r.json as { contentSha256: string }).contentSha256)).toEqual([shaA, shaB])
+    expect(fake.of(/\/submitted$/)).toHaveLength(2)
+    expect(localStorage.getItem(`pine:apiplan:${keyA}`)).toContain('"planId"')
+    expect(localStorage.getItem(`pine:tx:api:${keyA}`)).not.toBeNull()
+  })
+
+  it('SEC-TX-08 a commit rejected in the wallet is resumed with its own plan after another commit, never planned again', async () => {
+    const { result } = render()
+    await ready(result)
+    const shaA = result.current.ev.prepared?.contentSha256 as Hex32
+    demoWalletStore.failNext()
+    await act(async () => {
+      void result.current.ev.commit()
+    })
+    await waitFor(() => expect(result.current.ev.runner.runner.state).toBe('failed'))
+
+    await act(async () => {
+      expect(await result.current.ev.prepare({ ...composition(), title: 'A second, unrelated finding' })).not.toBeNull()
+    })
+    await act(async () => {
+      void result.current.ev.commit()
+    })
+    await waitFor(() => expect(result.current.ev.seals.find((s) => s.contentSha256 !== shaA)?.state).toBe('committed'))
+
+    await act(async () => {
+      expect(await result.current.ev.prepare(composition())).not.toBeNull()
+    })
+    await act(async () => {
+      void result.current.ev.commit()
+    })
+    await waitFor(() => expect(result.current.ev.seals.find((s) => s.contentSha256 === shaA)?.state).toBe('committed'))
+    const commits = fake.of(/\/evidence\/plans\/commit$/)
+    expect(commits).toHaveLength(2)
+    expect(new Set(commits.map((r) => r.headers['idempotency-key'])).size).toBe(2)
   })
 
   it('never commits for another wallet’s seal and refuses when the evidence window closed', async () => {

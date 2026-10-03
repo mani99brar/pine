@@ -72,17 +72,24 @@ export function claimStruct(over: Record<string, unknown> = {}): Record<string, 
 
 /** Claims ClaimRegistry knows, by lowercase market (tests may add more; reset with resetChain()). */
 export const chainClaims = new Map<string, Record<string, unknown>>()
+/** Reality's reopened_questions: original question id → its latest replacement (absent: not reopened). */
+export const chainReopened = new Map<string, Hex32>()
 export function resetChain(): void {
   chainClaims.clear()
   chainClaims.set(MARKET, claimStruct())
+  chainReopened.clear()
 }
 resetChain()
 
-/** ClaimRegistry on the user's RPC. Records every read. */
+/** ClaimRegistry and Reality on the user's RPC. Records every read. */
 export const reads: string[] = []
 export const fakeReader: RegistryReader = {
   async readContract({ address, functionName, args }) {
     reads.push(`${functionName}:${args[0]}`)
+    if (functionName === 'reopened_questions') {
+      if (address.toLowerCase() !== manifest.seer.realitio.toLowerCase()) throw new Error('read from the wrong Reality contract')
+      return chainReopened.get(String(args[0]).toLowerCase()) ?? `0x${'0'.repeat(64)}`
+    }
     if (address.toLowerCase() !== PINE.claimRegistry) throw new Error('read from the wrong registry')
     const claim = chainClaims.get(String(args[0]).toLowerCase())
     if (functionName === 'isRegistered') return claim !== undefined

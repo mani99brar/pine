@@ -5,10 +5,12 @@ import { PlanVerificationError, type Address, type Hex32 } from '@pine/core/pine
 import { useWallet, demoWalletStore } from '../src/wallet'
 import { __resetTxRunners } from '../src/tx/use-tx-runner'
 import { setDemoTxDelays } from '../src/tx/demo-executor'
+import { readCurrentQuestionId, verifyWirePlan } from '../src/api/plans'
 import { checkOraclePlan, minimumBondOf, reopenedQuestionIdsOf, useApiOracle } from '../src/api/oracle'
-import { checkLadderPlan, useApiFunding } from '../src/api/funding'
+import { checkLadderPlan, useApiFunding, type LadderPlanCheck } from '../src/api/funding'
 import { checkExitPlan } from '../src/api/exits'
-import { ACCOUNT, INVALID, manifest, MARKET, NO, NOW, NOW_S, OTHER, QUESTION, REVEAL_DEADLINE, wirePlan, XDAI, YES } from './api-write-chain'
+import { getSqrtRatioAtTick, MAX_SQRT_RATIO, MAX_TICK, MIN_SQRT_RATIO, MIN_TICK } from '../src/api/tick-math'
+import { ACCOUNT, chainReopened, fakeReader, INVALID, manifest, MARKET, NO, NOW, NOW_S, OTHER, QUESTION, reads, resetChain, REVEAL_DEADLINE, wirePlan, XDAI, YES } from './api-write-chain'
 import { apiError, FakePine, iso, json, noSleep, wrapper } from './api-write-support'
 
 vi.mock('wagmi', async (importOriginal) => {
@@ -19,6 +21,8 @@ vi.mock('wagmi', async (importOriginal) => {
 
 const ANSWER_NO = `0x${'0'.repeat(63)}1` as Hex32
 const REOPENED = `0x${'98'.repeat(32)}` as Hex32
+/** A Reality question someone else created (own arbitrator and timeout): never a target of the user's bonds. */
+const FOREIGN = `0x${'a1'.repeat(32)}` as Hex32
 const COLLATERAL = manifest.seer.collateralToken
 const PM = manifest.amm.positionManager
 const ROUTER = manifest.seer.gnosisRouter
@@ -67,43 +71,201 @@ describe('checkOraclePlan', () => {
     expect(() => checkOraclePlan(bounty, oracleCtx({ route: 'fund-bounty', body: { market: MARKET, amount: '4' }, valueWei: 4n }))).toThrow(PlanVerificationError)
   })
 
-  it('derives the bond floor and the reopened question ids from the oracle status', () => {
+  it('derives the bond floor from the oracle status, and takes a replacement question from it only when the chain confirms it', () => {
     const question = { questionId: QUESTION, openingTs: 1, minBond: (10n * XDAI).toString(), timeout: 1, bestAnswer: null, bond: (7n * XDAI).toString(), finalizeTs: 0, pendingArbitration: false, arbitrationRequestedBy: null, answeredByArbitrator: false, bounty: '0', reopenedBy: null, reopens: null, answerCount: 1 }
     const status = { ...statusFixture(), question }
     expect(minimumBondOf(status, null)).toBe(14n * XDAI)
-    expect(reopenedQuestionIdsOf({ ...status, currentQuestionId: REOPENED, reopened: true }, QUESTION)).toEqual([REOPENED])
+    const reopened = { ...status, currentQuestionId: REOPENED, reopened: true }
+    // SEC-TX-01: the status alone never vouches for a question.
+    expect(reopenedQuestionIdsOf(reopened, QUESTION)).toEqual([])
+    expect(reopenedQuestionIdsOf(reopened, QUESTION, QUESTION)).toEqual([])
+    expect(reopenedQuestionIdsOf({ ...status, currentQuestionId: FOREIGN, reopened: true }, QUESTION, REOPENED)).toEqual([])
+    expect(reopenedQuestionIdsOf(reopened, QUESTION, REOPENED)).toEqual([REOPENED])
     expect(reopenedQuestionIdsOf(status, QUESTION)).toEqual([])
   })
 })
 
+describe('oracle questions come from the chain', () => {
+  beforeEach(() => resetChain())
+
+  const bounty = (question: Hex32) => wirePlan('p-b', ACCOUNT, [{ id: 'fund-bounty', allowlistId: 'realitio.fundAnswerBounty', args: [question], value: 500n * XDAI }])
+  const limits = { maxTotalValueWei: 500n * XDAI, maxApprovalAmount: 0n }
+
+  it('reads the current question from Reality: the latest replacement once reopened, else the claim question', async () => {
+    expect(await readCurrentQuestionId(fakeReader, manifest, QUESTION)).toBe(QUESTION)
+    chainReopened.set(QUESTION, REOPENED)
+    expect(await readCurrentQuestionId(fakeReader, manifest, QUESTION)).toBe(REOPENED)
+  })
+
+  it('SEC-TX-01 refuses a bounty or a bonded answer for a question that only the Pine API vouches for', async () => {
+    await expect(verifyWirePlan(bounty(FOREIGN), { manifest, account: ACCOUNT, reader: fakeReader, markets: [MARKET], limits })).rejects.toThrow(/not a registered claim question/)
+    const answer = wirePlan('p-a', ACCOUNT, [{ id: 'answer', allowlistId: 'realitio.submitAnswer', args: [FOREIGN, ANSWER_NO, 0n], value: 20n * XDAI }])
+    await expect(verifyWirePlan(answer, { manifest, account: ACCOUNT, reader: fakeReader, markets: [MARKET], limits })).rejects.toThrow(/not a registered claim question/)
+    // The current question handed to the route check is the chain's, so the same plans fail there too.
+    const currentQuestionId = await readCurrentQuestionId(fakeReader, manifest, QUESTION)
+    expect(() => checkOraclePlan(bounty(FOREIGN), oracleCtx({ route: 'fund-bounty', body: { market: MARKET, amount: (500n * XDAI).toString() }, valueWei: 500n * XDAI, currentQuestionId }))).toThrow(/another question/)
+  })
+
+  it('accepts a plan for the replacement question Reality reports on chain', async () => {
+    chainReopened.set(QUESTION, REOPENED)
+    const { plan } = await verifyWirePlan(bounty(REOPENED), { manifest, account: ACCOUNT, reader: fakeReader, markets: [MARKET], limits })
+    expect(plan.steps).toHaveLength(1)
+    expect(reads).toContain(`reopened_questions:${QUESTION}`)
+  })
+})
+
+describe('tick math', () => {
+  it('matches Algebra/Uniswap TickMath at the canonical values', () => {
+    expect(getSqrtRatioAtTick(0)).toBe(1n << 96n)
+    expect(getSqrtRatioAtTick(MIN_TICK)).toBe(MIN_SQRT_RATIO)
+    expect(getSqrtRatioAtTick(MAX_TICK)).toBe(MAX_SQRT_RATIO)
+    expect(getSqrtRatioAtTick(1)).toBe(79_232_123_823_359_799_118_286_999_568n)
+    expect(getSqrtRatioAtTick(-1)).toBe(79_224_201_403_219_477_170_569_942_574n)
+    expect(getSqrtRatioAtTick(-29_940)).toBe(17_732_633_948_828_052_598_660_473_723n)
+    expect(() => getSqrtRatioAtTick(MAX_TICK + 1)).toThrow(RangeError)
+    expect(() => getSqrtRatioAtTick(0.5)).toThrow(RangeError)
+  })
+})
+
+// The backend's ladder for 100 xDAI over YES 0.05–0.5 sDAI with S = 79 sets (packages/api funding math, tick spacing 60):
+// YES (0x50…) sorts before sDAI (0xaf20…), so YES = token0 and the pool price is sDAI per YES.
 const SETS = 79n * XDAI
-const ladderSteps = (over: { approveTo?: Address; recipient?: Address; split?: bigint } = {}) => [
-  { id: 'split', allowlistId: 'gnosisRouter.splitFromBase', args: [MARKET], value: over.split ?? 100n * XDAI },
-  { id: 'approve-yes', allowlistId: 'outcomeToken.approve', to: over.approveTo ?? YES, args: [PM, SETS], dependsOn: ['split'] },
-  { id: 'create-pool', allowlistId: 'positionManager.createAndInitializePoolIfNecessary', args: [YES, COLLATERAL, 2n ** 96n] },
-  {
-    id: 'mint-yes',
-    allowlistId: 'positionManager.mint',
-    args: [{ token0: YES, token1: COLLATERAL, tickLower: -60, tickUpper: 60, amount0Desired: SETS, amount1Desired: 0n, amount0Min: SETS - 1n, amount1Min: 0n, recipient: over.recipient ?? ACCOUNT, deadline: BigInt(NOW_S + 1200) }],
-    dependsOn: ['approve-yes', 'create-pool'],
-  },
-]
-const ladderCtx = { market: MARKET, account: ACCOUNT, budgetWei: 100n * XDAI, yesToken: YES, manifest }
+const LOSS = 66_514_848_024_341_992_635n
+const TICKS: [number, number] = [-29_940, -6_960]
+const INIT_SQRT = 17_732_633_948_828_052_598_660_473_722n
+const minus50bps = (amount: bigint) => amount - (amount * 50n) / 10_000n
+
+interface LadderOver {
+  approveTo?: Address
+  recipient?: Address
+  split?: bigint
+  ticks?: [number, number]
+  init?: bigint
+  yes?: bigint
+  approve?: bigint
+  yesMin?: bigint
+  sdai?: bigint
+  deadline?: bigint
+}
+
+const ladderSteps = (over: LadderOver = {}) => {
+  const yes = over.yes ?? SETS
+  const [tickLower, tickUpper] = over.ticks ?? TICKS
+  return [
+    { id: 'split', allowlistId: 'gnosisRouter.splitFromBase', args: [MARKET], value: over.split ?? 100n * XDAI },
+    { id: 'approve-yes', allowlistId: 'outcomeToken.approve', to: over.approveTo ?? YES, args: [PM, over.approve ?? yes], dependsOn: ['split'] },
+    { id: 'create-pool', allowlistId: 'positionManager.createAndInitializePoolIfNecessary', args: [YES, COLLATERAL, over.init ?? INIT_SQRT] },
+    {
+      id: 'mint-yes',
+      allowlistId: 'positionManager.mint',
+      args: [
+        {
+          token0: YES,
+          token1: COLLATERAL,
+          tickLower,
+          tickUpper,
+          amount0Desired: yes,
+          amount1Desired: over.sdai ?? 0n,
+          amount0Min: over.yesMin ?? minus50bps(yes),
+          amount1Min: 0n,
+          recipient: over.recipient ?? ACCOUNT,
+          deadline: over.deadline ?? BigInt(NOW_S + 1200),
+        },
+      ],
+      dependsOn: ['approve-yes', 'create-pool'],
+    },
+  ]
+}
+const ladderCtx: LadderPlanCheck = { market: MARKET, account: ACCOUNT, budgetWei: 100n * XDAI, yesToken: YES, manifest, lowerPrice: '0.05', upperPrice: '0.5', maxYesAmount: SETS, maxLossIfYesShares: LOSS, now: NOW_S }
+const ladder = (over: LadderOver = {}) => wirePlan('p-l', ACCOUNT, ladderSteps(over))
 
 describe('checkLadderPlan', () => {
-  it('accepts split → approve YES → create pool → mint YES to the wallet, valued at exactly the budget', () => {
-    expect(checkLadderPlan(wirePlan('p-l', ACCOUNT, ladderSteps()), ladderCtx).steps).toHaveLength(4)
+  it('accepts split → approve YES → create pool → mint YES to the wallet, inside the acknowledged range and figures', () => {
+    expect(checkLadderPlan(ladder(), ladderCtx).steps).toHaveLength(4)
+    // A plan whose S shrank a little since the quote (sDAI appreciated) is still the acknowledged ladder.
+    expect(checkLadderPlan(ladder({ yes: SETS - 10n ** 15n }), ladderCtx).steps).toHaveLength(4)
   })
 
   it('SEC-TX-03 refuses an approval of another market token, and a split of another amount', () => {
-    expect(() => checkLadderPlan(wirePlan('p-l', ACCOUNT, ladderSteps({ approveTo: NO })), ladderCtx)).toThrow(/YES token/)
-    expect(() => checkLadderPlan(wirePlan('p-l', ACCOUNT, ladderSteps({ split: 101n * XDAI })), ladderCtx)).toThrow(/differs from your budget/)
+    expect(() => checkLadderPlan(ladder({ approveTo: NO }), ladderCtx)).toThrow(/YES token/)
+    expect(() => checkLadderPlan(ladder({ split: 101n * XDAI }), ladderCtx)).toThrow(/differs from your budget/)
   })
 
   it('refuses a position minted to another address and any extra call', () => {
-    expect(() => checkLadderPlan(wirePlan('p-l', ACCOUNT, ladderSteps({ recipient: OTHER })), ladderCtx)).toThrow(/minted to another address/)
+    expect(() => checkLadderPlan(ladder({ recipient: OTHER }), ladderCtx)).toThrow(/minted to another address/)
     const extra = [...ladderSteps(), { id: 'withdraw', allowlistId: 'realitio.withdraw', args: [] }]
     expect(() => checkLadderPlan(wirePlan('p-l', ACCOUNT, extra), ladderCtx)).toThrow(/may not call realitio.withdraw/)
+  })
+
+  it('SEC-LEGAL-03 refuses a tick range that sells YES below or above the requested prices', () => {
+    // YES at about 0.0001 sDAI: anyone could buy the wallet's YES for almost nothing.
+    expect(() => checkLadderPlan(ladder({ ticks: [-92_160, -92_100], init: getSqrtRatioAtTick(-92_160) - 1n }), ladderCtx)).toThrow(/outside the price range/)
+    // One tick spacing below the requested lower price, or above the upper one.
+    expect(() => checkLadderPlan(ladder({ ticks: [-30_000, -6_960], init: getSqrtRatioAtTick(-30_000) - 1n }), ladderCtx)).toThrow(/outside the price range/)
+    expect(() => checkLadderPlan(ladder({ ticks: [-29_940, -6_900] }), ladderCtx)).toThrow(/outside the price range/)
+    // A range at 0.9–0.95 when 0.05–0.5 was requested.
+    expect(() => checkLadderPlan(ladder({ ticks: [-1_020, -480], init: getSqrtRatioAtTick(-1_020) - 1n }), ladderCtx)).toThrow(/outside the price range/)
+  })
+
+  it('SEC-LEGAL-03 refuses a narrower range whose loss if YES resolves is above the acknowledged figure', () => {
+    // Inside the request but only at its bottom (0.050–0.051): almost the whole deposit is lost if YES resolves.
+    expect(() => checkLadderPlan(ladder({ ticks: [-29_940, -29_760] }), ladderCtx)).toThrow(/maximum loss/)
+  })
+
+  it('SEC-LEGAL-03 refuses a new pool initialised inside or above the range', () => {
+    expect(() => checkLadderPlan(ladder({ init: 1n << 96n }), ladderCtx)).toThrow(/new pool would start/)
+    expect(() => checkLadderPlan(ladder({ init: getSqrtRatioAtTick(TICKS[0]) }), ladderCtx)).toThrow(/new pool would start/)
+    expect(() => checkLadderPlan(ladder({ init: getSqrtRatioAtTick(-20_000) }), ladderCtx)).toThrow(/new pool would start/)
+  })
+
+  it('SEC-TX-03 refuses an approval or deposit above the acknowledged sets, and any sDAI-side deposit', () => {
+    expect(() => checkLadderPlan(ladder({ yes: 200n * XDAI }), ladderCtx)).toThrow(/exceeds the YES amount you acknowledged/)
+    expect(() => checkLadderPlan(ladder({ approve: SETS + 1n }), ladderCtx)).toThrow(/exceeds the YES amount you acknowledged/)
+    expect(() => checkLadderPlan(ladder({ approve: SETS - 1n }), ladderCtx)).toThrow(/approval differs from the YES the position deposits/)
+    expect(() => checkLadderPlan(ladder({ sdai: 5n * XDAI }), ladderCtx)).toThrow(/would deposit sDAI/)
+  })
+
+  it('refuses a minimum outside the slippage bound and a deadline that passed or lies far ahead', () => {
+    expect(() => checkLadderPlan(ladder({ yesMin: 0n }), ladderCtx)).toThrow(/slippage bound/)
+    expect(() => checkLadderPlan(ladder({ yesMin: SETS + 1n }), ladderCtx)).toThrow(/slippage bound/)
+    expect(() => checkLadderPlan(ladder({ deadline: BigInt(NOW_S) }), ladderCtx)).toThrow(/deadline/)
+    expect(() => checkLadderPlan(ladder({ deadline: BigInt(NOW_S + 86_400) }), ladderCtx)).toThrow(/deadline/)
+  })
+
+  it('refuses when the acknowledged range or figures are missing', () => {
+    expect(() => checkLadderPlan(ladder(), { ...ladderCtx, lowerPrice: 'undefined' })).toThrow(/acknowledged/)
+    expect(() => checkLadderPlan(ladder(), { ...ladderCtx, maxLossIfYesShares: -1n })).toThrow(/acknowledged/)
+    expect(() => checkLadderPlan(ladder(), { ...ladderCtx, maxYesAmount: 0n })).toThrow(/acknowledged/)
+  })
+
+  describe('with YES sorted after sDAI (YES = token1, pool price in YES per sDAI)', () => {
+    const YES1 = '0xc000000000000000000000000000000000000c0c' as Address
+    const ctx1: LadderPlanCheck = { ...ladderCtx, yesToken: YES1 }
+    const steps1 = (over: { ticks?: [number, number]; init?: bigint; tokens?: [Address, Address] } = {}) => {
+      const [tickLower, tickUpper] = over.ticks ?? [6_960, 29_940]
+      const [token0, token1] = over.tokens ?? [COLLATERAL, YES1]
+      return wirePlan('p-l1', ACCOUNT, [
+        { id: 'split', allowlistId: 'gnosisRouter.splitFromBase', args: [MARKET], value: 100n * XDAI },
+        { id: 'approve-yes', allowlistId: 'outcomeToken.approve', to: YES1, args: [PM, SETS], dependsOn: ['split'] },
+        { id: 'create-pool', allowlistId: 'positionManager.createAndInitializePoolIfNecessary', args: [token0, token1, over.init ?? 353_985_863_211_343_940_043_224_823_342n] },
+        {
+          id: 'mint-yes',
+          allowlistId: 'positionManager.mint',
+          args: [{ token0, token1, tickLower, tickUpper, amount0Desired: 0n, amount1Desired: SETS, amount0Min: 0n, amount1Min: minus50bps(SETS), recipient: ACCOUNT, deadline: BigInt(NOW_S + 1200) }],
+          dependsOn: ['approve-yes', 'create-pool'],
+        },
+      ])
+    }
+
+    it('accepts the backend ladder', () => {
+      expect(checkLadderPlan(steps1(), ctx1).steps).toHaveLength(4)
+    })
+
+    it('SEC-LEGAL-03 refuses a shifted range, a pool started below the range and swapped token order', () => {
+      expect(() => checkLadderPlan(steps1({ ticks: [6_960, 30_000], init: getSqrtRatioAtTick(30_000) + 1n }), ctx1)).toThrow(/outside the price range/)
+      expect(() => checkLadderPlan(steps1({ init: getSqrtRatioAtTick(6_960) - 1n }), ctx1)).toThrow(/new pool would start/)
+      expect(() => checkLadderPlan(steps1({ tokens: [YES1, COLLATERAL] }), ctx1)).toThrow(/YES\/sDAI pool/)
+    })
   })
 })
 
@@ -146,14 +308,14 @@ describe('checkExitPlan', () => {
 // Hooks
 // ---------------------------------------------------------------------------------------------------------------
 
-function statusFixture() {
+function statusFixture(currentQuestionId: Hex32 = QUESTION) {
   return {
     market: MARKET,
     questionId: QUESTION,
-    currentQuestionId: QUESTION,
-    reopened: false,
+    currentQuestionId,
+    reopened: currentQuestionId !== QUESTION,
     question: {
-      questionId: QUESTION,
+      questionId: currentQuestionId,
       openingTs: REVEAL_DEADLINE,
       minBond: (10n * XDAI).toString(),
       timeout: 302_400,
@@ -165,13 +327,13 @@ function statusFixture() {
       answeredByArbitrator: false,
       bounty: '0',
       reopenedBy: null,
-      reopens: null,
+      reopens: currentQuestionId !== QUESTION ? QUESTION : null,
       answerCount: 0,
     },
     originalQuestion: null,
     status: { state: 'open_unanswered' as const },
     phase: 'oracle_open' as const,
-    dueActions: [{ action: 'answer' as const, questionId: QUESTION, planRoute: '/api/v1/oracle/plans/submit-answer', details: { minimumBond: (10n * XDAI).toString(), maxPrevious: '0' } }],
+    dueActions: [{ action: 'answer' as const, questionId: currentQuestionId, planRoute: '/api/v1/oracle/plans/submit-answer', details: { minimumBond: (10n * XDAI).toString(), maxPrevious: '0' } }],
     chainReads: { historyHash: null, originalHistoryHash: null, balance: '0' },
     computedAt: NOW_S,
   }
@@ -182,7 +344,11 @@ const LADDER_PLAN = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
 
 let fake: FakePine
 let answerValue: (bond: bigint) => bigint
-let ladderApproveTo: Address
+let statusQuestion: Hex32
+let bountyQuestion: Hex32
+let ladderOver: LadderOver
+let fundingExpiresAt: number
+let clock: Date
 
 function marketsView(wire: ReturnType<typeof wirePlan>, state = 'planned') {
   return {
@@ -205,29 +371,29 @@ function marketsView(wire: ReturnType<typeof wirePlan>, state = 'planned') {
 }
 
 function fundingView(state = 'planned') {
-  const wire = wirePlan(LADDER_PLAN, ACCOUNT, ladderSteps({ approveTo: ladderApproveTo }))
+  const wire = wirePlan(LADDER_PLAN, ACCOUNT, ladderSteps(ladderOver))
   return {
     planId: LADDER_PLAN,
     kind: 'ladder',
     market: MARKET,
     account: ACCOUNT,
     state,
-    createdAt: new Date(NOW.getTime()).toISOString(),
-    expiresAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+    createdAt: NOW.toISOString(),
+    expiresAt: new Date(fundingExpiresAt).toISOString(),
     plan: wire,
-    details: { maxLossIfYes: { sdai: '55000000000000000000' } },
+    details: { maxLossIfYes: { sdai: LOSS.toString() } },
     steps: wire.steps.map((s) => ({ id: s.id, state: 'pending', txHashes: [], confirmedTxHash: null, revertReason: null })),
     recovery: null,
   }
 }
 
 const FIGURES = [
-  ['maxLossIfYesShares', '55000000000000000000'],
-  ['maxLossIfYesXdaiWei', '68750000000000000000'],
+  ['maxLossIfYesShares', LOSS.toString()],
+  ['maxLossIfYesXdaiWei', '83143560030427490794'],
   ['budgetWei', (100n * XDAI).toString()],
   ['sets', SETS.toString()],
-  ['finalLowerPrice', '0.0501'],
-  ['finalUpperPrice', '0.4998'],
+  ['finalLowerPrice', '0.050094186778981481'],
+  ['finalUpperPrice', '0.498592972568148699'],
 ].map(([name, message]) => ({ path: ['riskAcknowledgement', 'computed', name as string], message: message as string }))
 
 beforeAll(() => {
@@ -238,20 +404,30 @@ beforeEach(() => {
   localStorage.clear()
   __resetTxRunners()
   demoWalletStore.reset()
+  resetChain()
+  reads.length = 0
   answerValue = (bond) => bond
-  ladderApproveTo = YES
+  statusQuestion = QUESTION
+  bountyQuestion = QUESTION
+  ladderOver = {}
+  fundingExpiresAt = NOW.getTime() + 20 * 60_000
+  clock = NOW
   fake = new FakePine()
-    .on('GET', /^\/api\/v1\/markets\/[^/]+\/oracle$/, () => json(200, statusFixture()))
+    .on('GET', /^\/api\/v1\/markets\/[^/]+\/oracle$/, () => json(200, statusFixture(statusQuestion)))
     .on('POST', /^\/api\/v1\/oracle\/plans\/submit-answer$/, (req) => {
       const body = req.json as { outcome: string; bond: string }
       const wire = wirePlan(ORACLE_PLAN, ACCOUNT, [{ id: 'answer', allowlistId: 'realitio.submitAnswer', args: [QUESTION, ANSWER_NO, 0n], value: answerValue(BigInt(body.bond)) }])
       return json(201, marketsView(wire))
     })
+    .on('POST', /^\/api\/v1\/oracle\/plans\/fund-bounty$/, (req) => {
+      const body = req.json as { amount: string }
+      return json(201, marketsView(wirePlan(ORACLE_PLAN, ACCOUNT, [{ id: 'fund-bounty', allowlistId: 'realitio.fundAnswerBounty', args: [bountyQuestion], value: BigInt(body.amount) }])))
+    })
     .on('POST', /^\/api\/v1\/markets\/plans\/[^/]+\/submitted$/, () => json(200, marketsView(wirePlan(ORACLE_PLAN, ACCOUNT, [{ id: 'answer', allowlistId: 'realitio.submitAnswer', args: [QUESTION, ANSWER_NO, 0n], value: 10n * XDAI }]), 'submitted')))
     .on('GET', /^\/api\/v1\/markets\/plans\/[^/]+$/, () => json(200, marketsView(wirePlan(ORACLE_PLAN, ACCOUNT, [{ id: 'answer', allowlistId: 'realitio.submitAnswer', args: [QUESTION, ANSWER_NO, 0n], value: 10n * XDAI }]), 'confirmed')))
     .on('POST', /^\/api\/v1\/funding\/plans\/ladder$/, (req) => {
       const ack = (req.json as { riskAcknowledgement: { maxLossIfYesShares: string } }).riskAcknowledgement.maxLossIfYesShares
-      if (BigInt(ack) < 55n * XDAI) return apiError(409, 'CONFLICT', 'The maximum loss if YES resolves is now 55 … Review the figures and acknowledge again.', { issues: FIGURES })
+      if (BigInt(ack) < LOSS) return apiError(409, 'CONFLICT', 'The maximum loss if YES resolves is now 66 … Review the figures and acknowledge again.', { issues: FIGURES })
       return json(200, fundingView())
     })
     .on('POST', /^\/api\/v1\/funding\/plans\/[^/]+\/submitted$/, () => json(200, fundingView('submitted')))
@@ -266,7 +442,7 @@ afterEach(() => {
 
 describe('useApiOracle', () => {
   function render() {
-    return renderHook(() => ({ oracle: useApiOracle(MARKET, { sleep: noSleep, pollIntervalMs: 1 }), wallet: useWallet() }), { wrapper })
+    return renderHook(() => ({ oracle: useApiOracle(MARKET, { sleep: noSleep, pollIntervalMs: 1, now: () => clock }), wallet: useWallet() }), { wrapper })
   }
 
   it('answers with exactly the bond the user chose and reports the mined step', async () => {
@@ -286,6 +462,7 @@ describe('useApiOracle', () => {
     expect(req?.headers['idempotency-key']).toMatch(/^[A-Za-z0-9_-]{1,64}$/)
     const step = result.current.oracle.runner.runner.steps[0]
     expect(step?.request?.value).toBe((10n * XDAI).toString())
+    expect(step?.request?.from).toBe(ACCOUNT)
     expect(fake.of(/\/markets\/plans\/[^/]+\/submitted$/).map((r) => r.text)).toEqual([JSON.stringify({ stepId: 'answer', txHash: step?.txHash?.toLowerCase() })])
     await waitFor(() => expect(result.current.oracle.planState?.state).toBe('confirmed'))
   })
@@ -313,11 +490,99 @@ describe('useApiOracle', () => {
     expect(result.current.oracle.error?.message).toMatch(/at least twice the current bond/)
     expect(fake.of(/\/oracle\/plans\//)).toEqual([])
   })
+
+  it('SEC-TX-01 refuses to plan while the oracle status names a current question the chain does not', async () => {
+    // A compromised API claims the question was reopened as FOREIGN; Reality on the user's RPC says it was not.
+    statusQuestion = FOREIGN
+    bountyQuestion = FOREIGN
+    const { result } = render()
+    act(() => result.current.wallet.connect())
+    await waitFor(() => expect(result.current.oracle.status?.currentQuestionId).toBe(FOREIGN))
+    await waitFor(() => expect(result.current.oracle.claim).not.toBeNull())
+    await act(async () => {
+      void result.current.oracle.fundBounty(500n * XDAI)
+    })
+    await waitFor(() => expect(result.current.oracle.error?.action).toBe('retry_later'))
+    expect(result.current.oracle.error?.message).toMatch(/does not match the question on chain/)
+    expect(reads).toContain(`reopened_questions:${QUESTION}`)
+    expect(fake.of(/\/oracle\/plans\//)).toEqual([])
+    expect(result.current.oracle.runner.runner.steps).toEqual([])
+    expect(fake.of(/\/submitted$/)).toEqual([])
+  })
+
+  it('SEC-TX-01 blocks a bounty for a question other than the one Reality reports, before any wallet prompt', async () => {
+    chainReopened.set(QUESTION, REOPENED)
+    statusQuestion = REOPENED
+    bountyQuestion = FOREIGN
+    const { result } = render()
+    act(() => result.current.wallet.connect())
+    await waitFor(() => expect(result.current.oracle.status?.currentQuestionId).toBe(REOPENED))
+    await waitFor(() => expect(result.current.oracle.claim).not.toBeNull())
+    await act(async () => {
+      void result.current.oracle.fundBounty(500n * XDAI)
+    })
+    await waitFor(() => expect(result.current.oracle.error?.code).toBe('PLAN_REJECTED'))
+    expect(result.current.oracle.error?.message).toMatch(/another question/)
+    expect(result.current.oracle.runner.runner.steps).toEqual([])
+    expect(fake.of(/\/submitted$/)).toEqual([])
+  })
+
+  it('funds the bounty of the replacement question Reality reports on chain', async () => {
+    chainReopened.set(QUESTION, REOPENED)
+    statusQuestion = REOPENED
+    bountyQuestion = REOPENED
+    const { result } = render()
+    act(() => result.current.wallet.connect())
+    await waitFor(() => expect(result.current.oracle.status?.currentQuestionId).toBe(REOPENED))
+    await waitFor(() => expect(result.current.oracle.claim).not.toBeNull())
+    await act(async () => {
+      void result.current.oracle.fundBounty(500n * XDAI)
+    })
+    await waitFor(() => expect(result.current.oracle.runner.runner.state).toBe('done'))
+    expect(result.current.oracle.runner.plan?.steps[0]?.args).toEqual([REOPENED])
+    expect(fake.of(/\/markets\/plans\/[^/]+\/submitted$/)).toHaveLength(1)
+  })
+
+  it('SEC-TX-08 never sends a stored plan after its offer expired, through run() or the runner itself', async () => {
+    const { result } = render()
+    act(() => result.current.wallet.connect())
+    await waitFor(() => expect(result.current.oracle.status).not.toBeNull())
+    demoWalletStore.failNext() // the user rejects the first wallet prompt
+    await act(async () => {
+      void result.current.oracle.submitAnswer('no', 10n * XDAI)
+    })
+    await waitFor(() => expect(result.current.oracle.runner.runner.state).toBe('failed'))
+    expect(result.current.oracle.runner.expiresAt).toBe((NOW_S + 3_600) * 1000)
+
+    clock = new Date((NOW_S + 3_600) * 1000) // the offer ends
+    await act(async () => {
+      await result.current.oracle.runner.run()
+    })
+    expect(result.current.oracle.runner.error).toMatch(/offer has expired/)
+    await act(async () => {
+      await result.current.oracle.runner.runner.retry()
+    })
+    const step = result.current.oracle.runner.runner.steps[0]
+    expect(step?.status).toBe('failed')
+    expect(step?.error).toMatch(/offer has expired/)
+    expect(step?.txHash).toBeUndefined()
+    expect(fake.of(/\/oracle\/plans\//)).toHaveLength(1)
+    expect(fake.of(/\/submitted$/)).toEqual([])
+
+    // Before the end of the offer, the same stored plan is sent (no new plan is requested).
+    clock = new Date((NOW_S + 3_599) * 1000)
+    await act(async () => {
+      await result.current.oracle.runner.run()
+    })
+    await waitFor(() => expect(result.current.oracle.runner.runner.state).toBe('done'))
+    expect(fake.of(/\/oracle\/plans\//)).toHaveLength(1)
+    expect(fake.of(/\/submitted$/)).toHaveLength(1)
+  })
 })
 
 describe('useApiFunding', () => {
   function render() {
-    return renderHook(() => ({ funding: useApiFunding(MARKET, { sleep: noSleep, pollIntervalMs: 1 }), wallet: useWallet() }), { wrapper })
+    return renderHook(() => ({ funding: useApiFunding(MARKET, { sleep: noSleep, pollIntervalMs: 1, now: () => clock }), wallet: useWallet() }), { wrapper })
   }
 
   async function quoted(result: ReturnType<typeof render>['result']) {
@@ -327,8 +592,19 @@ describe('useApiFunding', () => {
       await result.current.funding.quoteLadder({ budgetWei: 100n * XDAI, lowerPrice: '0.05', upperPrice: '0.5' })
     })
     const quote = result.current.funding.quote
-    expect(quote).toMatchObject({ maxLossIfYesShares: '55000000000000000000', finalLowerPrice: '0.0501', requestedLowerPrice: '0.05' })
+    expect(quote).toMatchObject({ maxLossIfYesShares: LOSS.toString(), sets: SETS.toString(), finalLowerPrice: '0.050094186778981481', requestedLowerPrice: '0.05' })
     return quote!
+  }
+
+  async function fundRejected(result: ReturnType<typeof render>['result']) {
+    const quote = await quoted(result)
+    await act(async () => {
+      void result.current.funding.fund({ quote, spendingLimitWei: 200n * XDAI })
+    })
+    await waitFor(() => expect(result.current.funding.error?.code).toBe('PLAN_REJECTED'))
+    expect(result.current.funding.runner.runner.steps).toEqual([])
+    expect(fake.of(/\/submitted$/)).toEqual([])
+    return result.current.funding.error?.message ?? ''
   }
 
   it('SEC-LEGAL-03 shows the computed figures first, then funds exactly what the user acknowledged', async () => {
@@ -342,12 +618,14 @@ describe('useApiFunding', () => {
     })
     await waitFor(() => expect(result.current.funding.runner.runner.state).toBe('done'))
     const [, planReq] = fake.of(/\/funding\/plans\/ladder$/)
-    expect(planReq?.json).toEqual({ market: MARKET, budgetWei: (100n * XDAI).toString(), lowerPrice: '0.05', upperPrice: '0.5', riskAcknowledgement: { budgetWei: (100n * XDAI).toString(), maxLossIfYesShares: '55000000000000000000' } })
+    expect(planReq?.json).toEqual({ market: MARKET, budgetWei: (100n * XDAI).toString(), lowerPrice: '0.05', upperPrice: '0.5', riskAcknowledgement: { budgetWei: (100n * XDAI).toString(), maxLossIfYesShares: LOSS.toString() } })
     expect(planReq?.headers['idempotency-key']).not.toBe(quoteReq?.headers['idempotency-key'])
     const steps = result.current.funding.runner.runner.steps
     expect(fake.of(/\/funding\/plans\/[^/]+\/submitted$/).map((r) => r.text)).toEqual(
       ['split', 'approve-yes', 'create-pool', 'mint-yes'].map((id, i) => JSON.stringify({ stepId: id, txHash: steps[i]?.txHash?.toLowerCase() })),
     )
+    // The offer ends at the mint deadline (now + 20 min), the earlier of the two.
+    expect(result.current.funding.runner.expiresAt).toBe((NOW_S + 1200) * 1000)
     await waitFor(() => expect(result.current.funding.plan?.state).toBe('confirmed'))
   })
 
@@ -362,14 +640,48 @@ describe('useApiFunding', () => {
   })
 
   it('SEC-TX-03 blocks a ladder that approves another token before any wallet prompt', async () => {
-    ladderApproveTo = NO
+    ladderOver = { approveTo: NO }
+    await fundRejected(render().result)
+  })
+
+  it('SEC-LEGAL-03 blocks a ladder with a tampered tick range before any wallet prompt', async () => {
+    ladderOver = { ticks: [-92_160, -92_100], init: getSqrtRatioAtTick(-92_160) - 1n }
+    expect(await fundRejected(render().result)).toMatch(/outside the price range/)
+  })
+
+  it('SEC-LEGAL-03 blocks a ladder whose new pool starts inside the range before any wallet prompt', async () => {
+    ladderOver = { init: getSqrtRatioAtTick(-20_000) }
+    expect(await fundRejected(render().result)).toMatch(/new pool would start/)
+  })
+
+  it('SEC-TX-03 blocks a ladder approving more than the acknowledged sets (up to the spending limit) before any wallet prompt', async () => {
+    ladderOver = { yes: 200n * XDAI }
+    expect(await fundRejected(render().result)).toMatch(/exceeds the YES amount you acknowledged/)
+  })
+
+  it('SEC-LEGAL-03 blocks a ladder that deposits sDAI before any wallet prompt', async () => {
+    ladderOver = { sdai: 5n * XDAI }
+    expect(await fundRejected(render().result)).toMatch(/would deposit sDAI/)
+  })
+
+  it('SEC-TX-08 sends nothing more of a ladder once its mint deadline passed, although the offer still runs', async () => {
+    fundingExpiresAt = NOW.getTime() + 60 * 60_000
     const { result } = render()
     const quote = await quoted(result)
+    demoWalletStore.failNext() // the user rejects the split
     await act(async () => {
       void result.current.funding.fund({ quote, spendingLimitWei: 200n * XDAI })
     })
-    await waitFor(() => expect(result.current.funding.error?.code).toBe('PLAN_REJECTED'))
-    expect(result.current.funding.runner.runner.steps).toEqual([])
+    await waitFor(() => expect(result.current.funding.runner.runner.state).toBe('failed'))
+    expect(result.current.funding.runner.expiresAt).toBe((NOW_S + 1200) * 1000)
+
+    clock = new Date((NOW_S + 1200) * 1000)
+    await act(async () => {
+      await result.current.funding.runner.run()
+    })
+    expect(result.current.funding.runner.error).toMatch(/offer has expired/)
+    expect(result.current.funding.runner.runner.steps.every((s) => !s.txHash)).toBe(true)
+    expect(fake.of(/\/funding\/plans\/ladder$/)).toHaveLength(2)
     expect(fake.of(/\/submitted$/)).toEqual([])
   })
 })
