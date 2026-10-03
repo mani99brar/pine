@@ -10,7 +10,7 @@ import { HashChip } from '@/components/ui/interactive'
 import { Container, Notice } from '@/components/ui/primitives'
 import { SafeMarkdown } from '@/components/ui/SafeMarkdown'
 import { FAMILY_VAR } from '@/lib/crystal'
-import { getPolicyServer } from '@/lib/server/data'
+import { getPolicyServerStrict } from '@/lib/server/data'
 import { PolicyClaims } from './PolicyClaims'
 
 type Params = { params: Promise<{ id: string }> }
@@ -19,7 +19,8 @@ type Params = { params: Promise<{ id: string }> }
 async function findPolicy(id: string, version?: string): Promise<PolicyVersion | null> {
   if (readPineEnv().dataSource !== 'api') return getPolicy(id, version) ?? null
   await connection()
-  return getPolicyServer(id, version)
+  // A backend outage throws (error page, retried later) instead of turning a valid policy into a 404.
+  return getPolicyServerStrict(id, version)
 }
 
 export async function generateMetadata({ params }: Params): Promise<Metadata> {
@@ -72,7 +73,13 @@ export default async function PolicyPage({ params }: Params) {
         <p className="flex flex-wrap items-center gap-2 text-[0.9375rem]" style={{ color: FAMILY_VAR[p.family] }}>
           <FamilyIcon family={p.family} size={20} />
           <span className="text-lumen-2">{fam?.name}</span>
-          {gated ? <span className="tag border-[rgba(183,154,255,0.45)] text-ca">Gated</span> : <span className="tag text-lumen-2">Enabled</span>}
+          {gated ? (
+            <span className="tag border-[rgba(183,154,255,0.45)] text-ca">Gated</span>
+          ) : p.status === 'draft' ? (
+            <span className="tag text-lumen-2">Draft text</span>
+          ) : (
+            <span className="tag text-lumen-2">Enabled</span>
+          )}
         </p>
         <h1 className="t-h1 chroma mt-3">
           {p.id}@{p.version}: {p.title}

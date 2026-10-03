@@ -37,6 +37,9 @@ jobs:
         run: |
           corepack enable
           pnpm --version
+      - name: Backend workspace install (the verifier parity tests import packages/shared with its dependencies)
+        working-directory: .
+        run: pnpm install --frozen-lockfile
       - name: Install (frozen lockfile)
         run: pnpm install --frozen-lockfile
       - name: Vendored plan verifier equals packages/shared

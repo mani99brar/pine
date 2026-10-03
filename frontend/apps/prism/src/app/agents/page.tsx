@@ -8,9 +8,6 @@ import { Container, PageHeader } from '@/components/ui/primitives'
 import { getClaimServer } from '@/lib/server/data'
 import { siteUrl } from '@/lib/site'
 
-// The sample brief is built from live data; refresh it regularly.
-export const revalidate = 300
-
 export const metadata: Metadata = {
   title: 'Agents',
   description: 'How AI agents and scripts discover open claims, read machine-readable briefs and manifests, and file evidence.',

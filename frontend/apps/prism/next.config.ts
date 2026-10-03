@@ -39,18 +39,25 @@ const X402_OPTIONAL = [
 const emptyShim = './src/lib/shims/x402.js'
 
 /**
- * Backend routes served on the web app's own origin. In production the edge proxy routes these paths to pine-api
- * before Next.js sees them (deploy/proxy); for local development and e2e (`NEXT_PUBLIC_PINE_DATA_SOURCE=api` with
- * `PINE_API_INTERNAL_URL`), Next.js proxies them itself so the session cookie, CSRF Origin and SIWE domain all see
- * one origin. `beforeFiles` makes them win over the app's own handlers (e.g. /.well-known/pine.json).
+ * Local development only: Next.js proxies the backend's same-origin paths to pine-api, so the session cookie, the CSRF
+ * Origin and the SIWE domain all see one origin. In production the edge proxy routes these paths to pine-api before
+ * Next.js sees them (deploy/proxy), and this proxy must not exist: Next matches rewrites case-insensitively, so it would
+ * let /API/v1/... bypass the edge's API location (and its header handling). Enabled only by PINE_DEV_PROXY=1 (written by
+ * scripts/dev-stack/up.sh), and refused for any non-loopback site. `beforeFiles` makes the paths win over the app's
+ * own handlers (e.g. /.well-known/pine.json).
  */
 const BACKEND_PATHS = ['/api/v1/:path*', '/api/openapi.json', '/.well-known/pine.json', '/healthz', '/readyz']
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
 
 function backendRewrites(): { source: string; destination: string }[] {
-  if ((process.env.NEXT_PUBLIC_PINE_DATA_SOURCE ?? '').toLowerCase() !== 'api') return []
+  if (process.env.PINE_DEV_PROXY !== '1') return []
+  const site = process.env.NEXT_PUBLIC_SITE_URL ?? process.env.NEXT_PUBLIC_PINE_SITE_URL ?? 'http://localhost:3004'
   const raw = process.env.PINE_API_INTERNAL_URL
-  if (!raw) return []
+  if (!raw) throw new Error('PINE_DEV_PROXY=1 needs PINE_API_INTERNAL_URL')
   const url = new URL(raw)
+  if (!LOOPBACK.has(new URL(site).hostname) || !LOOPBACK.has(url.hostname)) {
+    throw new Error('PINE_DEV_PROXY=1 is for local development only (site and API must be loopback)')
+  }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('PINE_API_INTERNAL_URL must be an http(s) URL')
   if (url.username || url.password || url.search || url.hash) throw new Error('PINE_API_INTERNAL_URL must be a bare origin')
   return BACKEND_PATHS.map((source) => ({ source, destination: `${url.origin}${source}` }))
