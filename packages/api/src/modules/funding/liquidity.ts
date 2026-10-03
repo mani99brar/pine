@@ -1,5 +1,6 @@
 // Market liquidity state (PRD-04 3.1): YES and NO pools against sDAI, spot prices in sDAI and xDAI, and executable
-// depth from the Algebra Quoter, all read at one pinned block. Public and cookie-free; cached per market for 30 s.
+// depth from the Algebra Quoter, all read at one pinned block. Public and cookie-free; cached per market for 30 s, and
+// cache misses are capped by the route's own fan-out limiter (PRD-07 section 3).
 
 import { z } from "zod";
 import type { DeploymentManifest } from "@pine/shared/deployment";
@@ -8,13 +9,16 @@ import type { Address } from "@pine/shared/types";
 import type { AppContext } from "../../contracts/app.js";
 import { ApiError } from "../../contracts/errors.js";
 import { chainReader, type ChainReader } from "./chain.js";
-import { addressSchema, PRICE_LABEL, PUBLIC_ROUTE, requireClaim, TtlCache, XDAI, type ZodApp } from "./common.js";
+import { addressSchema, FanOutLimiter, PRICE_LABEL, PUBLIC_ROUTE, requireClaim, TtlCache, XDAI, type ZodApp } from "./common.js";
 import { formatWad, outcomePriceWad, sharesToAssetsFloor, WAD } from "./math.js";
 
 /** Depth probes: buying 1, 10 and 100 xDAI worth of the outcome (PRD-04 3.1). */
 export const DEPTH_PROBES_XDAI: readonly bigint[] = [1n * XDAI, 10n * XDAI, 100n * XDAI];
 export const LIQUIDITY_CACHE_TTL_MS = 30_000;
 const LIQUIDITY_CACHE_MAX_ENTRIES = 1_000;
+/** Concurrent cache misses that may fan out to RPC (per process, this route only); the next one is refused with 429. */
+export const LIQUIDITY_MAX_IN_FLIGHT = 4;
+export const LIQUIDITY_RETRY_AFTER_SECONDS = 2;
 
 export interface DepthQuote {
   xdaiIn: string;
@@ -124,6 +128,7 @@ export function registerLiquidityRoutes(deps: { app: ZodApp; ctx: AppContext; ma
   const { app, ctx, manifest } = deps;
   // Per-market cache, bounded in size, expiring by ctx.clock.
   const cache = new TtlCache<Address, LiquidityResponse>(LIQUIDITY_CACHE_TTL_MS, LIQUIDITY_CACHE_MAX_ENTRIES);
+  const limiter = new FanOutLimiter(LIQUIDITY_MAX_IN_FLIGHT, LIQUIDITY_RETRY_AFTER_SECONDS);
   app.get(
     "/api/v1/markets/:market/liquidity",
     { config: PUBLIC_ROUTE, schema: { params: z.object({ market: addressSchema }).strict() } },
@@ -133,7 +138,8 @@ export function registerLiquidityRoutes(deps: { app: ZodApp; ctx: AppContext; ma
       let body = cache.get(market, nowMs);
       if (!body) {
         const claim = await requireClaim(ctx, manifest, market);
-        body = await readLiquidity(ctx, manifest, claim);
+        // Checked after the cache lookup: cached answers are never refused; a refused miss caches nothing.
+        body = await limiter.run(() => readLiquidity(ctx, manifest, claim));
         cache.set(market, body, nowMs);
       }
       void reply.header("cache-control", `public, max-age=${LIQUIDITY_CACHE_TTL_MS / 1000}`);

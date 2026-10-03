@@ -7,7 +7,7 @@ import type { DeploymentManifest } from "@pine/shared/deployment";
 import type { AppContext, RouteModule } from "../../contracts/app.js";
 import { registerAccountRoutes } from "./accounts.js";
 import { assertConfig, BoundedCache, FanOutLimiter, manifestOf, withZod, type MarketsState } from "./common.js";
-import { EVIDENCE_LIST_CACHE_ENTRIES, EVIDENCE_LIST_CACHE_SECONDS, registerEvidenceBrowseRoutes } from "./evidence-browse.js";
+import { EVIDENCE_LIST_CACHE_ENTRIES, EVIDENCE_LIST_CACHE_SECONDS, registerEvidenceBrowseRoutes, RETRIEVE_MAX_IN_FLIGHT, RETRIEVE_RETRY_AFTER_SECONDS } from "./evidence-browse.js";
 import { registerEvidenceContentRoutes } from "./evidence-content.js";
 import { registerEvidencePlanRoutes } from "./evidence-plans.js";
 import { registerNotificationRoutes, watchJob } from "./notifications.js";
@@ -16,13 +16,14 @@ import { ORACLE_CACHE_ENTRIES, ORACLE_CACHE_SECONDS, ORACLE_MAX_IN_FLIGHT, ORACL
 import { registerPlanRoutes } from "./plans.js";
 import { reconcileJob } from "./reconcile.js";
 
-/** Fresh per-process state of the module: the verified manifest, the public-route caches and the RPC fan-out limiter. */
+/** Fresh per-process state of the module: the verified manifest, the public-route caches and the fan-out limiters. */
 export function createMarketsState(manifest: DeploymentManifest): MarketsState {
   return {
     manifest,
     retrievableCache: new Map(),
     oracleCache: new BoundedCache(ORACLE_CACHE_SECONDS, ORACLE_CACHE_ENTRIES),
     oracleFanOut: new FanOutLimiter(ORACLE_MAX_IN_FLIGHT, ORACLE_RETRY_AFTER_SECONDS),
+    retrieveFanOut: new FanOutLimiter(RETRIEVE_MAX_IN_FLIGHT, RETRIEVE_RETRY_AFTER_SECONDS),
     evidenceCache: new BoundedCache(EVIDENCE_LIST_CACHE_SECONDS, EVIDENCE_LIST_CACHE_ENTRIES),
   };
 }

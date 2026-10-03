@@ -41,7 +41,9 @@ export interface MarketsState {
   oracleCache: BoundedCache<unknown>;
   /** At most this many oracle-status cache misses fan out to RPC at once (PRD-04 4b). */
   oracleFanOut: FanOutLimiter;
-  /** Public evidence listings, keyed by market, status and cursor (10 s). */
+  /** At most this many evidence-detail `retrievable` cache misses reach the content store's gateways at once (PRD-07). */
+  retrieveFanOut: FanOutLimiter;
+  /** Read-model pages of public evidence listings, keyed by market, status and cursor (10 s); never rendered output. */
   evidenceCache: BoundedCache<unknown>;
 }
 
@@ -249,15 +251,19 @@ export function toJsonValue(value: unknown): JsonValue {
   throw new Error("value is not JSON-representable");
 }
 
+/** Cache-Control value of a public response that shared caches may keep for `seconds`. */
+export const publicMaxAge = (seconds: number): string => `public, max-age=${seconds}`;
+
 /**
- * Sends a public, cookie-free response with a strong ETag over the exact JSON body (304 on If-None-Match). Handlers
- * that call this never read request.session, so the output is identical with or without credentials.
+ * Sends a public, cookie-free response with a strong ETag over the exact JSON body (304 on If-None-Match) and the given
+ * Cache-Control (`no-store` for responses carrying moderated content, SEC-EVID-11). Handlers that call this never read
+ * request.session, so the output is identical with or without credentials.
  */
-export function sendPublic(request: FastifyRequest, reply: FastifyReply, body: unknown, maxAgeSeconds = 15): FastifyReply {
+export function sendPublic(request: FastifyRequest, reply: FastifyReply, body: unknown, cacheControl: string = publicMaxAge(15)): FastifyReply {
   const json = JSON.stringify(toJsonValue(body));
   const etag = `"${createHash("sha256").update(json).digest("base64url")}"`;
   void reply.header("etag", etag);
-  void reply.header("cache-control", `public, max-age=${maxAgeSeconds}`);
+  void reply.header("cache-control", cacheControl);
   const match = request.headers["if-none-match"];
   if (typeof match === "string" && match.split(",").some((value) => value.trim() === etag)) return reply.status(304).send();
   return reply.type("application/json; charset=utf-8").send(json);

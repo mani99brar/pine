@@ -7,8 +7,9 @@ import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { planToWire, type TxPlan, type WireTxPlan } from "@pine/shared/tx-plan";
 import type { Address, Hex32 } from "@pine/shared/types";
-import type { AppContext, ComplianceAction, SessionInfo } from "../../contracts/app.js";
+import type { AppContext, AuditEntry, ComplianceAction, SessionInfo } from "../../contracts/app.js";
 import { ApiError } from "../../contracts/errors.js";
+import { flushAuditInBackground, queueAuditFrom } from "./audit.js";
 import { assertReadModelReady, auditIp, canonicalHash, DAY, isoSeconds, nowSeconds, sessionOf, type MarketsRouteDeps } from "./common.js";
 import { fromJson, fromMs, jsonb, msOf, one, rows, sql, toNumber, ts, type Executor } from "./db.js";
 
@@ -181,14 +182,15 @@ export async function hintsOf(db: Executor, planId: string): Promise<TxHint[]> {
   return list.map((row) => ({ stepId: row.step_id, txHash: row.tx_hash as Hex32, status: row.status, reason: row.reason }));
 }
 
-/** Compare-and-set transition; success only from RETURNING rows. Null when another writer moved the plan first. */
-export async function transitionPlan(db: Executor, id: string, from: readonly PlanState[], to: PlanState, now: Date): Promise<PlanRow | null> {
-  const row = await one<RawPlan>(
-    db,
-    sql`UPDATE markets_plans SET state = ${to}, updated_at = ${ts(now)}
+/**
+ * Compare-and-set transition; success only from RETURNING rows. Null when another writer moved the plan first. With
+ * `audit`, the entry is queued in the audit outbox by the same statement, only when the transition happened.
+ */
+export async function transitionPlan(db: Executor, id: string, from: readonly PlanState[], to: PlanState, now: Date, audit?: AuditEntry): Promise<PlanRow | null> {
+  const moved = sql`UPDATE markets_plans SET state = ${to}, updated_at = ${ts(now)}
         WHERE id = ${id}::uuid AND state IN (SELECT jsonb_array_elements_text(${JSON.stringify(from)}::jsonb))
-        RETURNING ${planColumns}`,
-  );
+        RETURNING ${planColumns}`;
+  const row = await one<RawPlan>(db, audit ? sql`WITH moved AS (${moved}), queued AS (${queueAuditFrom(sql`moved`, audit, now)}) SELECT * FROM moved` : moved);
   return row ? toPlanRow(row) : null;
 }
 
@@ -234,6 +236,8 @@ export interface PlanRequest {
  * plans_per_day -> build and verify (eth_call reads happen only here) -> one INSERT ... ON CONFLICT DO NOTHING
  * (conflict: the winner's plan). A NOT_READY refusal burns no quota, an exhausted quota makes no RPC call, and
  * QUOTA_EXCEEDED never leaves a stored plan; a build refused after the quota was consumed keeps that unit spent.
+ * The `markets.plan.created` entry is queued in the audit outbox by the insert statement itself; a flush is started
+ * (not awaited) after the insert and on every same-key replay.
  */
 export async function createOrReplayPlan(ctx: AppContext, request: FastifyRequest, input: PlanRequest): Promise<{ statusCode: 200 | 201; body: Awaited<ReturnType<typeof planView>> }> {
   const session = sessionOf(request);
@@ -242,6 +246,7 @@ export async function createOrReplayPlan(ctx: AppContext, request: FastifyReques
   const bodyHash = canonicalHash(input.body);
   const replay = async (row: PlanRow) => {
     if (row.bodyHash !== bodyHash) throw new ApiError("CONFLICT", "This Idempotency-Key was used with a different request body; use a new key");
+    flushAuditInBackground(ctx, request.log);
     return { statusCode: 200 as const, body: await planView(ctx.db, row, nowSeconds(ctx)) };
   };
   const existing = await findByKey(ctx.db, session.userId, input.route, key);
@@ -257,6 +262,14 @@ export async function createOrReplayPlan(ctx: AppContext, request: FastifyReques
   const expiresAt = Math.min(built.expiresAt, nowSeconds(ctx) + PLAN_MAX_TTL_SECONDS);
   const wire = planToWire(built.plan);
   const steps = wire.steps.map((step, ord) => ({ step_id: step.id, ord, allowlist_id: step.allowlistId, to_address: step.to, data: step.data.toLowerCase(), value: step.value }));
+  const created: AuditEntry = {
+    actorUserId: session.userId,
+    action: "markets.plan.created",
+    subjectType: "markets_plan",
+    subjectId: planId,
+    details: { route: input.route, kind: built.kind, market: built.market, steps: steps.length },
+    ip: auditIp(request),
+  };
   const inserted = await one<{ id: string | null; steps: unknown }>(
     ctx.db,
     sql`WITH p AS (
@@ -270,18 +283,13 @@ export async function createOrReplayPlan(ctx: AppContext, request: FastifyReques
           SELECT p.id, x.step_id, x.ord, x.allowlist_id, x.to_address, x.data, x.value::numeric, 'pending'
           FROM p CROSS JOIN jsonb_to_recordset(${jsonb(steps)}) AS x(step_id text, ord int, allowlist_id text, to_address text, data text, value text)
           RETURNING plan_id
+        ), a AS (
+          ${queueAuditFrom(sql`p`, created, now)}
         )
         SELECT (SELECT id::text FROM p) AS id, (SELECT count(*)::int FROM s) AS steps`,
   );
   if (inserted?.id) {
-    await ctx.audit.record({
-      actorUserId: session.userId,
-      action: "markets.plan.created",
-      subjectType: "markets_plan",
-      subjectId: planId,
-      details: { route: input.route, kind: built.kind, market: built.market, steps: steps.length },
-      ip: auditIp(request),
-    });
+    flushAuditInBackground(ctx, request.log);
     const row = await findPlan(ctx.db, planId, session.userId);
     if (!row) throw new Error("stored plan disappeared");
     return { statusCode: 201, body: await planView(ctx.db, row, nowSeconds(ctx)) };
@@ -316,20 +324,26 @@ export function registerPlanRoutes({ app, ctx }: MarketsRouteDeps): void {
       if (!plan.wire.steps.some((step) => step.id === stepId)) throw new ApiError("NOT_FOUND", "Step not found in this plan");
       if ((OPEN_PLAN_STATES as readonly string[]).includes(plan.state)) {
         const now = ctx.clock.now();
-        // One statement: the per-step cap and the duplicate check cannot race.
+        const reported: AuditEntry = { actorUserId: session.userId, action: "markets.plan.tx_reported", subjectType: "markets_plan", subjectId: plan.id, details: { stepId, txHash }, ip: auditIp(request) };
+        // One statement: the per-step cap and the duplicate check cannot race, and only a NEW hint queues its audit entry.
         const added = await one<{ tx_hash: string }>(
           ctx.db,
-          sql`INSERT INTO markets_plan_txs (plan_id, step_id, tx_hash, status, reported_at)
-              SELECT ${plan.id}::uuid, ${stepId}, ${txHash}, 'unknown', ${ts(now)}
-              WHERE (SELECT count(*)::int FROM markets_plan_txs WHERE plan_id = ${plan.id}::uuid AND step_id = ${stepId}) < ${MAX_TX_HINTS_PER_STEP}
-              ON CONFLICT (plan_id, step_id, tx_hash) DO NOTHING
-              RETURNING tx_hash`,
+          sql`WITH added AS (
+                INSERT INTO markets_plan_txs (plan_id, step_id, tx_hash, status, reported_at)
+                SELECT ${plan.id}::uuid, ${stepId}, ${txHash}, 'unknown', ${ts(now)}
+                WHERE (SELECT count(*)::int FROM markets_plan_txs WHERE plan_id = ${plan.id}::uuid AND step_id = ${stepId}) < ${MAX_TX_HINTS_PER_STEP}
+                ON CONFLICT (plan_id, step_id, tx_hash) DO NOTHING
+                RETURNING tx_hash
+              ), queued AS (
+                ${queueAuditFrom(sql`added`, reported, now)}
+              )
+              SELECT tx_hash FROM added`,
         );
+        // A new hint or an idempotent replay: either way pending audit entries are flushed.
+        flushAuditInBackground(ctx, request.log);
         if (!added) {
           const known = await one<{ tx_hash: string }>(ctx.db, sql`SELECT tx_hash FROM markets_plan_txs WHERE plan_id = ${plan.id}::uuid AND step_id = ${stepId} AND tx_hash = ${txHash}`);
           if (!known) throw new ApiError("UNPROCESSABLE", `At most ${MAX_TX_HINTS_PER_STEP} transaction hashes can be reported per step`);
-        } else {
-          await ctx.audit.record({ actorUserId: session.userId, action: "markets.plan.tx_reported", subjectType: "markets_plan", subjectId: plan.id, details: { stepId, txHash }, ip: auditIp(request) });
         }
         const moved = await transitionPlan(ctx.db, plan.id, ["planned"], "submitted", now);
         if (moved) plan = moved;

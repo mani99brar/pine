@@ -1,7 +1,9 @@
 // Notifications (PRD-04 section 2.4, operator-settled routes under /api/v1/accounts/me): job markets.watch derives due
 // actions and deadline proximity from read-model facts only (no eth_call), at most 200 claims per run with a persisted
 // rotating cursor, and inserts idempotent rows (unique per user, claim, kind and target time) for the claim creator and
-// the evidence submitters that have a Pine account. Nothing is notified while the read model is stale or halted.
+// the evidence submitters that have a Pine account. Nothing is notified while the read model is stale or halted. The
+// abort signal is checked between listing pages and between claims; an aborted run keeps the persisted cursor, so the
+// claims it fetched but did not process are not skipped (the next run repeats them; inserts are idempotent).
 
 import { z } from "zod";
 import { deriveOracleStatus, InvalidCursorError, type ClaimRecord, type Page } from "@pine/shared/read-model";
@@ -122,6 +124,8 @@ export async function runWatch(ctx: AppContext, state: MarketsState, signal?: Ab
       inserted += added.length;
     }
   }
+  // Aborted: no further claim, and the cursor is not advanced past claims this run never processed.
+  if (signal?.aborted) return { claims: claims.length, inserted, skipped: false };
   // The cursor rotates: after the last page the next run starts again from the newest claim.
   await ctx.db.execute(
     sql`INSERT INTO markets_watch_state (id, cursor, updated_at) VALUES (1, ${cursor}, ${ts(ctx.clock.now())})

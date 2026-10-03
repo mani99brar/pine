@@ -9,8 +9,9 @@ import { z } from "zod";
 import { canonicalJson, identify, RAW_CID_MAX_BYTES } from "@pine/shared/canonical";
 import { encodeEvidenceManifest, EVIDENCE_MANIFEST_MAX_BYTES, evidenceManifestSchema, type EvidenceManifest } from "@pine/shared/evidence";
 import type { Hex32 } from "@pine/shared/types";
-import type { AppContext, SessionInfo } from "../../contracts/app.js";
+import type { AppContext, AuditEntry, SessionInfo } from "../../contracts/app.js";
 import { ApiError, type ErrorIssue } from "../../contracts/errors.js";
+import { flushAuditInBackground, queueAudit, queueAuditFrom } from "./audit.js";
 import { auditIp, requireClaim, sessionOf, toJsonValue, type MarketsRouteDeps, type MarketsState } from "./common.js";
 import { one, sql, toNumber, ts } from "./db.js";
 
@@ -48,32 +49,44 @@ async function previousUpload(ctx: AppContext, userId: string, sha256: Hex32): P
  * QuotaGateway has only consume(), so when the byte quota succeeds and the count quota refuses, those bytes stay spent
  * (a deterministic, self-inflicted gap bounded by the count quota; operator decision, PRD-04 4b). Then the bytes are
  * stored and the upload recorded (ON CONFLICT DO NOTHING). Two identical concurrent first uploads may both consume
- * (accepted).
+ * (accepted). The upload audit goes through the markets audit outbox (SEC-OPS-07): queued by the markets_uploads INSERT
+ * itself for a first upload, or by one outbox INSERT for a restored upload whose row already existed; a flush is then
+ * started without being awaited.
  */
 async function storeOnce(ctx: AppContext, request: FastifyRequest, session: SessionInfo, input: { bytes: Uint8Array; sha256: Hex32; kind: "manifest" | "artifact"; mediaType: string; maxBytes: number }): Promise<Upload> {
   const previous = await previousUpload(ctx, session.userId, input.sha256);
-  if (previous && (await ctx.contentStore.has(input.sha256))) return previous;
+  if (previous && (await ctx.contentStore.has(input.sha256))) {
+    flushAuditInBackground(ctx, request.log);
+    return previous;
+  }
   await ctx.quotas.consume(session.userId, "evidence_bytes_per_day", input.bytes.byteLength);
   await ctx.quotas.consume(session.userId, "evidence_uploads_per_day");
   const stored = await ctx.contentStore.put({ bytes: input.bytes, declaredMediaType: input.mediaType, maxBytes: input.maxBytes });
   if (stored.sha256.toLowerCase() !== input.sha256) throw new ApiError("INTEGRITY_FAILED", "Stored content does not match its digest");
+  const now = ctx.clock.now();
+  const uploaded: AuditEntry = {
+    actorUserId: session.userId,
+    action: `markets.evidence.${input.kind}_uploaded`,
+    subjectType: "content",
+    subjectId: input.sha256,
+    details: { size: input.bytes.byteLength, cid: stored.cid, restored: previous !== null },
+    ip: auditIp(request),
+  };
+  // Audited once per first upload (queued by the INSERT itself), and again when vanished content was stored (and paid
+  // for) anew: then the row already exists and one outbox INSERT queues the entry.
   const inserted = await one<{ sha256: string }>(
     ctx.db,
-    sql`INSERT INTO markets_uploads (user_id, sha256, cid, kind, size, created_at)
-        VALUES (${session.userId}::uuid, ${input.sha256}, ${stored.cid}, ${input.kind}, ${input.bytes.byteLength}, ${ts(ctx.clock.now())})
-        ON CONFLICT (user_id, sha256) DO NOTHING RETURNING sha256`,
+    sql`WITH added AS (
+          INSERT INTO markets_uploads (user_id, sha256, cid, kind, size, created_at)
+          VALUES (${session.userId}::uuid, ${input.sha256}, ${stored.cid}, ${input.kind}, ${input.bytes.byteLength}, ${ts(now)})
+          ON CONFLICT (user_id, sha256) DO NOTHING RETURNING sha256
+        ), queued AS (
+          ${queueAuditFrom(sql`added`, uploaded, now)}
+        )
+        SELECT sha256 FROM added`,
   );
-  // Audited once per first upload, and again when vanished content was stored (and paid for) anew.
-  if (inserted || previous) {
-    await ctx.audit.record({
-      actorUserId: session.userId,
-      action: `markets.evidence.${input.kind}_uploaded`,
-      subjectType: "content",
-      subjectId: input.sha256,
-      details: { size: input.bytes.byteLength, cid: stored.cid, restored: previous !== null },
-      ip: auditIp(request),
-    });
-  }
+  if (!inserted && previous) await ctx.db.execute(queueAudit(uploaded, now));
+  flushAuditInBackground(ctx, request.log);
   return { sha256: stored.sha256.toLowerCase() as Hex32, cid: stored.cid, size: stored.size };
 }
 

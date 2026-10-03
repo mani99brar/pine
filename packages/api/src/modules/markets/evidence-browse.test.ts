@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { rawCidFromSha256 } from "@pine/shared/canonical";
 import { encodeEvidenceManifest } from "@pine/shared/evidence";
 import type { Address, Hex32 } from "@pine/shared/types";
-import { timelinessOf } from "./evidence-browse.js";
+import { RETRIEVE_MAX_IN_FLIGHT, RETRIEVE_RETRY_AFTER_SECONDS, timelinessOf } from "./evidence-browse.js";
 import { createMarketsModule } from "./index.js";
 import { addClaim, buildMarketsTestApp, EVIDENCE_REGISTRY, exampleManifest, spyNetwork, storeManifest, useHarness, type Harness } from "./test/helpers.js";
 
@@ -256,5 +256,159 @@ describe("GET .../erc1497.json", () => {
     await commitAndReveal(h, claim.market, 2n, `0x${"96".repeat(32)}`, { committedAt: claim.createdAt, revealedAt: claim.createdAt + 1 });
     h.ctx.moderation.set("content", `0x${"96".repeat(32)}`, "block", "illegal");
     expect((await h.app.inject({ method: "GET", url: `/api/v1/markets/${claim.market}/evidence/${EVIDENCE_REGISTRY}/2/erc1497.json` })).statusCode).toBe(451);
+  });
+});
+
+describe("SEC-EVID-11 the listing caches only the read-model page (PRD-07 section 3)", () => {
+  it("SEC-EVID-11 blocking the evidence after a cached listing removes the manifest from the next listing; sent with no-store", async () => {
+    const h = harnessOf();
+    const claim = await addClaim(h, "x1");
+    const sha = await storeManifest(h, exampleManifest(claim, RESEARCHER));
+    await commitAndReveal(h, claim.market, 1n, sha, { committedAt: claim.createdAt, revealedAt: claim.createdAt + 5 });
+    const first = await list(h, claim.market);
+    expect(first.headers["cache-control"]).toBe("no-store");
+    expect(first.json().items[0]).toMatchObject({ manifest: { title: "Reporter deposit draws from the gas reserve" }, manifestError: null, moderation: null });
+    const listEvidence = vi.spyOn(h.ctx.readModel, "listEvidence");
+    h.ctx.moderation.set("evidence", `${EVIDENCE_REGISTRY}:1`, "block", "illegal content");
+    const next = await list(h, claim.market);
+    // The page still comes from the 10 s cache; moderation and the manifest are computed for this response.
+    expect(listEvidence).not.toHaveBeenCalled();
+    expect(next.headers["cache-control"]).toBe("no-store");
+    expect(next.json().items[0]).toMatchObject({ submissionId: "1", contentSha256: sha, manifest: null, manifestError: "blocked by moderation", availability: { stored: false }, moderation: { action: "block" } });
+    expect(next.body).not.toContain("Reporter deposit draws from the gas reserve");
+  });
+
+  it("SEC-EVID-11 blocking the content after a cached listing removes the manifest from the next listing", async () => {
+    const h = harnessOf();
+    const claim = await addClaim(h, "x2");
+    const sha = await storeManifest(h, exampleManifest(claim, RESEARCHER));
+    await commitAndReveal(h, claim.market, 1n, sha, { committedAt: claim.createdAt, revealedAt: claim.createdAt + 5 });
+    expect((await list(h, claim.market)).json().items[0].manifest).not.toBeNull();
+    h.ctx.moderation.set("content", sha, "block", "illegal content");
+    const next = await list(h, claim.market);
+    expect(next.json().items[0]).toMatchObject({ manifest: null, manifestError: "blocked by moderation", moderation: { action: "block" } });
+    expect(next.body).not.toContain("Reporter deposit draws from the gas reserve");
+  });
+
+  it("SEC-EVID-11 the detail and ERC-1497 routes are sent with no-store too", async () => {
+    const h = harnessOf();
+    const claim = await addClaim(h, "x3");
+    const sha = await storeManifest(h, exampleManifest(claim, RESEARCHER));
+    await commitAndReveal(h, claim.market, 1n, sha, { committedAt: claim.createdAt, revealedAt: claim.createdAt + 5 });
+    const url = `/api/v1/markets/${claim.market}/evidence/${EVIDENCE_REGISTRY}/1`;
+    expect((await h.app.inject({ method: "GET", url })).headers["cache-control"]).toBe("no-store");
+    expect((await h.app.inject({ method: "GET", url: `${url}/erc1497.json` })).headers["cache-control"]).toBe("no-store");
+  });
+});
+
+describe("evidence detail: retrieve fan-out cap (PRD-07 section 3)", () => {
+  it("caps concurrent retrieve cache misses at 4: a 5th is 429 at once and caches nothing; slots are released", async () => {
+    const h = harnessOf();
+    const claim = await addClaim(h, "f1");
+    const manifests = Array.from({ length: 5 }, (_, index) => encodeEvidenceManifest(exampleManifest(claim, RESEARCHER, { title: `Finding ${index + 1}` })));
+    for (const [index, manifest] of manifests.entries()) {
+      await commitAndReveal(h, claim.market, BigInt(index + 1), manifest.sha256, { committedAt: claim.createdAt, revealedAt: claim.createdAt + 5 });
+    }
+    const store = h.ctx.contentStore;
+    const realRetrieve = store.retrieve.bind(store);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let waiting = 0;
+    let retrieves = 0;
+    store.retrieve = async (sha256, maxBytes) => {
+      retrieves += 1;
+      waiting += 1;
+      await gate;
+      waiting -= 1;
+      return realRetrieve(sha256, maxBytes);
+    };
+    const detail = (id: number) => h.app.inject({ method: "GET", url: `/api/v1/markets/${claim.market}/evidence/${EVIDENCE_REGISTRY}/${id}` });
+    const inFlight = [1, 2, 3, 4].map((id) => detail(id));
+    await vi.waitFor(() => expect(waiting).toBe(4));
+    const refused = await detail(5);
+    expect(refused.statusCode).toBe(429);
+    expect(refused.json().error.code).toBe("RATE_LIMITED");
+    expect(refused.headers["retry-after"]).toBe(String(RETRIEVE_RETRY_AFTER_SECONDS));
+    // Refused before the content store was asked: no 5th retrieve is waiting.
+    expect(retrieves).toBe(4);
+    release();
+    expect((await Promise.all(inFlight)).map((response) => response.statusCode)).toEqual([200, 200, 200, 200]);
+    // No false `retrievable` was cached for the refused miss: the next request asks the store and sees the remote copy.
+    const fifth = manifests[4]!;
+    store.remote.set(fifth.sha256, fifth.bytes);
+    const served = await detail(5);
+    expect(served.statusCode).toBe(200);
+    expect(retrieves).toBe(5);
+    expect(served.json().submission.availability).toMatchObject({ retrievable: true });
+    expect(RETRIEVE_MAX_IN_FLIGHT).toBe(4);
+  });
+});
+
+describe("evidence detail and oracle status have separate fan-out limiters (PRD-07 3c)", () => {
+  const status = (h: Harness, market: Address, n: number) => h.app.inject({ method: "GET", url: `/api/v1/markets/${market}/oracle?account=0x${n.toString(16).padStart(40, "0")}` });
+  const detail = (h: Harness, market: Address, id: number) => h.app.inject({ method: "GET", url: `/api/v1/markets/${market}/evidence/${EVIDENCE_REGISTRY}/${id}` });
+
+  /** A claim past its reveal deadline (oracle status reads the chain) with five revealed submissions not stored locally. */
+  async function claimWithSubmissions(h: Harness, seed: string) {
+    const claim = await addClaim(h, seed);
+    for (let id = 1; id <= 5; id += 1) {
+      const manifest = encodeEvidenceManifest(exampleManifest(claim, RESEARCHER, { title: `Separate ${id}` }));
+      await commitAndReveal(h, claim.market, BigInt(id), manifest.sha256, { committedAt: claim.createdAt, revealedAt: claim.createdAt + 5 });
+    }
+    h.b.nextBlock(claim.revealDeadline + 10 - h.b.now());
+    h.at(h.b.now());
+    await h.fresh();
+    return claim;
+  }
+
+  it("four oracle misses holding every slot of the oracle limiter leave the evidence detail retrieve its own slot", async () => {
+    const h = harnessOf();
+    const claim = await claimWithSubmissions(h, "sep1");
+    const held = h.chain.hold();
+    try {
+      const inFlight = [1, 2, 3, 4].map((n) => status(h, claim.market, n));
+      await vi.waitFor(() => expect(held.waiting()).toBe(4));
+      // The oracle limiter is full ...
+      expect((await status(h, claim.market, 5)).statusCode).toBe(429);
+      // ... and the detail route's cache miss still calls the content store.
+      const served = await detail(h, claim.market, 1);
+      expect(served.statusCode, served.body).toBe(200);
+      expect(served.json().submission.availability).toMatchObject({ retrievable: false });
+      held.release();
+      expect((await Promise.all(inFlight)).map((response) => response.statusCode)).toEqual([200, 200, 200, 200]);
+    } finally {
+      held.release();
+    }
+  });
+
+  it("four retrieve misses holding every slot of the retrieve limiter leave the oracle status its own slot", async () => {
+    const h = harnessOf();
+    const claim = await claimWithSubmissions(h, "sep2");
+    const store = h.ctx.contentStore;
+    const realRetrieve = store.retrieve.bind(store);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let waiting = 0;
+    store.retrieve = async (sha256, maxBytes) => {
+      waiting += 1;
+      await gate;
+      return realRetrieve(sha256, maxBytes);
+    };
+    try {
+      const inFlight = [1, 2, 3, 4].map((id) => detail(h, claim.market, id));
+      await vi.waitFor(() => expect(waiting).toBe(4));
+      expect((await detail(h, claim.market, 5)).statusCode).toBe(429);
+      const served = await status(h, claim.market, 1);
+      expect(served.statusCode, served.body).toBe(200);
+      expect(served.json().questionId).toBe(claim.questionId);
+      release();
+      expect((await Promise.all(inFlight)).map((response) => response.statusCode)).toEqual([200, 200, 200, 200]);
+    } finally {
+      release();
+    }
   });
 });
