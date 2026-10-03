@@ -188,6 +188,15 @@ Contracts are immutable once deployed, so every contract change here lands befor
 - `outboxSelect` generates the outbox id per row (`gen_random_uuid()` in SQL, or one id per returned row), not one constant;
   test with a source returning two rows.
 
+## 3g. hardening-cl-003 review fixes (carried by hardening-cl-004; claims)
+- Test (coverage P1): a raw-inject POST /publications with a never-resolving audit store where the read model serves a final
+  claim, so the request reaches the request-side `mined` transition; assert the response is not delayed. Mutation evidence for
+  BOTH flush call sites of the route (after createOrReusePublication and after the `mined` transition); split the COVERAGE.md row.
+- Integrity finality (SEC-IDX-01): a `final` integrity verdict (verified or mismatch) is written only when
+  `isFinal(claim.createdBlock)` holds (the same predicate and bound F as section 3f); otherwise the claim stays `pending` with
+  backoff. With the native-like harness default (finalized = indexedBlock) existing integrity tests keep their meaning; new
+  tests: Envio-like status with the claim above the chain's finalized block → pending, at or below → verdict.
+
 ## 4. Checks
 contracts-hardening: `forge build`, `export-abis --check`, the plan-vector `--check`, forge unit tests (claim-registry and
 evidence-registry), the fork tests, the e2e tests, `check-forbidden`. api-hardening (and claims-hardening with `src/modules/claims`): `pnpm --filter @pine/api typecheck`,
