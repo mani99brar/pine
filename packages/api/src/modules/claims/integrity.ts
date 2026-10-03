@@ -1,7 +1,8 @@
 // Job claims.verify-integrity (PRD-03 §7/§7a, SEC-CLAIM-03..08, SEC-IDX-08). Two phases so a partial run never loses claims:
 //   1. discovery walks created_desc from the head to the first indexed claim, then inserts everything it collected as
 //      `pending` in ONE transaction (an error inserts nothing);
-//   2. verification takes due rows oldest first (<= 50), each in its own try/catch and its own compare-and-set write.
+//   2. verification takes up to 50 due never-attempted rows (oldest first) and up to 50 due retries (by next_attempt_at),
+//      so retries can never crowd out new claims; each row in its own try/catch and its own compare-and-set write.
 // Only `verified` claims are listed. Transient failures are not results: the row stays as it is with backoff.
 
 import { keccak256, toBytes as utf8Bytes } from "viem";
@@ -9,11 +10,12 @@ import { ClaimDocumentError, parseClaimDocumentBytes, type ClaimDocument } from 
 import { renderQuestion } from "@pine/shared/question";
 import type { ClaimRecord } from "@pine/shared/read-model";
 import type { Hex32 } from "@pine/shared/types";
-import type { AppContext, JobDefinition } from "../../contracts/app.js";
+import type { AppContext, AuditEntry, JobDefinition } from "../../contracts/app.js";
 import { safeErrorMessage } from "../../contracts/redact.js";
+import { flushAudit, outboxInsert } from "./audit.js";
 import { CLAIM_DOCUMENT_FETCH_MAX, DAY } from "./common.js";
 import { fromMs, msOf, rows, sql, toNumber, ts, type Executor, type SQL } from "./db.js";
-import { fetchReceipt, hasMatchingNewMarket } from "./receipts.js";
+import { claimCreatedMarkets, fetchReceipt, hasMatchingNewMarket } from "./receipts.js";
 import type { ClaimsState } from "./state.js";
 
 export const INTEGRITY_STATUSES = ["pending", "verified", "mismatch", "document_unavailable"] as const;
@@ -65,9 +67,14 @@ export async function evaluateClaim(ctx: AppContext, state: ClaimsState, claim: 
   const { manifest, catalog } = state;
   const fields = new Set<string>();
 
-  // Creation receipt: Seer's NewMarket for the same market from the configured factory (SEC-IDX-08).
+  // Creation receipt: it must prove the read model's registry, creator and digest for this market (its ClaimCreated
+  // event; the read model is not trusted alone), and carry Seer's NewMarket for the same market from the configured
+  // factory (SEC-IDX-08). A missing receipt or an RPC failure is transient, never a verdict.
   const receipt = await fetchReceipt(ctx, claim.createdTxHash);
   if (!receipt) throw new TransientError("creation receipt unavailable");
+  if (!claimCreatedMarkets(receipt, claim.registry, claim.creator, claim.claimDocumentSha256).includes(claim.market.toLowerCase() as ClaimRecord["market"])) {
+    fields.add("creation");
+  }
   if (!hasMatchingNewMarket(receipt, manifest.seer.marketFactory, { market: claim.market, conditionId: claim.conditionId, questionId: claim.questionId, marketName: claim.marketName })) {
     fields.add("newMarket");
   }
@@ -241,28 +248,43 @@ interface WorkRow {
   first_unavailable_ms: unknown;
 }
 
-/** Compare-and-set write of one row in its own transaction; success only from RETURNING rows. */
-async function writeResult(ctx: AppContext, row: Pick<WorkRow, "market" | "version">, update: SQL, guard: SQL = sql`NOT final`): Promise<boolean> {
+/**
+ * Compare-and-set write of one row in its own transaction; success only from RETURNING rows. An `audit` entry goes to the
+ * outbox as the second statement of the same transaction, only when the write happened.
+ */
+async function writeResult(ctx: AppContext, row: Pick<WorkRow, "market" | "version">, update: SQL, guard: SQL = sql`NOT final`, audit?: AuditEntry): Promise<boolean> {
   const version = toNumber(row.version);
   return ctx.db.transaction(async (tx) => {
     const updated = await rows<{ market: string }>(tx, sql`UPDATE claims_index SET ${update}, version = version + 1 WHERE market = ${row.market} AND version = ${version} AND ${guard} RETURNING market`);
-    return updated.length === 1;
+    if (updated.length !== 1) return false;
+    if (audit) await outboxInsert(tx, audit, ctx.clock.now());
+    return true;
   });
 }
 
-/** Phase 2. Verifies due rows independently; one claim's failure never aborts the others. */
+/**
+ * Phase 2. Verifies due rows independently; one claim's failure never aborts the others. Up to VERIFY_BATCH never-attempted
+ * rows (oldest first) and, separately, up to VERIFY_BATCH retries (soonest due first), so retries of unavailable
+ * documents can never crowd out new claims.
+ */
 export async function verifyPendingClaims(ctx: AppContext, state: ClaimsState, signal?: AbortSignal): Promise<Record<string, number>> {
   const counts: Record<string, number> = { verified: 0, mismatch: 0, document_unavailable: 0, transient: 0, skipped: 0 };
   const now = ctx.clock.now();
-  const due = await rows<WorkRow>(
-    ctx.db,
-    sql`SELECT market, integrity_status, attempts::int AS attempts, version::int AS version,
-          CASE WHEN first_unavailable_at IS NULL THEN NULL ELSE ${msOf(sql`first_unavailable_at`)} END AS first_unavailable_ms
-        FROM claims_index
-        WHERE NOT final AND integrity_status IN ('pending', 'document_unavailable') AND next_attempt_at <= ${ts(now)}
-        ORDER BY created_block ASC, created_log_index ASC
-        LIMIT ${VERIFY_BATCH}`,
-  );
+  const work = (attempted: boolean, order: SQL) =>
+    rows<WorkRow>(
+      ctx.db,
+      sql`SELECT market, integrity_status, attempts::int AS attempts, version::int AS version,
+            CASE WHEN first_unavailable_at IS NULL THEN NULL ELSE ${msOf(sql`first_unavailable_at`)} END AS first_unavailable_ms
+          FROM claims_index
+          WHERE NOT final AND integrity_status IN ('pending', 'document_unavailable') AND next_attempt_at <= ${ts(now)}
+            AND ${attempted ? sql`attempts > 0` : sql`attempts = 0`}
+          ORDER BY ${order}
+          LIMIT ${VERIFY_BATCH}`,
+    );
+  const due = [
+    ...(await work(false, sql`created_block ASC, created_log_index ASC`)),
+    ...(await work(true, sql`next_attempt_at ASC, created_block ASC, created_log_index ASC`)),
+  ];
   for (const row of due) {
     if (signal?.aborted) break;
     const attempts = toNumber(row.attempts) + 1;
@@ -284,11 +306,13 @@ export async function verifyPendingClaims(ctx: AppContext, state: ClaimsState, s
           parameters_valid = ${verdict.parametersValid}::boolean,
           attempts = ${attempts}, final = true, next_attempt_at = NULL, checked_at = ${ts(checkedAt)}, last_error = NULL`;
       }
-      if (await writeResult(ctx, row, update)) {
+      const audit: AuditEntry | undefined =
+        verdict.status === "document_unavailable"
+          ? undefined
+          : { actorUserId: null, action: `claim.integrity.${verdict.status}`, subjectType: "claim", subjectId: row.market, details: { fields: verdict.fields }, ip: null };
+      if (await writeResult(ctx, row, update, sql`NOT final`, audit)) {
         counts[verdict.status] = (counts[verdict.status] ?? 0) + 1;
-        if (verdict.status !== "document_unavailable") {
-          await ctx.audit.record({ actorUserId: null, action: `claim.integrity.${verdict.status}`, subjectType: "claim", subjectId: row.market, details: { fields: verdict.fields }, ip: null });
-        }
+        if (audit) await flushAudit(ctx, signal);
       } else {
         counts.skipped = (counts.skipped ?? 0) + 1;
       }
@@ -345,6 +369,8 @@ async function backfillParameters(ctx: AppContext, state: ClaimsState, counts: R
 }
 
 export async function runIntegrity(ctx: AppContext, state: ClaimsState, signal?: AbortSignal): Promise<{ discovered: number; verification: Record<string, number> }> {
+  // Entries an audit outage left in the outbox, before anything else.
+  await flushAudit(ctx, signal);
   let discoveryError: unknown = null;
   let discovered = 0;
   try {

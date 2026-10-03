@@ -540,3 +540,55 @@ describe("claims.verify-integrity: the unavailable window excludes moderation (c
     expect(await row()).toEqual({ status: "document_unavailable", final: true, first: restarted });
   });
 });
+
+describe("claims.verify-integrity: creation receipt and starvation (claims-hardening, PRD-07 §3b)", () => {
+  it("the creation receipt must prove the read model's creator, registry and digest for the market: otherwise a mismatch on creation", async () => {
+    const h = harnessOf();
+    const otherCreator = await claimWith(h, { logs: (event) => [claimCreatedLog(event, { creator: OTHER }), newMarketLog(event)] });
+    const otherRegistry = await claimWith(h, { logs: (event) => [claimCreatedLog(event, { address: OTHER }), newMarketLog(event)] });
+    const otherDigest = await claimWith(h, { logs: (event) => [claimCreatedLog({ ...event, claimDocumentSha256: `0x${"5a".repeat(32)}` as Hex32 }), newMarketLog(event)] });
+    const otherMarket = await claimWith(h, { logs: (event) => [claimCreatedLog({ ...event, market: OTHER }), newMarketLog(event)] });
+    const fine = await claimWith(h);
+    await runIntegrity(h);
+    const index = await indexOf(h);
+    for (const [name, event] of [["creator", otherCreator], ["registry", otherRegistry], ["digest", otherDigest], ["market", otherMarket]] as const) {
+      expect(index.get(event.market), name).toMatchObject({ integrity_status: "mismatch", mismatch_fields: ["creation"], final: true });
+    }
+    expect(index.get(fine.market)).toMatchObject({ integrity_status: "verified", mismatch_fields: [] });
+  });
+
+  it("a missing creation receipt is transient: the claim stays pending with backoff, never a verdict", async () => {
+    const h = harnessOf();
+    const event = await claimWith(h);
+    h.chain.receipts.delete(event.transactionHash.toLowerCase());
+    await runIntegrity(h);
+    const [row] = await h.ctx.database.sql.query<{ integrity_status: string; final: boolean; attempts: number; delay_ms: string; last_error: string | null }>(
+      `SELECT integrity_status, final, attempts, ((extract(epoch from next_attempt_at) * 1000)::bigint - $2::bigint)::text AS delay_ms, last_error
+         FROM claims_index WHERE market = $1`,
+      [event.market, h.ctx.clock.now().getTime()],
+    );
+    expect(row).toMatchObject({ integrity_status: "pending", final: false, attempts: 1, delay_ms: "60000" });
+    expect(row!.last_error).toMatch(/creation receipt unavailable/);
+    expect(h.ctx.audit.entries.filter((entry) => entry.action.startsWith("claim.integrity."))).toEqual([]);
+  });
+
+  it("60 always-due retries of unavailable documents cannot crowd out a new claim: it is verified in the first run", async () => {
+    const h = harnessOf();
+    const due = new Date(h.ctx.clock.now().getTime() - 3_600_000).toISOString();
+    for (let index = 0; index < 60; index += 1) {
+      const market = `0x${(0xdead00 + index).toString(16).padStart(40, "0")}`;
+      await h.ctx.database.sql.query(
+        `INSERT INTO claims_index (market, registry, creator, claim_document_sha256, policy_document_sha256, repository_id, evidence_deadline, reveal_deadline,
+           created_block, created_log_index, integrity_status, attempts, next_attempt_at, first_unavailable_at, discovered_at)
+         VALUES ($1, $2, $2, $3, $3, 1, 1, 2, $4, 0, 'document_unavailable', 3, $5, $5, $5)`,
+        [market, OTHER, `0x${"01".repeat(32)}`, index + 1, due],
+      );
+    }
+    const fresh = await claimWith(h);
+    await runIntegrity(h);
+    expect((await indexOf(h)).get(fresh.market)).toMatchObject({ integrity_status: "verified", final: true });
+    // The retries ran too (up to 50 of them), soonest due first.
+    const [retried] = await h.ctx.database.sql.query<{ n: number }>("SELECT count(*)::int AS n FROM claims_index WHERE attempts = 4");
+    expect(retried!.n).toBe(50);
+  });
+});

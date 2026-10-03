@@ -50,6 +50,8 @@ export interface PolicyEntry {
   enabled: boolean;
   gate: string | null;
   text: string;
+  /** The verified file bytes (digest `sha256`): what POST /publications stores and pins next to the claim document. */
+  content: Uint8Array;
 }
 
 /**
@@ -176,6 +178,7 @@ export function loadPolicyCatalog(catalogDir: string): PolicyCatalog {
       enabled: item.enabled,
       gate: item.gate ?? null,
       text,
+      content: bytes,
     });
   }
   return new PolicyCatalog(entries);

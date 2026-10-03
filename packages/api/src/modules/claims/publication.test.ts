@@ -233,16 +233,25 @@ describe("publication plans", () => {
     expect(response.json().plan).toBeUndefined();
   });
 
-  it("a retry after the claim exists returns the market and no plan (latest-block marketOf or the read model)", async () => {
+  it("a retry after the claim exists: a latest-block marketOf hit alone is 503 NOT_READY (no plan, state unchanged); mined only once indexed", async () => {
     const h = harnessOf();
     const { preview } = await previewed(h);
     expect((await publish(h, preview)).json().plan).not.toBeNull();
     const market = "0x00000000000000000000000000000000000ca1e0" as Address;
     h.chain.markets.set(`${h.session.wallet.toLowerCase()}|${preview.documentSha256}`, market);
+    const pending = await publish(h, preview);
+    expect(pending.statusCode).toBe(503);
+    expect(pending.json().error).toMatchObject({ code: "NOT_READY", message: "the claim is being created on chain; retry when it is final" });
+    expect(pending.headers["retry-after"]).toBe("30");
+    expect(pending.json().plan).toBeUndefined();
+    const [row] = await h.ctx.database.sql.query<{ state: string; market: string | null }>("SELECT state, market FROM claim_publications");
+    expect(row).toEqual({ state: "planned", market: null });
+    // Once the finalized read model has the claim, the retry answers with the market and no plan.
+    const event = addOnChainClaim(h.ctx, h.chain, preview.document, preview.documentSha256);
     const retry = (await publish(h, preview)).json() as PublicationBody;
     expect(retry.plan).toBeNull();
     expect(retry.planExpired).toBe(false);
-    expect(retry.publication).toMatchObject({ state: "mined", market });
+    expect(retry.publication).toMatchObject({ state: "mined", market: event.market });
 
     const second = await previewed(h);
     addOnChainClaim(h.ctx, h.chain, second.preview.document, second.preview.documentSha256);
@@ -273,12 +282,18 @@ describe("publication plans", () => {
     expect(expired.plan).toBeNull();
     expect(expired.planExpired).toBe(true);
     expect(expired.publication.state).toBe("planned");
-    // A first request after expiry gets the same answer.
+    // A first request after expiry is 409 (no publication exists to return): no GitHub call, quota unit or row.
     const late = await previewed(h);
     h.ctx.clock.advance(86_400 * 1000);
     markFresh(h.ctx);
-    const lateBody = (await publish(h, late.preview)).json() as PublicationBody;
-    expect(lateBody).toMatchObject({ plan: null, planExpired: true });
+    const githubBefore = h.ctx.quotas.used.get(`${h.session.userId}:github_calls_per_hour`) ?? 0;
+    const lateResponse = await publish(h, late.preview);
+    expect(lateResponse.statusCode).toBe(409);
+    expect(lateResponse.json().error).toMatchObject({ code: "CONFLICT", message: "plan offer expired; create a new preview" });
+    expect(lateResponse.json().plan).toBeUndefined();
+    expect(h.ctx.quotas.used.get(`${h.session.userId}:github_calls_per_hour`) ?? 0).toBe(githubBefore);
+    expect(h.ctx.quotas.used.get(`${h.session.userId}:publications_per_day`)).toBe(1);
+    expect(await rowCount(h)).toBe(1);
   });
 
   it("applies the policy gate again at publication", async () => {
@@ -435,8 +450,11 @@ describe("publication gates, races and audit (claims-006)", () => {
     const id = (await publish(h, preview)).json().publication.id as string;
     const txHash = `0x${"ac".repeat(32)}`;
     await h.app.inject({ method: "POST", url: `/api/v1/publications/${id}/submitted`, headers: h.headers, payload: { txHash } });
-    const market = "0x00000000000000000000000000000000000ca1e1" as Address;
-    h.chain.markets.set(`${h.session.wallet.toLowerCase()}|${preview.documentSha256}`, market);
+    // A latest-block hit alone moves nothing and audits nothing (503 NOT_READY); the indexed claim makes it mined.
+    h.chain.markets.set(`${h.session.wallet.toLowerCase()}|${preview.documentSha256}`, "0x00000000000000000000000000000000000ca1e1" as Address);
+    expect((await publish(h, preview)).statusCode).toBe(503);
+    expect(h.ctx.audit.entries.filter((entry) => entry.subjectId === id)).toHaveLength(3);
+    const market = addOnChainClaim(h.ctx, h.chain, preview.document, preview.documentSha256).market;
     expect((await publish(h, preview)).json().publication.state).toBe("mined");
     const entries = h.ctx.audit.entries.filter((entry) => entry.subjectType === "claim_publication" && entry.subjectId === id);
     expect(entries.map((entry) => entry.action)).toEqual(["claim.publication.created", "claim.publication.tx_reported", "claim.publication.submitted", "claim.publication.mined"]);
@@ -542,13 +560,18 @@ describe("lock order, revision under lock and gate positions (claims-007, PRD-03
   const publishOn = (app: Harness["app"], h: Harness, preview: { previewId: string; documentSha256: string }) =>
     app.inject({ method: "POST", url: "/api/v1/publications", headers: h.headers, payload: { previewId: preview.previewId, documentSha256: preview.documentSha256 } });
 
-  it("a retry after the policy stopped being publishable returns the on-chain market without a plan", async () => {
+  it("a retry after the policy stopped being publishable: 503 NOT_READY while the claim is only at the latest block, then the indexed market without a plan", async () => {
     const h = harnessOf();
     const { preview } = await previewed(h);
     expect((await publish(h, preview)).json().plan).not.toBeNull();
-    const market = "0x00000000000000000000000000000000000ca1e2" as Address;
-    h.chain.markets.set(`${h.session.wallet.toLowerCase()}|${preview.documentSha256}`, market);
+    h.chain.markets.set(`${h.session.wallet.toLowerCase()}|${preview.documentSha256}`, "0x00000000000000000000000000000000000ca1e2" as Address);
     const strict = await strictApp(h);
+    const pending = await publishOn(strict, h, preview);
+    expect(pending.statusCode).toBe(503);
+    expect(pending.json().error.code).toBe("NOT_READY");
+    expect(pending.json().plan).toBeUndefined();
+    expect((await h.ctx.database.sql.query<{ state: string }>("SELECT state FROM claim_publications"))[0]!.state).toBe("planned");
+    const market = addOnChainClaim(h.ctx, h.chain, preview.document, preview.documentSha256).market;
     const retry = await publishOn(strict, h, preview);
     expect(retry.statusCode).toBe(200);
     expect(retry.json()).toMatchObject({ plan: null, planExpired: false, publication: { state: "mined", market } });
@@ -788,7 +811,10 @@ describe("publish-time repository recheck (claims-010, PRD-03 §8d, SEC-GH-13)",
     expect(down.json().error.code).toBe("NOT_READY");
     expect(down.json().plan).toBeUndefined();
     h.ctx.github.getRepoById = getRepoById;
-    expect((await publish(h, preview)).json().plan).not.toBeNull();
+    const recovered = await publish(h, preview);
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.json().plan).not.toBeNull();
+    verifyWirePlan(h, recovered.json().plan);
   });
 
   it("SEC-GH-13 an unlinked GitHub account is 409 without a plan", async () => {
@@ -803,18 +829,144 @@ describe("publish-time repository recheck (claims-010, PRD-03 §8d, SEC-GH-13)",
     expect(publicationsQuota(h)).toBeUndefined();
   });
 
-  it("the recheck runs on the existing-row path after the chain re-check: an on-chain claim is returned without a plan even if the repository is private", async () => {
+  it("the recheck runs on the existing-row path after the chain re-check: an on-chain claim is answered without a plan or GitHub call even if the repository is private", async () => {
     const h = harnessOf();
     const { preview } = await previewed(h);
     expect((await publish(h, preview)).statusCode).toBe(200);
     setVisibility(h, "private");
-    const market = "0x00000000000000000000000000000000000ca1e5" as Address;
-    h.chain.markets.set(`${h.session.wallet.toLowerCase()}|${preview.documentSha256}`, market);
+    h.chain.markets.set(`${h.session.wallet.toLowerCase()}|${preview.documentSha256}`, "0x00000000000000000000000000000000000ca1e5" as Address);
     const before = githubQuota(h);
+    // Only at the latest block: 503 NOT_READY, state unchanged, no plan, GitHub not asked.
+    const pending = await publish(h, preview);
+    expect(pending.statusCode).toBe(503);
+    expect(pending.json().error.code).toBe("NOT_READY");
+    expect(pending.json().plan).toBeUndefined();
+    expect(githubQuota(h)).toBe(before);
+    expect((await h.ctx.database.sql.query<{ state: string }>("SELECT state FROM claim_publications"))[0]!.state).toBe("planned");
+    // Indexed (final): mined without a plan.
+    const market = addOnChainClaim(h.ctx, h.chain, preview.document, preview.documentSha256).market;
     const retry = await publish(h, preview);
     expect(retry.statusCode).toBe(200);
     expect(retry.json()).toMatchObject({ plan: null, publication: { state: "mined", market } });
     // No plan would be returned, so GitHub was not asked.
     expect(githubQuota(h)).toBe(before);
+  });
+});
+
+describe("claims-hardening at publication (PRD-07 §3b)", () => {
+  const githubQuota = (h: Harness) => h.ctx.quotas.used.get(`${h.session.userId}:github_calls_per_hour`) ?? 0;
+  const seededRepo = (h: Harness) => {
+    const repo = h.ctx.github.repos.get(`${REPO.owner}/${REPO.name}`.toLowerCase());
+    if (!repo) throw new Error("seeded repository missing");
+    return repo;
+  };
+  const policyBytes = async (h: Harness) => new Uint8Array(await readFile(path.join(h.catalogDir, "BOT-001", "0.1.0.md")));
+
+  it("stores (pins) the digest-verified policy text next to the claim document before a plan is returned, on both paths", async () => {
+    const h = harnessOf();
+    const { preview } = await previewed(h);
+    expect(await h.ctx.contentStore.has(BOT_POLICY_SHA)).toBe(false);
+    const response = await publish(h, preview);
+    expect(response.statusCode).toBe(200);
+    verifyWirePlan(h, response.json().plan);
+    const stored = await h.ctx.contentStore.get(BOT_POLICY_SHA);
+    expect(stored?.record.sha256).toBe(BOT_POLICY_SHA);
+    expect(Buffer.from(stored!.bytes).equals(Buffer.from(await policyBytes(h)))).toBe(true);
+    // Existing-row path: stored again (idempotently) before the plan.
+    h.ctx.contentStore.items.delete(BOT_POLICY_SHA);
+    const retry = await publish(h, preview);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json().plan).not.toBeNull();
+    expect(await h.ctx.contentStore.has(BOT_POLICY_SHA)).toBe(true);
+  });
+
+  it("a failing policy-text put is 503 NOT_READY without a plan; once the store recovers the retry gets the plan", async () => {
+    const h = harnessOf();
+    const { preview } = await previewed(h);
+    const put = h.ctx.contentStore.put.bind(h.ctx.contentStore);
+    const policy = Buffer.from(await policyBytes(h));
+    h.ctx.contentStore.put = async (input) => {
+      if (Buffer.from(input.bytes).equals(policy)) throw new Error("pinning service unavailable");
+      return put(input);
+    };
+    const refused = await publish(h, preview);
+    expect(refused.statusCode).toBe(503);
+    expect(refused.json().error.code).toBe("NOT_READY");
+    expect(refused.headers["retry-after"]).toBeDefined();
+    expect(refused.json().plan).toBeUndefined();
+    expect(await h.ctx.contentStore.has(BOT_POLICY_SHA)).toBe(false);
+    h.ctx.contentStore.put = put;
+    const ok = await publish(h, preview);
+    expect(ok.statusCode).toBe(200);
+    verifyWirePlan(h, ok.json().plan);
+  });
+
+  it("SEC-GH-12 a repository renamed or transferred since the preview is 409 without a plan or row (one GitHub unit); a case-only difference passes", async () => {
+    const h = harnessOf();
+    const { preview } = await previewed(h);
+    const repo = seededRepo(h);
+    const before = githubQuota(h);
+    repo.name = "kleros-v3";
+    const renamed = await publish(h, preview);
+    expect(renamed.statusCode).toBe(409);
+    expect(renamed.json().error).toMatchObject({ code: "CONFLICT", message: "repository changed since preview; create a new preview" });
+    expect(renamed.json().plan).toBeUndefined();
+    expect(await rowCount(h)).toBe(0);
+    expect(h.ctx.quotas.used.get(`${h.session.userId}:publications_per_day`)).toBeUndefined();
+    expect(githubQuota(h)).toBe(before + 1);
+    repo.name = REPO.name;
+    repo.owner = "someone-else";
+    const transferred = await publish(h, preview);
+    expect(transferred.statusCode).toBe(409);
+    expect(transferred.json().error.message).toBe("repository changed since preview; create a new preview");
+    expect(githubQuota(h)).toBe(before + 2);
+    // Case-insensitive comparison: GitHub logins and names are case-insensitive.
+    repo.owner = REPO.owner.toUpperCase();
+    repo.name = "Kleros-V2";
+    const ok = await publish(h, preview);
+    expect(ok.statusCode).toBe(200);
+    verifyWirePlan(h, ok.json().plan);
+  });
+
+  it("SEC-GH-12 on the existing-row path: a retry after a rename is 409 without a plan and consumes one GitHub unit", async () => {
+    const h = harnessOf();
+    const { preview } = await previewed(h);
+    expect((await publish(h, preview)).statusCode).toBe(200);
+    seededRepo(h).name = "renamed-repository";
+    const before = githubQuota(h);
+    const retry = await publish(h, preview);
+    expect(retry.statusCode).toBe(409);
+    expect(retry.json().error.message).toBe("repository changed since preview; create a new preview");
+    expect(retry.json().plan).toBeUndefined();
+    expect(githubQuota(h)).toBe(before + 1);
+  });
+
+  it("existing-row order: after the plan offer expired a retry is 200 with planExpired and no plan, without asking GitHub (private or rate-limited)", async () => {
+    const h = harnessOf();
+    for (const outage of ["private", "rate-limited"] as const) {
+      const { preview } = await previewed(h);
+      const first = (await publish(h, preview)).json() as PublicationBody;
+      verifyWirePlan(h, first.plan);
+      if (outage === "private") seededRepo(h).visibility = "private";
+      else h.ctx.github.rateLimited = true;
+      const previewRow = await h.ctx.database.sql.query<{ plan_expires_at: string }>("SELECT plan_expires_at::text AS plan_expires_at FROM claim_previews WHERE id = $1", [preview.previewId]);
+      h.ctx.clock.set(new Date(Number(previewRow[0]!.plan_expires_at) * 1000));
+      markFresh(h.ctx);
+      const before = githubQuota(h);
+      let repoLookups = 0;
+      const getRepoById = h.ctx.github.getRepoById.bind(h.ctx.github);
+      h.ctx.github.getRepoById = async (...args) => {
+        repoLookups += 1;
+        return getRepoById(...args);
+      };
+      const retry = await publish(h, preview);
+      expect(retry.statusCode, outage).toBe(200);
+      expect(retry.json(), outage).toMatchObject({ plan: null, planExpired: true, publication: { id: first.publication.id, state: "planned" } });
+      expect(githubQuota(h), outage).toBe(before);
+      expect(repoLookups, outage).toBe(0);
+      h.ctx.github.getRepoById = getRepoById;
+      seededRepo(h).visibility = "public";
+      h.ctx.github.rateLimited = false;
+    }
   });
 });

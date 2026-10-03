@@ -10,8 +10,10 @@ import { ClaimDocumentError, parseClaimDocumentBytes, type ClaimDocument } from 
 import type { DeploymentManifest } from "@pine/shared/deployment";
 import { buildStep, newPlan, planToWire, verifyPlan, type TxPlan, type WireTxPlan } from "@pine/shared/tx-plan";
 import type { Address, Hex32 } from "@pine/shared/types";
-import { GitHubGatewayError, type AppContext, type SessionInfo } from "../../contracts/app.js";
+import { GitHubGatewayError, type AppContext, type AuditEntry, type SessionInfo } from "../../contracts/app.js";
 import { ApiError } from "../../contracts/errors.js";
+import { flushAudit, outboxInsert, outboxSelect } from "./audit.js";
+import { POLICY_FILE_MAX_BYTES, type PolicyEntry } from "./catalog.js";
 import { assertReadModelReady, auditIp, CLAIM_DOCUMENT_FETCH_MAX, isoSeconds, nowSeconds, sessionOf } from "./common.js";
 import { fromMs, msOf, one, rows, sql, toBytes, toNumber, ts, type Executor } from "./db.js";
 import { publicationInsertRaceError } from "./races.js";
@@ -97,7 +99,9 @@ export async function txHintsOf(db: Executor, publicationId: string): Promise<{ 
 
 /**
  * Compare-and-set state transition. Success is read only from RETURNING rows. Returns the updated row or null when
- * another writer moved the publication first.
+ * another writer moved the publication first. With `audit`, the transition and its outbox row are one statement (a CTE),
+ * so the entry exists exactly when the transition happened; inside a transaction pass no `audit` and add the outbox
+ * INSERT as the next statement of that transaction.
  */
 export async function transitionPublication(
   db: Executor,
@@ -105,18 +109,17 @@ export async function transitionPublication(
   from: readonly PublicationState[],
   to: PublicationState,
   now: Date,
-  fields: { market?: Address; failureReason?: string; clearMarket?: boolean } = {},
+  fields: { market?: Address; failureReason?: string } = {},
+  audit?: AuditEntry,
 ): Promise<PublicationRow | null> {
   const fromList = JSON.stringify(from);
-  const row = await one<RawPublication>(
-    db,
-    sql`UPDATE claim_publications
+  const update = sql`UPDATE claim_publications
         SET state = ${to}, updated_at = ${ts(now)},
-            market = CASE WHEN ${fields.clearMarket === true}::boolean THEN NULL ELSE COALESCE(${fields.market ?? null}::text, market) END,
+            market = COALESCE(${fields.market ?? null}::text, market),
             failure_reason = COALESCE(${fields.failureReason ?? null}::text, failure_reason)
         WHERE id = ${id}::uuid AND state IN (SELECT jsonb_array_elements_text(${fromList}::jsonb))
-        RETURNING ${publicationColumns}`,
-  );
+        RETURNING ${publicationColumns}`;
+  const row = await one<RawPublication>(db, audit ? sql`WITH moved AS (${update}), audited AS (${outboxSelect(audit, now, sql`moved`)}) SELECT * FROM moved` : update);
   return row ? toPublication(row) : null;
 }
 
@@ -188,8 +191,11 @@ async function findPreview(db: Executor, userId: string, id: string): Promise<Pr
  * One `github_calls_per_hour` unit per upstream call (PRD-03 §3). Every failure refuses without a plan; there is no
  * "unchecked" fallback. REPO_NOT_PUBLIC and NOT_FOUND are 422 (the frozen error codes have no REPO_NOT_PUBLIC, so the
  * message names it), GITHUB_NOT_LINKED is 409, RATE_LIMITED and UPSTREAM are a 503 NOT_READY refusal.
+ * SEC-GH-12 (PRD-07 §3b): the owner login and name GitHub returns must still equal the frozen document's (compared
+ * case-insensitively); a renamed or transferred repository is 409 and a new preview is needed.
  */
-export async function assertRepositoryStillPublic(ctx: AppContext, userId: string, repositoryId: number): Promise<void> {
+export async function assertRepositoryStillPublic(ctx: AppContext, userId: string, repository: ClaimDocument["target"]["repository"]): Promise<void> {
+  const repositoryId = repository.id;
   await ctx.quotas.consume(userId, "github_calls_per_hour");
   let repo;
   try {
@@ -210,6 +216,9 @@ export async function assertRepositoryStillPublic(ctx: AppContext, userId: strin
   }
   // Defence in depth: the gateway contract says private is always false and ids are stable.
   if (repo.id !== repositoryId || (repo.private as boolean) !== false) throw repoNotPublic();
+  if (repo.owner.toLowerCase() !== repository.ownerLogin.toLowerCase() || repo.name.toLowerCase() !== repository.name.toLowerCase()) {
+    throw new ApiError("CONFLICT", "repository changed since preview; create a new preview");
+  }
 }
 
 const repoNotPublic = () => new ApiError("UNPROCESSABLE", "REPO_NOT_PUBLIC: the repository is no longer public or visible to you; the claim cannot be published");
@@ -226,6 +235,21 @@ export function createClaimParams(document: ClaimDocument, documentSha256: Hex32
     minBond: BigInt(document.market.minBondWei),
     title: document.claim.title,
   };
+}
+
+/**
+ * Stores the digest-verified catalog policy text in the content store (idempotent; the store pins it by CID), so the
+ * `ipfs://<policy cid>` every immutable question references stays retrievable. A failing put refuses the plan with 503.
+ */
+async function storePolicyText(ctx: AppContext, policy: PolicyEntry | null): Promise<void> {
+  if (!policy) throw new Error("publication: the policy gate did not run before the plan");
+  let stored;
+  try {
+    stored = await ctx.contentStore.put({ bytes: policy.content, declaredMediaType: "text/markdown; charset=utf-8", maxBytes: POLICY_FILE_MAX_BYTES });
+  } catch {
+    throw new ApiError("NOT_READY", "Could not store the policy text; try again later", { retryAfterSeconds: 30 });
+  }
+  if (stored.sha256.toLowerCase() !== policy.sha256) throw new ApiError("INTEGRITY_FAILED", "The stored policy text does not match its digest");
 }
 
 export const PUBLICATION_PLAN_LIMITS = { maxTotalValueWei: 0n, maxApprovalAmount: 0n } as const;
@@ -262,8 +286,9 @@ const txHashSchema = z.string().regex(/^0x[0-9a-fA-F]{64}$/, "must be a 0x-prefi
 type InsertOutcome = { kind: "inserted"; row: RawPublication } | { kind: "taken" } | { kind: "missing" } | { kind: "edited" };
 
 /**
- * The publication row for (user, digest): reused when it exists; otherwise `gate` (the publishability gate, before any
- * quota or insert), the repository recheck (SEC-GH-13), one `publications_per_day` unit, then the insert. No transaction is open across the quota call.
+ * The publication row for (user, digest): reused when it exists; otherwise a refusal once the preview's plan offer has
+ * expired (nothing to return, PRD-07 §3b), `gate` (the publishability gate, before any quota or insert), the repository
+ * recheck (SEC-GH-13), one `publications_per_day` unit, then the insert. No transaction is open across the quota call.
  * The insert runs in a transaction that first takes FOR SHARE on the draft row at the previewed revision (lock order of
  * PRD-03 §8b: a draft delete locks the same row FOR UPDATE first), so a draft deleted or edited after the earlier
  * checks yields NOT_FOUND or 409 and never a publication for a stale or deleted preview.
@@ -279,6 +304,8 @@ async function createOrReusePublication(
 ): Promise<{ publication: PublicationRow; created: boolean }> {
   const existing = await findPublication(ctx.db, { userId: session.userId, documentSha256: digest });
   if (existing) return { publication: existing, created: false };
+  // No publication exists to return and no plan would be offered: refused before GitHub, the quota and the insert.
+  if (nowSeconds(ctx) >= preview.planExpiresAt) throw new ApiError("CONFLICT", "plan offer expired; create a new preview");
   gate();
   // SEC-GH-13 on the new-row path: before the quota and the insert, so a refusal consumes nothing and creates nothing.
   await recheckRepository();
@@ -307,7 +334,20 @@ async function createOrReusePublication(
             ON CONFLICT (user_id, document_sha256) DO NOTHING
             RETURNING ${publicationColumns}`,
       );
-      return row ? { kind: "inserted", row } : { kind: "taken" };
+      if (!row) return { kind: "taken" };
+      await outboxInsert(
+        tx,
+        {
+          actorUserId: session.userId,
+          action: "claim.publication.created",
+          subjectType: "claim_publication",
+          subjectId: id,
+          details: { previewId: preview.id, documentSha256: digest, state: "planned" },
+          ip: auditIp(request),
+        },
+        now,
+      );
+      return { kind: "inserted", row };
     });
   } catch (error) {
     // The draft and its previews were deleted concurrently (FK), or a deadlock/serialization race: never a 500.
@@ -317,17 +357,7 @@ async function createOrReusePublication(
   }
   if (outcome.kind === "missing") throw new ApiError("NOT_FOUND", "Preview not found");
   if (outcome.kind === "edited") throw new ApiError("CONFLICT", "The draft was modified after this preview; preview again");
-  if (outcome.kind === "inserted") {
-    await ctx.audit.record({
-      actorUserId: session.userId,
-      action: "claim.publication.created",
-      subjectType: "claim_publication",
-      subjectId: id,
-      details: { previewId: preview.id, documentSha256: digest, state: "planned" },
-      ip: auditIp(request),
-    });
-    return { publication: toPublication(outcome.row), created: true };
-  }
+  if (outcome.kind === "inserted") return { publication: toPublication(outcome.row), created: true };
   // A concurrent identical request won the insert: reuse its row (never a duplicate, never a 500).
   const winner = await findPublication(ctx.db, { userId: session.userId, documentSha256: digest });
   if (!winner) throw new ApiError("CONFLICT", "The publication could not be created; try again");
@@ -360,21 +390,25 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
       throw error;
     }
     // Publishability gate (SEC-CLAIM-06), applied only where a row would be created or a plan built (PRD-03 §8b).
+    let policy: PolicyEntry | null = null;
     const gate = () => {
-      const policy = state.catalog.requirePublishable(document.policy.id, document.policy.version, ctx.config);
+      const entry = state.catalog.requirePublishable(document.policy.id, document.policy.version, ctx.config);
       // SEC-CLAIM-03: the policy digest recomputed from the loaded catalog bytes must equal the previewed one.
-      if (policy.sha256 !== document.policy.sha256) throw new ApiError("UNPROCESSABLE", "The policy text changed since the preview; preview again");
+      if (entry.sha256 !== document.policy.sha256) throw new ApiError("UNPROCESSABLE", "The policy text changed since the preview; preview again");
+      policy = entry;
     };
 
     // SEC-GH-13: at most once per request, on whichever path would return a plan.
     let repositoryRechecked = false;
     const recheckRepository = async () => {
       if (repositoryRechecked) return;
-      await assertRepositoryStillPublic(ctx, session.userId, document.target.repository.id);
+      await assertRepositoryStillPublic(ctx, session.userId, document.target.repository);
       repositoryRechecked = true;
     };
 
     const result = await createOrReusePublication(ctx, request, session, preview, documentSha256, gate, recheckRepository);
+    // A new row's audit entry, or entries a replay finds still pending (SEC-OPS-07).
+    await flushAudit(ctx);
     let publication = result.publication;
     if (publication.previewId !== preview.id) throw new ApiError("CONFLICT", "This document belongs to another preview");
 
@@ -383,25 +417,30 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
     const now = nowSeconds(ctx);
     const view = async (plan: WireTxPlan | null) => ({ publication: await publicationView(ctx.db, publication, now), planExpired: plan === null && publication.market === null && now >= publication.planExpiresAt, plan });
     if ((FINAL_STATES as readonly string[]).includes(publication.state) || publication.state === "mined") return view(null);
+    // Only finalized evidence moves the state (PRD-07 §3b): the claim in the finalized read model makes it `mined`.
     const indexed = await ctx.readModel.listClaims({ creator: publication.creator, claimDocumentSha256: documentSha256, order: "created_desc", limit: 10 });
-    const indexedMarket = indexed.items.find((claim) => claim.registry === state.manifest.pine.claimRegistry)?.market ?? null;
+    const market = indexed.items.find((claim) => claim.registry === state.manifest.pine.claimRegistry)?.market ?? null;
+    if (market) {
+      const at = ctx.clock.now();
+      const audit: AuditEntry = { actorUserId: null, action: "claim.publication.mined", subjectType: "claim_publication", subjectId: publication.id, details: { market, via: "request" }, ip: null };
+      const moved = await transitionPublication(ctx.db, publication.id, ["planned", "submitted"], "mined", at, { market }, audit);
+      if (moved) {
+        publication = moved;
+        await flushAudit(ctx);
+      } else {
+        publication = (await findPublication(ctx.db, { userId: session.userId, id: publication.id })) ?? publication;
+      }
+      return view(null);
+    }
+    // A market at the latest block alone is not final: it never moves the state, and no plan is offered for a claim
+    // that may already exist (SEC-TX-08) until the read model has it.
     let onChain: Address | null;
     try {
       onChain = await marketOnChain(ctx, state.manifest, publication.creator, documentSha256);
     } catch {
       throw new ApiError("UPSTREAM_UNAVAILABLE", "Could not check the chain for an existing claim; try again");
     }
-    const market = indexedMarket ?? onChain;
-    if (market) {
-      const moved = await transitionPublication(ctx.db, publication.id, ["planned", "submitted"], "mined", ctx.clock.now(), { market });
-      if (moved) {
-        publication = moved;
-        await ctx.audit.record({ actorUserId: null, action: "claim.publication.mined", subjectType: "claim_publication", subjectId: publication.id, details: { market, via: "request" }, ip: null });
-      } else {
-        publication = (await findPublication(ctx.db, { userId: session.userId, id: publication.id })) ?? publication;
-      }
-      return view(null);
-    }
+    if (onChain) throw new ApiError("NOT_READY", "the claim is being created on chain; retry when it is final", { retryAfterSeconds: 30 });
     // The plan offer expired: the stored publication without a plan, before the gate (no plan would be built).
     if (now >= publication.planExpiresAt) return view(null);
     // Existing-row path: the gate and the repository recheck run after the chain re-check and before content and plan
@@ -414,6 +453,8 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
     // Content first: no plan is ever returned for a document that is not stored.
     const stored = await ctx.contentStore.put({ bytes: preview.document, declaredMediaType: "application/json", maxBytes: CLAIM_DOCUMENT_FETCH_MAX });
     if (stored.sha256.toLowerCase() !== documentSha256) throw new ApiError("INTEGRITY_FAILED", "The stored claim document does not match its digest");
+    // The policy text the question references as ipfs://<policy cid> is stored (and pinned) next to it (PRD-07 §3b).
+    await storePolicyText(ctx, policy);
     const plan = buildPublicationPlan(state.manifest, publication.planId, publication.creator, document, documentSha256);
     return view(planToWire(plan));
   });
@@ -434,24 +475,30 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
       if (!publication) throw new ApiError("NOT_FOUND", "Publication not found");
       const txHash = request.body.txHash;
       const now = ctx.clock.now();
+      const subjectId = publication.id;
+      const entry = (action: string): AuditEntry => ({ actorUserId: session.userId, action, subjectType: "claim_publication", subjectId, details: { txHash }, ip: auditIp(request) });
+      // The hint and its audit entry in one statement: an outbox row exists exactly when the hash was new.
       const added = await one<{ tx_hash: string }>(
         ctx.db,
-        sql`INSERT INTO claim_publication_txs (publication_id, tx_hash, status, reported_at)
-            SELECT ${publication.id}::uuid, ${txHash}, 'unknown', ${ts(now)}
-            WHERE (SELECT count(*)::int FROM claim_publication_txs WHERE publication_id = ${publication.id}::uuid) < ${MAX_TX_HINTS}
-            ON CONFLICT (publication_id, tx_hash) DO NOTHING
-            RETURNING tx_hash`,
+        sql`WITH added AS (
+              INSERT INTO claim_publication_txs (publication_id, tx_hash, status, reported_at)
+              SELECT ${publication.id}::uuid, ${txHash}, 'unknown', ${ts(now)}
+              WHERE (SELECT count(*)::int FROM claim_publication_txs WHERE publication_id = ${publication.id}::uuid) < ${MAX_TX_HINTS}
+              ON CONFLICT (publication_id, tx_hash) DO NOTHING
+              RETURNING tx_hash
+            ), audited AS (${outboxSelect(entry("claim.publication.tx_reported"), now, sql`added`)})
+            SELECT tx_hash FROM added`,
       );
+      // Flushed after each audited write (in the order they happened), and on a same-hash replay.
+      await flushAudit(ctx);
       if (!added) {
         const known = await one<{ tx_hash: string }>(ctx.db, sql`SELECT tx_hash FROM claim_publication_txs WHERE publication_id = ${publication.id}::uuid AND tx_hash = ${txHash}`);
         if (!known) throw new ApiError("UNPROCESSABLE", `At most ${MAX_TX_HINTS} transaction hashes can be reported`);
-      } else {
-        await ctx.audit.record({ actorUserId: session.userId, action: "claim.publication.tx_reported", subjectType: "claim_publication", subjectId: publication.id, details: { txHash }, ip: auditIp(request) });
       }
-      const moved = await transitionPublication(ctx.db, publication.id, ["planned"], "submitted", now);
+      const moved = await transitionPublication(ctx.db, publication.id, ["planned"], "submitted", now, {}, entry("claim.publication.submitted"));
       if (moved) {
         publication = moved;
-        await ctx.audit.record({ actorUserId: session.userId, action: "claim.publication.submitted", subjectType: "claim_publication", subjectId: publication.id, details: { txHash }, ip: auditIp(request) });
+        await flushAudit(ctx);
       } else {
         publication = (await findPublication(ctx.db, { userId: session.userId, id: publication.id })) ?? publication;
       }
