@@ -102,6 +102,13 @@ Contracts are immutable once deployed, so every contract change here lands befor
   deletable by pine_api until flushed (inherent in the outbox design; accepted); the evidence listing's per-request cost
   (moderation queries and up to 50 manifest reads; bounded by the platform rate limit; accepted).
 
+## 3d. hardening-a-002 review fixes (carried by hardening-a-003; markets and funding)
+- Outbox atomicity test (coverage P1, SEC-OPS-07), both modules: make the outbox INSERT fail deterministically on PGlite
+  (`ALTER TABLE <module>_audit_outbox ADD CONSTRAINT outbox_fail CHECK (false) NOT VALID`), then drive each audited write
+  (markets: plan insert, new hint, transition, evidence upload; funding: plan insert, hint append, transition) and assert the
+  request or transition fails and its plan, hint, transition or upload row was NOT committed. The tests fail if any outbox
+  INSERT is moved into a separate statement. Map the COVERAGE.md SEC-OPS-07 rows to these tests.
+
 ## 3b. claims-hardening (claims module; run after claims-010 merged at 74659eb)
 - Cooperative abort: claims reconcile and integrity jobs (including discovery and backfillParameters) check `signal.aborted`
   between items and stop promptly; tests abort before a run and from inside a fake during the first item (second untouched);
