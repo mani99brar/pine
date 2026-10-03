@@ -217,6 +217,20 @@ The integrity job runs in two phases so that a run that stops partway never lose
   row and no quota consumed); on the existing-row path after the chain re-check and before content and plan. The coverage matrix
   goes in the completion file, not in a repository file.
 
+## 8c. claims-008 review fixes (carried by claims-009)
+- Tests (each must fail when the behaviour is removed): expiry is decided from read-model coverage, not the chain head (advance the
+  clock past evidenceDeadline − 1 day while the indexed block timestamp stays before it: no expiry; then advance coverage: expiry);
+  `expired`/`failed` never happen once a recorded hash has a successful matching receipt after coverage passed; preview of a
+  private repository → 422 and no preview row; a publication whose preview document's policy sha256 differs from the loaded
+  catalog entry is refused; BOT-001 parameter length caps (sourceRequirement 1000, startingStates 4000, simulatedAdapters 20 × 100);
+  agent responses include the commitment formula, salt rules and size limits; the concurrent-publication test proves the
+  re-read-on-conflict branch ran (spy or an injected pre-existing row between check and insert).
+- Reconcile fetches receipts only for hints still `unknown` (never re-fetches `reverted` hints) and at most 5 hints per publication
+  per run.
+- Integrity: a document withheld by moderation (`ctx.moderation.states("content", [digest])` says block) is NOT recorded as
+  `document_unavailable`; it stays `pending` with backoff and is re-evaluated when the block is lifted.
+- `GET /api/v1/claims` caps `limit` at 25 like the agent feed.
+
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;
 draft IDOR; GitHub error mapping; membership failure blocks preview; preview determinism except nonce/createdAt; attestation
