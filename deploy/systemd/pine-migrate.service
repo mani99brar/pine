@@ -1,0 +1,50 @@
+# Applies pending migrations (API groups, then pine_index) as pine_migrator. Oneshot: run it on every deploy BEFORE
+# restarting pine-indexer-native and pine-api; both refuse to start while any migration is pending or modified.
+#   systemctl start pine-migrate.service && systemctl restart pine-indexer-native.service pine-api.service
+# Install: deploy/README.md. Paths assume the release is checked out at /opt/pine/current with node_modules installed
+# by `pnpm install --frozen-lockfile --prod=false` (tsx runs the TypeScript sources).
+# Runs as its own system user pine-migrate (SEC-OPS-10): only it can read /etc/pine/migrate.secrets.env
+# (0640 root:pine-migrate, the DDL-capable pine_migrator URL); the API and indexer users cannot.
+
+[Unit]
+Description=Pine database migrations (API and native indexer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pine-migrate
+Group=pine-migrate
+WorkingDirectory=/opt/pine/current/packages/api
+EnvironmentFile=/etc/pine/migrate.secrets.env
+Environment=NODE_ENV=production
+# The API groups first: platform 0002 creates the default privileges every later API group relies on.
+ExecStart=/usr/bin/node --import tsx src/migrate.ts
+ExecStart=/usr/bin/node --import tsx ../indexer-native/src/migrate-cli.ts
+TimeoutStartSec=300
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
