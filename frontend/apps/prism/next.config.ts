@@ -5,6 +5,11 @@ const securityHeaders = [
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  // Directives that need no script nonces: no framing, no <base> or plugin injection, forms post only to this origin.
+  // (A script-src policy needs per-request nonces for Next.js inline scripts; see docs/frontend/deployment.md.)
+  { key: 'Content-Security-Policy', value: "base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'" },
+  // Wallet SDK popups keep working; no other window can script this one.
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin-allow-popups' },
 ]
 
 // Optional x402 payment modules lazily imported by @coinbase/cdp-sdk (via RainbowKit's Base Account
