@@ -6,6 +6,8 @@ Replace the stub `packages/api/src/modules/markets/index.ts` with the markets `R
 
 ## Context
 
+- Rerun: run markets-001 produced this lane's complete module (branch `keep/markets-001-work`, commit `0d410df`) but the run was blocked at its freeze by a session-stop race before any verification, not by its code. Start from it: one `git checkout 0d410df -- <path>` per owned path (packages/api/src/modules/markets packages/api/migrations/markets), review it against the CURRENT PRD-04 and decisions (the markets-001 operator clarifications were already applied: list them again in your completion as operator-settled), run every check of your lane as one full run each (vitest serializes PGlite-heavy files with the lane's cross-process lock), write the coverage matrix decisions.md asks for and close every gap before completing.
+
 - Frozen building blocks: `@pine/shared/evidence` (manifest schema, `encodeEvidenceManifest`, `parseEvidenceManifestBytes`, `computeEvidenceCommitment`), `@pine/shared/tx-plan` (`buildStep`, `newPlan`, `verifyPlan`), `@pine/shared/deployment` (`buildDeploymentManifest`), `@pine/shared/read-model` (`deriveOracleStatus`, `classifyAnswer`, records), `@pine/shared/abi/external` (Reality, Kleros home proxy), `@pine/shared/testing/*` (scenarios, `MemoryReadModel` with `markIndexed`/`setHalted`).
 - API contracts and harness: `packages/api/src/contracts/*.ts` (RouteSecurityConfig `multipart`/`public`, ContentStore `put`/`retrieve`, ComplianceGateway, QuotaGateway, `createTestContext`, `buildTestApp`).
 - Reality.eth semantics (claimWinnings history order, commitments, arbitration): `docs/research/reality-kleros.md`; requirements: `docs/security/requirements.md` sections 3 (SEC-TX) and 5 (SEC-EVID).

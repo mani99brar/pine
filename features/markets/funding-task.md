@@ -6,6 +6,8 @@ Replace the stub `packages/api/src/modules/funding/index.ts` with the funding `R
 
 ## Context
 
+- Rerun: run markets-001 produced this lane's complete module (branch `keep/markets-001-work`, commit `0d410df`) but the run was blocked at its freeze by a session-stop race before any verification, not by its code. Start from it: one `git checkout 0d410df -- <path>` per owned path (packages/api/src/modules/funding packages/api/migrations/funding), review it against the CURRENT PRD-04 and decisions (the markets-001 operator clarifications were already applied: list them again in your completion as operator-settled), run every check of your lane as one full run each (vitest serializes PGlite-heavy files with the lane's cross-process lock), write the coverage matrix decisions.md asks for and close every gap before completing.
+
 - Frozen building blocks: `@pine/shared/abi/algebra` (factory, pool, position manager, quoter ABIs — Algebra V1.9: `globalState`, MintParams without fee), `@pine/shared/abi/external` (Seer GnosisRouter, ERC20), `@pine/shared/tx-plan` (allowlist covers splitFromBase, approvals, createAndInitializePoolIfNecessary, mint, decreaseLiquidity, collect, burn, mergeToBase, redeemToBase), `@pine/shared/deployment` (`buildDeploymentManifest`, `GNOSIS_EXTERNAL.amm`).
 - Pricing, orientation, tick spacing (60), pool-initialisation griefing and the ladder economics: `docs/research/liquidity-amm.md` sections 2, 3 and 7.
 - API harness: `createScriptedChain` (script `eth_call` responses for factory, pool, quoter, sDAI `previewDeposit`/`convertToAssets`), `MemoryReadModel` (claims with outcome tokens), `FakeCompliance`, `FakeQuotas`.
