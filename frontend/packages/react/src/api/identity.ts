@@ -244,7 +244,9 @@ export function useWalletSessionGuard(): WalletSwitch | null {
     switchSeq += 1
     const change = { seq: switchSeq, from: bound as Address, to: selected as Address }
     setSwitch({ ...change, state: 'signing_out' })
-    signOut()
+    // SEC-AUTH-13: fail closed. The session of the previous wallet is dropped in this browser even when Pine could not
+    // end it server-side (the state says 'failed', so the user is told).
+    signOut({ force: true })
       .then(
         () => setSwitch({ ...change, state: 'signed_out' }),
         () => setSwitch({ ...change, state: 'failed' }),

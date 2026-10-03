@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { usePathname } from 'next/navigation'
 import { useState } from 'react'
 import { DropdownMenu, Dialog as RDialog } from 'radix-ui'
@@ -90,7 +91,15 @@ function BackendAccountMenu({ backend, signOut }: { backend: BackendIdentity; si
               </DropdownMenu.Item>
             ))}
             <DropdownMenu.Separator className="my-1 h-px bg-edge" />
-            <DropdownMenu.Item onSelect={() => void signOut().catch(() => undefined)} className={cn(MENU_ITEM, 'cursor-pointer')}>
+            <DropdownMenu.Item
+              onSelect={() =>
+                void signOut().catch((e: unknown) =>
+                  // The session stays valid when Pine could not end it: say so instead of looking signed out.
+                  toast.error('Pine could not sign you out', { description: e instanceof Error ? e.message : 'Try again in a moment.' }),
+                )
+              }
+              className={cn(MENU_ITEM, 'cursor-pointer')}
+            >
               Sign out
             </DropdownMenu.Item>
           </DropdownMenu.Content>
