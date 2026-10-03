@@ -6,13 +6,13 @@ import type { RepoSummary, SourceRef } from '@pine/core'
 import { shortSha } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { GIT_BRANCH_PATTERN } from '@pine/data'
-import { toSourceRef, useAccount, useGitHubLink, useGitHubPullCommits, useGitHubPulls, useResolveGitHubInput, type ClaimComposer } from '@pine/react'
+import { toSourceRef, useGitHubLink, useGitHubPullCommits, useGitHubPulls, useResolveGitHubInput, type ClaimComposer } from '@pine/react'
 import { GitBranch, GitPullRequest, Lock, Search } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { FormField, Notice, Skeleton } from '@/components/ui/primitives'
 import { StageHeader, StageIssues, StageNav, type StepNav } from '../shared'
 import { PinnedSha, SourceCard } from '../SourceParts'
-import { ApiIdentityGate, identityReady, useApiIdentity } from './identity'
+import { ApiIdentityGate, identityReady, useApiIdentity, useIdentityActions } from './identity'
 
 // Source stage in api mode. GitHub is read through the Pine backend with the user's linked account. Existence is not
 // membership (SEC-GH-11): the commit is pinned together with the pull request or the branch that contains it, and the
@@ -131,8 +131,8 @@ function RepoPicker({ repo, onPull, onCommit }: { repo: RepoSummary; onPull: (n:
 
 export function ApiStageSource({ c, nav, initialInput }: { c: ClaimComposer; nav: StepNav; initialInput?: string }) {
   const id = useApiIdentity()
-  const account = useAccount()
   const gh = useGitHubLink()
+  const identity = useIdentityActions(c.saveNow)
   const ready = identityReady(id, 'github')
   const pinned = c.draft.source
   const [input, setInput] = useState(initialInput ?? '')
@@ -203,7 +203,7 @@ export function ApiStageSource({ c, nav, initialInput }: { c: ClaimComposer; nav
         repositories only), pins the full 40-character SHA, and proves when you request the preview that the commit belongs to the repository.
       </StageHeader>
       {!ready ? (
-        <ApiIdentityGate need="github" reason="Pine reads GitHub for the wallet you sign in with, so pinning a commit starts with signing in and linking GitHub." />
+        <ApiIdentityGate need="github" saveDraft={c.saveNow} reason="Pine reads GitHub for the wallet you sign in with, so pinning a commit starts with signing in and linking GitHub." />
       ) : (
         <>
           <form
@@ -308,11 +308,11 @@ export function ApiStageSource({ c, nav, initialInput }: { c: ClaimComposer; nav
                 title={status === 401 ? 'Your Pine session has ended' : 'GitHub is not linked to this session'}
                 action={
                   status === 401 ? (
-                    <Button size="sm" onClick={() => void account.signIn().catch(() => undefined)}>
+                    <Button size="sm" onClick={identity.signIn}>
                       Sign in again
                     </Button>
                   ) : (
-                    <Button size="sm" onClick={() => void gh.link().catch(() => undefined)} loading={gh.busy}>
+                    <Button size="sm" onClick={identity.linkGitHub} loading={gh.busy}>
                       Link GitHub again
                     </Button>
                   )

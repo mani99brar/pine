@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import type { ClaimComposer } from '@pine/react'
+import { isDraftFrozen, type ClaimComposer } from '@pine/react'
 import { formatAmount, formatDate, shortHash } from '@pine/core'
 import { Check, Lock } from 'lucide-react'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
@@ -77,7 +77,7 @@ function apiFacetState(c: ClaimComposer, api: NonNullable<ClaimComposer['api']>,
   if (reached('deadlines')) cut.push('deadline', 'oracle')
   if (reached('funding')) cut.push('funding')
   if (documentSha256 && c.validation.ok) cut.push('manifest')
-  if (c.frozen) cut.push('market')
+  if (isDraftFrozen(d)) cut.push('market')
   return {
     cut,
     seeds: {
@@ -109,7 +109,8 @@ function apiFacetState(c: ClaimComposer, api: NonNullable<ClaimComposer['api']>,
 export function CuttingBench({ c, facets, compact }: { c: ClaimComposer; facets: FacetState; compact?: boolean }) {
   const reduce = useReduceMotion()
   const hue = FAMILY_HEX[c.policy?.family ?? 'FUNC']
-  const sealed = c.frozen
+  // Sealed once the market transaction confirmed (api mode also locks the inputs while it may still land).
+  const sealed = isDraftFrozen(c.draft)
   const n = facets.cut.length
   const sharp = Math.round((n / FACET_ORDER.length) * 100)
   const title = c.draft.spec.title?.trim()

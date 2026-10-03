@@ -23,8 +23,8 @@ import { WriteErrorNotice } from './WriteError'
 const isoOf = (unix: number): IsoDate => new Date(unix * 1000).toISOString().replace(/\.\d{3}Z$/, 'Z')
 const UINT = /^(?:0|[1-9][0-9]{0,77})$/
 
-/** Steps where a publication has started: the review cannot be redone, only followed. */
-const PUBLISHING = new Set(['publishing', 'confirming', 'confirmed', 'failed', 'expired'])
+/** A publication is under way or done: the review cannot be redone, only followed (a failed or expired one can be). */
+const PUBLISHING = new Set(['publishing', 'confirming', 'confirmed'])
 
 export const ATTESTATION_TEXT = 'I attest no counterexample would demonstrate an exploitable flaw in a deployed system holding third-party funds or data.'
 
@@ -215,7 +215,7 @@ export function ApiStageReview({ c, nav, acknowledged, setAcknowledged }: { c: C
           </Notice>
         ) : null}
 
-        {!started && <ApiIdentityGate need="preview" reason="Pine previews claims for the wallet you sign in with, and checks the commit through your linked GitHub account." />}
+        {!started && <ApiIdentityGate need="preview" saveDraft={c.saveNow} reason="Pine previews claims for the wallet you sign in with, and checks the commit through your linked GitHub account." />}
 
         {!started && !preview && c.api?.questionSketch && (
           <div className="cut-xl well p-5 sm:p-6">
@@ -251,7 +251,7 @@ export function ApiStageReview({ c, nav, acknowledged, setAcknowledged }: { c: C
           </section>
         )}
 
-        {pub.error && !started && <WriteErrorNotice error={pub.error} onRetry={requestPreview} onRepreview={requestPreview} />}
+        {pub.error && !started && <WriteErrorNotice error={pub.error} onRetry={requestPreview} onRepreview={requestPreview} saveDraft={c.saveNow} />}
 
         {preview && (
           <section aria-labelledby="preview-title" className="grid gap-4">

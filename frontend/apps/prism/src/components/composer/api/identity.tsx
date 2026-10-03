@@ -73,18 +73,35 @@ function GatePanel({ title, icon, children, className }: { title: string; icon: 
 }
 
 /**
+ * Sign-in replaces the per-user query cache (the draft being composed among it) and linking GitHub leaves the page, so
+ * pending draft edits are saved first.
+ */
+export function useIdentityActions(saveDraft?: () => Promise<void>): { signIn(): void; linkGitHub(): void } {
+  const a = useAccount()
+  const gh = useGitHubLink()
+  const save = async () => {
+    await saveDraft?.().catch(() => undefined)
+  }
+  return {
+    signIn: () => void save().then(() => a.signIn()).catch(() => undefined),
+    linkGitHub: () => void save().then(() => gh.link()).catch(() => undefined),
+  }
+}
+
+/**
  * The next identity step an action needs, as a call to action (sign in with the wallet, link GitHub, accept the current
  * terms, connect the session wallet); nothing once the identity is ready.
  */
-export function ApiIdentityGate({ need, reason, className }: { need: IdentityNeed; reason: ReactNode; className?: string }) {
+export function ApiIdentityGate({ need, reason, className, saveDraft }: { need: IdentityNeed; reason: ReactNode; className?: string; saveDraft?: () => Promise<void> }) {
   const a = useAccount()
   const w = useWallet()
   const gh = useGitHubLink()
   const id = useApiIdentity()
+  const actions = useIdentityActions(saveDraft)
   const siwe = a.backend?.siwe
   const step: SiweStep = siwe?.step ?? 'idle'
   const signing = step === 'challenge' || step === 'signing' || step === 'verifying'
-  const signIn = () => void a.signIn().catch(() => undefined)
+  const signIn = actions.signIn
 
   if (id.status === 'loading') return <LoadingBlock lines={2} label="Checking your Pine session" className={className} />
 
@@ -124,7 +141,7 @@ export function ApiIdentityGate({ need, reason, className }: { need: IdentityNee
           Pine reads public repositories through a GitHub app with no permissions, linked to your wallet. GitHub sends you back to Pine afterwards; this draft
           stays saved in this browser, so you can reopen it from Drafts.
         </p>
-        <Button className="mt-4" onClick={() => void gh.link().catch(() => undefined)} loading={gh.busy} icon={<Link2 size={15} aria-hidden />}>
+        <Button className="mt-4" onClick={actions.linkGitHub} loading={gh.busy} icon={<Link2 size={15} aria-hidden />}>
           Link GitHub
         </Button>
         {gh.error && (

@@ -182,8 +182,8 @@ export function ApiStagePublish({ c, nav, acknowledged }: { c: ClaimComposer; na
               Pine reports the claim as confirmed. Checking the market in Pine&apos;s claim registry through your wallet&apos;s network…
             </p>
           )}
-          {pub.error && <WriteErrorNotice className="mt-5" error={pub.error} onRetry={() => void pub.publish()} onRepreview={() => nav.go('review')} />}
-          {!ready && !locked && <ApiIdentityGate need="publish" className="mt-5" reason="Pine publishes claims for the wallet you signed in with." />}
+          {pub.error && <WriteErrorNotice className="mt-5" error={pub.error} onRetry={() => void pub.publish()} onRepreview={() => nav.go('review')} saveDraft={c.saveNow} />}
+          {!ready && !locked && <ApiIdentityGate need="publish" className="mt-5" saveDraft={c.saveNow} reason="Pine publishes claims for the wallet you signed in with." />}
           <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-edge pt-5">
             {pub.status === 'confirming' || (pub.status === 'confirmed' && !market) ? (
               <Button variant="glass" onClick={() => void pub.refresh()} icon={<RotateCw size={15} aria-hidden />}>

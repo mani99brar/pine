@@ -2,10 +2,11 @@
 
 import { useState, type ReactNode } from 'react'
 import type { WriteErrorInfo } from '@pine/data'
-import { useAccount, useGitHubLink } from '@pine/react'
+import { useGitHubLink } from '@pine/react'
 import { Button } from '@/components/ui/Button'
 import { Notice } from '@/components/ui/primitives'
 import { useNowMs } from '@/lib/hooks'
+import { useIdentityActions } from './identity'
 
 // A failed backend write, with the one thing to do next: sign in again (session ended, terms changed), link GitHub
 // again, request a new preview (offer expired, draft changed), or wait for Retry-After (NOT_READY, rate limits).
@@ -37,6 +38,8 @@ interface WriteErrorNoticeProps {
   onRetry?: () => void
   /** Goes back to request a new preview. */
   onRepreview?: () => void
+  /** Saves pending draft edits before signing in again or linking GitHub. */
+  saveDraft?: () => Promise<void>
   className?: string
 }
 
@@ -45,20 +48,20 @@ export function WriteErrorNotice(props: WriteErrorNoticeProps) {
   return <ErrorNotice key={`${props.error.code}|${props.error.message}|${props.error.retryAfter ?? ''}`} {...props} />
 }
 
-function ErrorNotice({ error, onRetry, onRepreview, className }: WriteErrorNoticeProps) {
-  const account = useAccount()
+function ErrorNotice({ error, onRetry, onRepreview, saveDraft, className }: WriteErrorNoticeProps) {
   const gh = useGitHubLink()
+  const identity = useIdentityActions(saveDraft)
   const left = useCountdown(error.action === 'retry_later' ? error.retryAfter : undefined)
   let action: ReactNode = null
   if (error.action === 'sign_in') {
     action = (
-      <Button size="sm" onClick={() => void account.signIn().catch(() => undefined)}>
+      <Button size="sm" onClick={identity.signIn}>
         Sign in again
       </Button>
     )
   } else if (error.action === 'link_github') {
     action = (
-      <Button size="sm" onClick={() => void gh.link().catch(() => undefined)} loading={gh.busy}>
+      <Button size="sm" onClick={identity.linkGitHub} loading={gh.busy}>
         Link GitHub again
       </Button>
     )

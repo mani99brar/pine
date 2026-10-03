@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClaimDraft, ComposerStage } from '@pine/core'
 import { formatDate } from '@pine/core'
-import { DEFAULT_SPENDING_LIMIT, defaultDeadline, defaultOracle, useAccount, useClaimComposer, usePine, type ClaimComposer } from '@pine/react'
+import { DEFAULT_SPENDING_LIMIT, defaultDeadline, defaultOracle, isDraftFrozen, useAccount, useClaimComposer, usePine, type ClaimComposer } from '@pine/react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Check, Lock } from 'lucide-react'
 import { CuttingBench, FacetRail, facetState } from './CuttingBench'
@@ -195,7 +195,7 @@ function ComposerBody({ c, draftId, initialInput, fromClaimId, initialPolicy }: 
             </Link>
           </p>
         </div>
-        {c.frozen && (
+        {isDraftFrozen(c.draft) && (
           <p className="tag gap-1.5 px-3 py-1 text-[0.84375rem] text-lumen">
             <Lock size={13} aria-hidden /> Sealed: terms frozen
           </p>
