@@ -77,7 +77,11 @@ export interface VerifiedPreview {
   documentSha256: Hex32
   cid: string
   document: ClaimDocument
-  question: string
+  /**
+   * The market question ClaimRegistry will ask for this document, composed in this browser; null when the document
+   * cannot produce one (an issue then blocks publishing). Never the backend's stated text.
+   */
+  question: string | null
   tokenNames: readonly [string, string]
   planExpiresAt: number
   draftRevision: number
@@ -258,7 +262,7 @@ export function verifyPreview(response: ClaimPreviewResponse, expected: PreviewE
     documentSha256: digest,
     cid: rawCidFromSha256(digest),
     document: doc,
-    question: question ?? response.question,
+    question,
     tokenNames: names,
     planExpiresAt: response.planExpiresAt,
     draftRevision: response.draftRevision,
