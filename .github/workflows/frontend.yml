@@ -58,4 +58,11 @@ jobs:
           NEXT_PUBLIC_PINE_CLAIM_REGISTRY: "0x0000000000000000000000000000000000000000"
           NEXT_PUBLIC_PINE_EVIDENCE_REGISTRY: "0x0000000000000000000000000000000000000001"
           NEXT_PUBLIC_PINE_DEPLOYMENT_BLOCK: "0"
-        run: pnpm -C apps/prism build
+        # next/font downloads the Google fonts at build time; a transient fetch failure is retried twice.
+        run: |
+          for attempt in 1 2 3; do
+            pnpm -C apps/prism build && exit 0
+            echo "build attempt $attempt failed; retrying"
+            sleep 15
+          done
+          exit 1

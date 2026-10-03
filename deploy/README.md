@@ -102,6 +102,9 @@ node scripts/sync-shared.mjs --check             # the bundled plan verifier equ
 set -a && . /etc/pine/web.env && set +a && pnpm -C apps/prism build
 ```
 
+The build downloads the app's Google fonts (`next/font/google`), so the build host needs HTTPS access to
+fonts.googleapis.com and fonts.gstatic.com (the running server does not); retry a build that fails to fetch them.
+
 The bundle pins Pine's deployment (`NEXT_PUBLIC_PINE_CLAIM_REGISTRY`, `NEXT_PUBLIC_PINE_EVIDENCE_REGISTRY`,
 `NEXT_PUBLIC_PINE_DEPLOYMENT_BLOCK`; the same values as the API's): the browser verifies every transaction plan against
 it and the verified Gnosis constants before any wallet prompt, so a wrong value makes every plan fail verification
