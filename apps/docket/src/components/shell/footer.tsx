@@ -44,7 +44,7 @@ export function Footer() {
             <p className="mt-3 text-sm text-graphite">{COPY.noMergeAuthority}</p>
           </div>
           {COLUMNS.map((col) => (
-            <nav key={col.title} aria-label={col.title}>
+            <nav key={col.title} aria-label={`Footer: ${col.title}`}>
               <h2 className="text-base font-bold">{col.title}</h2>
               <ul className="mt-3 space-y-2 text-[15px]">
                 {col.links.map((l) => (

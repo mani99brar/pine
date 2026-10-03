@@ -93,7 +93,7 @@ export function PublishStep() {
                 <p className="text-[15px] text-graphite">
                   {wallet.isConnected && wallet.address ? (
                     <>
-                      <code className="font-mono text-[13px] text-ink">{wallet.address}</code>
+                      <code className="font-mono text-[13px] break-all text-ink">{wallet.address}</code>
                       {wallet.isDemo ? ' (simulated)' : ''}
                     </>
                   ) : (

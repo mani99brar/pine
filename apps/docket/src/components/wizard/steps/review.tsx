@@ -122,7 +122,7 @@ export function ReviewStep() {
         <TermsOnRecord manifest={manifest} manifestHash={manifestHash} />
         <details className="mt-5">
           <summary className="font-bold text-violet underline underline-offset-4">Show the manifest as JSON</summary>
-          <pre className="mt-3 max-h-[28rem] overflow-auto border border-rule bg-bond p-4 font-mono text-[12.5px] leading-5 whitespace-pre-wrap break-all">
+          <pre tabIndex={0} aria-label="Manifest JSON" className="mt-3 max-h-[28rem] overflow-auto border border-rule bg-bond p-4 font-mono text-[12.5px] leading-5 whitespace-pre-wrap break-all">
             {JSON.stringify(manifest, null, 2)}
           </pre>
         </details>
@@ -149,6 +149,12 @@ export function ReviewStep() {
               <MarginNote title="Why we ask">
                 <p>Prediction markets are new to most people filing claims. These are the points people most often get wrong.</p>
                 <p>{COPY.noMergeAuthority}</p>
+                <p>
+                  <a href="/risks" target="_blank" rel="noopener" className="link">
+                    Read every disclosure and open launch gate
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                </p>
               </MarginNote>
             </aside>
           </div>

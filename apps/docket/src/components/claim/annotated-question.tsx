@@ -70,6 +70,7 @@ export function AnnotatedQuestion({
   layout = 'side',
   collapseAfter,
   compact = false,
+  notesHeading = true,
 }: {
   text: string
   annotations: Annotation[]
@@ -81,6 +82,8 @@ export function AnnotatedQuestion({
   collapseAfter?: number
   /** Slightly smaller record type, for previews */
   compact?: boolean
+  /** Render the notes title as a heading (h3). Off where no h2 precedes it, such as the landing hero. */
+  notesHeading?: boolean
 }) {
   const [active, setActive] = useState<number | null>(null)
   const [showAll, setShowAll] = useState(false)
@@ -104,6 +107,9 @@ export function AnnotatedQuestion({
                 href={`#${idPrefix}-note-${s.n}`}
                 className="term text-ink no-underline"
                 data-active={active === s.n}
+                onClick={() => {
+                  if (collapseAfter && s.n! > collapseAfter) setShowAll(true)
+                }}
                 onMouseEnter={() => setActive(s.n!)}
                 onMouseLeave={() => setActive(null)}
                 onFocus={() => setActive(s.n!)}
@@ -122,7 +128,11 @@ export function AnnotatedQuestion({
         </p>
       </blockquote>
       <div>
-        <h3 className="text-sm font-bold text-graphite">{notesTitle}</h3>
+        {notesHeading ? (
+          <h3 className="text-sm font-bold text-graphite">{notesTitle}</h3>
+        ) : (
+          <p className="text-sm font-bold text-graphite">{notesTitle}</p>
+        )}
         <ol className={cn('mt-2', layout === 'stacked' ? 'grid gap-x-4 gap-y-1 sm:grid-cols-2' : 'space-y-1')}>
           {visible.map((a, i) => {
             const n = i + 1

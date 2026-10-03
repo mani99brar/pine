@@ -49,7 +49,8 @@ export function ClaimActions({ claim }: { claim: ClaimDetail }) {
           window.print()
         }}
       >
-        Print or save as PDF
+        <span className="sm:hidden">Print</span>
+        <span className="hidden sm:inline">Print or save as PDF</span>
       </Button>
       <ButtonLink href="#agent" variant="secondary" icon={<Bot aria-hidden />}>
         Agent brief

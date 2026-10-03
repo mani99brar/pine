@@ -17,6 +17,7 @@ import {
 } from '@pine/react'
 import { FilePlus2, GitCommitHorizontal, GitPullRequest, Search, Star } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { plural } from '@/lib/format'
 import { Button, ButtonLink } from '@/components/ui/button'
 import { Breadcrumbs, EmptyState, Skeleton } from '@/components/ui/layout'
 import { ExternalLink } from '@/components/ui/external-link'
@@ -115,7 +116,7 @@ function RepoRow({ repo: r }: { repo: RepoSummary }) {
         <span className="inline-flex items-center gap-1">
           <Star aria-hidden className="size-3.5" /> {r.stars}
         </span>
-        <span>{r.openPullRequests ?? 0} open PRs</span>
+        <span>{plural(r.openPullRequests ?? 0, 'open pull request')}</span>
         <span>Updated {formatDate(r.updatedAt, 'short')}</span>
       </p>
     </li>

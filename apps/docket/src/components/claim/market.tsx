@@ -26,7 +26,9 @@ export function MarketSection({ claim }: { claim: ClaimDetail }) {
   if (!m) {
     return (
       <p className="measure text-graphite">
-        No market exists yet, so there is no price. The market is created during filing, and its terms freeze at that moment.
+        {claim.status === 'failed'
+          ? 'No market was created, so there is no price and nothing to trade.'
+          : 'No market exists yet, so there is no price. The market is created during filing, and its terms freeze at that moment.'}
       </p>
     )
   }
@@ -41,15 +43,20 @@ export function MarketSection({ claim }: { claim: ClaimDetail }) {
   const yes = m.outcomes.find((o) => o.label.toLowerCase().startsWith('yes')) ?? m.outcomes[0]
   const change = yes?.change24h
   const sym = m.collateral.symbol
+  const decided = claim.status === 'resolved' || claim.status === 'settled'
 
   return (
     <div className="space-y-8">
       <div className="grid gap-x-10 gap-y-6 lg:grid-cols-[minmax(0,1fr)_17rem] xl:grid-cols-[minmax(0,1fr)_19rem]">
         <div className="min-w-0">
-          <p className="text-[15px] font-bold text-graphite">{COPY.priceLabel}</p>
+          <p className="text-[15px] font-bold text-graphite">{decided ? 'Last Yes price, after the question was decided' : COPY.priceLabel}</p>
           <p className="mt-1 flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="text-[3.25rem] leading-none font-[800] tracking-[-0.03em]">{yes ? formatPrice(yes.price) : '—'}</span>
-            {typeof change === 'number' ? (
+            {decided ? (
+              <span className="text-[15px] text-graphite measure">
+                The outcome is final, so this price now tracks what a Yes token pays out. It is no longer a market-implied chance.
+              </span>
+            ) : typeof change === 'number' ? (
               <span className="text-[15px] text-graphite">
                 {change === 0 ? 'Unchanged' : `${change > 0 ? 'Up' : 'Down'} ${Math.abs(change * 100).toFixed(1)} points`} in 24 hours
               </span>
@@ -209,6 +216,7 @@ function ImpactCalculator({ claimId, symbol }: { claimId: string; symbol: string
         ) : !valid ? (
           <p className="text-red">Enter an amount greater than zero, like 25.</p>
         ) : result ? (
+          <>
           <dl className="grid gap-x-6 gap-y-2 sm:grid-cols-3">
             <div>
               <dt className="text-sm text-graphite">Average price</dt>
@@ -224,12 +232,13 @@ function ImpactCalculator({ claimId, symbol }: { claimId: string; symbol: string
                 {result.executable ? 'All of it' : `${formatAmount(String(result.filled), { maxDecimals: 2 })} ${symbol}`}
               </dd>
             </div>
-            {!result.executable ? (
-              <p className="text-sm text-ochre sm:col-span-3">
-                The book is too thin to fill the whole amount. The rest would need new liquidity or counterparties.
-              </p>
-            ) : null}
           </dl>
+          {!result.executable ? (
+            <p className="mt-2 text-sm text-ochre">
+              The book is too thin to fill the whole amount. The rest would need new liquidity or counterparties.
+            </p>
+          ) : null}
+          </>
         ) : (
           <p className="text-graphite">Could not estimate impact for this amount.</p>
         )}

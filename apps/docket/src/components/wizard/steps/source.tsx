@@ -13,8 +13,9 @@ import {
   useGitHubViewerRepos,
   useResolveGitHubInput,
 } from '@pine/react'
-import { GitCommitHorizontal, GitPullRequest, Link2, Loader2, Lock, Search } from 'lucide-react'
+import { ChevronRight, GitCommitHorizontal, GitPullRequest, Link2, Loader2, Lock, Search } from 'lucide-react'
 import { cn } from '@/lib/cn'
+import { plural } from '@/lib/format'
 import { Button } from '@/components/ui/button'
 import { Checkbox, Field, Input, MarginNote } from '@/components/ui/field'
 import { ExternalLink } from '@/components/ui/external-link'
@@ -302,19 +303,36 @@ function ResolvedPreview({
   )
 }
 
-function RepoCommits({ repo, onPin }: { repo: RepoSummary; onPin: (s: SourceRef) => void }) {
+function RepoCommits({
+  repo,
+  onPin,
+  pull: controlledPull,
+  onPullChange,
+}: {
+  repo: RepoSummary
+  onPin: (s: SourceRef) => void
+  /** When the parent shows its own trail, it owns which pull request is open. */
+  pull?: PullSummary | null
+  onPullChange?: (p: PullSummary | null) => void
+}) {
   const pulls = useGitHubPulls(repo.owner, repo.name, 'open')
   const commits = useGitHubCommits(repo.owner, repo.name, repo.defaultBranch)
-  const [pull, setPull] = useState<PullSummary | null>(null)
+  const [ownPull, setOwnPull] = useState<PullSummary | null>(null)
+  const controlled = onPullChange !== undefined
+  const pull = controlled ? (controlledPull ?? null) : ownPull
+  const setPull = controlled ? onPullChange : setOwnPull
   if (pull) {
-    return (
-      <PullPicker repo={repo} pull={pull} onPin={onPin} onBack={() => setPull(null)} />
-    )
+    return <PullPicker repo={repo} pull={pull} onPin={onPin} onBack={controlled ? undefined : () => setPull(null)} />
   }
   return (
     <div className="space-y-6">
       <p className="text-[15px]">
-        <strong>{repo.fullName}</strong> resolved. Choose a pull request, or a commit on <code className="font-mono">{repo.defaultBranch}</code>.
+        {controlled ? null : (
+          <>
+            <strong>{repo.fullName}</strong> found.{' '}
+          </>
+        )}
+        Choose a pull request, or a commit on <code className="font-mono">{repo.defaultBranch}</code>.
       </p>
       <div>
         <h3 className="text-lg font-bold">Open pull requests</h3>
@@ -348,13 +366,15 @@ function RepoCommits({ repo, onPin }: { repo: RepoSummary; onPin: (s: SourceRef)
   )
 }
 
-function PullPicker({ repo, pull, onPin, onBack }: { repo: RepoSummary; pull: PullSummary; onPin: (s: SourceRef) => void; onBack: () => void }) {
+function PullPicker({ repo, pull, onPin, onBack }: { repo: RepoSummary; pull: PullSummary; onPin: (s: SourceRef) => void; onBack?: () => void }) {
   const commits = useGitHubPullCommits(repo.owner, repo.name, pull.number)
   return (
     <div className="space-y-3">
-      <Button variant="quiet" onClick={onBack}>
-        Back to {repo.fullName}
-      </Button>
+      {onBack ? (
+        <Button variant="quiet" onClick={onBack}>
+          Back to {repo.fullName}
+        </Button>
+      ) : null}
       <p className="untrusted font-bold">
         #{pull.number}: {pull.title}
       </p>
@@ -412,6 +432,7 @@ function BrowsePanel({ onPin }: { onPin: (s: SourceRef) => void }) {
   const account = useAccount()
   const repos = useGitHubViewerRepos()
   const [repo, setRepo] = useState<RepoSummary | null>(null)
+  const [pull, setPull] = useState<PullSummary | null>(null)
   if (account.status === 'signed_out') {
     return (
       <Notice
@@ -428,12 +449,52 @@ function BrowsePanel({ onPin }: { onPin: (s: SourceRef) => void }) {
     )
   }
   if (repo) {
+    const crumb = 'font-bold text-violet underline underline-offset-4 hover:text-violet-deep'
     return (
-      <div className="space-y-3">
-        <Button variant="quiet" onClick={() => setRepo(null)}>
-          Back to your repositories
-        </Button>
-        <RepoCommits repo={repo} onPin={onPin} />
+      <div className="space-y-4">
+        <nav aria-label="Where you are in your repositories">
+          <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[15px]">
+            <li>
+              <button
+                type="button"
+                className={crumb}
+                onClick={() => {
+                  setPull(null)
+                  setRepo(null)
+                }}
+              >
+                Your repositories
+              </button>
+            </li>
+            <li aria-hidden className="text-graphite">
+              <ChevronRight className="size-4" />
+            </li>
+            <li>
+              {pull ? (
+                <button type="button" className={crumb} onClick={() => setPull(null)}>
+                  {repo.fullName}
+                </button>
+              ) : (
+                <span aria-current="page" className="font-bold">
+                  {repo.fullName}
+                </span>
+              )}
+            </li>
+            {pull ? (
+              <>
+                <li aria-hidden className="text-graphite">
+                  <ChevronRight className="size-4" />
+                </li>
+                <li>
+                  <span aria-current="page" className="font-bold">
+                    Pull request #{pull.number}
+                  </span>
+                </li>
+              </>
+            ) : null}
+          </ol>
+        </nav>
+        <RepoCommits repo={repo} onPin={onPin} pull={pull} onPullChange={setPull} />
       </div>
     )
   }
@@ -457,7 +518,7 @@ function BrowsePanel({ onPin }: { onPin: (s: SourceRef) => void }) {
               {r.description ? <span className="untrusted block text-sm text-graphite">{r.description}</span> : null}
             </span>
             <span className="shrink-0 text-sm text-graphite">
-              {r.openPullRequests ?? 0} open PRs
+              {plural(r.openPullRequests ?? 0, 'open pull request')}
             </span>
           </button>
         </li>

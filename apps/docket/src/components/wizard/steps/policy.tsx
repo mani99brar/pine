@@ -6,6 +6,7 @@ import { POLICIES, shortHash } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { Lock } from 'lucide-react'
 import { Checkbox, Choices, Field, Input, ListInput, MarginNote, Select, Textarea } from '@/components/ui/field'
+import { Button } from '@/components/ui/button'
 import { useWizard } from '../context'
 
 export function PolicyStep() {
@@ -16,6 +17,17 @@ export function PolicyStep() {
 
   const setParam = (key: string, v: string | string[] | boolean) =>
     composer.update((d) => ({ ...d, spec: { ...d.spec, parameters: { ...(d.spec.parameters ?? {}), [key]: v } } }))
+
+  const emptyWithExample = (policy?.parameters ?? []).filter((p) => usableExample(p) !== undefined && isEmpty(params[p.key]))
+  const fillExamples = () =>
+    composer.update((d) => {
+      const next = { ...(d.spec.parameters ?? {}) } as Record<string, string | string[] | boolean>
+      for (const p of emptyWithExample) {
+        const ex = usableExample(p)
+        if (ex !== undefined && isEmpty(next[p.key])) next[p.key] = ex
+      }
+      return { ...d, spec: { ...d.spec, parameters: next } }
+    })
 
   return (
     <>
@@ -102,7 +114,27 @@ export function PolicyStep() {
 
           {policy.parameters.length > 0 ? (
             <div className="space-y-7 border-t border-rule pt-7">
-              <h3 className="text-xl">What {policy.id} needs to know</h3>
+              <div className="grid gap-x-10 gap-y-3 lg:grid-cols-[minmax(0,1fr)_17rem] xl:grid-cols-[minmax(0,1fr)_19rem]">
+                <div className="min-w-0">
+                  <h3 className="text-xl">What {policy.id} needs to know</h3>
+                  <p className="mt-1 text-[15px] text-graphite measure">
+                    {(() => {
+                      const req = policy.parameters.filter((p) => p.required).length
+                      const all = policy.parameters.length
+                      return req === all ? `All ${all} details are required.` : `${req} of these ${all} details are required.`
+                    })()}{' '}
+                    They become part of the terms investigators and jurors read, so write them about your code.
+                  </p>
+                  {emptyWithExample.length > 0 ? (
+                    <p className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-[15px]">
+                      <Button size="sm" variant="secondary" onClick={fillExamples}>
+                        Fill the {emptyWithExample.length} empty field{emptyWithExample.length === 1 ? '' : 's'} with examples
+                      </Button>
+                      <span className="text-sm text-graphite">Then edit each one so it describes your code, not the example.</span>
+                    </p>
+                  ) : null}
+                </div>
+              </div>
               {policy.parameters.map((p) => (
                 <ParamField key={p.key} spec={p} value={params[p.key]} onChange={(v) => setParam(p.key, v)} error={errorFor(`spec.parameters.${p.key}`)} />
               ))}
@@ -141,7 +173,7 @@ function ParamField({
   let control: React.ReactNode
   switch (p.kind) {
     case 'longtext':
-      control = <Textarea {...common} rows={4} value={(value as string) ?? ''} maxLength={p.maxLength} placeholder={p.placeholder} onChange={(e) => onChange(e.target.value)} />
+      control = <Textarea {...common} rows={4} value={(value as string) ?? ''} maxLength={p.maxLength} placeholder={p.placeholder ? `e.g. ${p.placeholder}` : undefined} onChange={(e) => onChange(e.target.value)} />
       break
     case 'select':
       control = (
@@ -173,7 +205,7 @@ function ParamField({
       break
     }
     case 'list':
-      control = <ListInput id={id} value={Array.isArray(value) ? value : []} onChange={onChange} placeholder={p.placeholder} />
+      control = <ListInput id={id} value={Array.isArray(value) ? value : []} onChange={onChange} placeholder={p.placeholder ? `e.g. ${p.placeholder}` : undefined} />
       break
     case 'boolean':
       control = (
@@ -198,7 +230,7 @@ function ParamField({
           type={p.kind === 'url' ? 'url' : 'text'}
           value={(value as string) ?? ''}
           maxLength={p.maxLength}
-          placeholder={p.placeholder}
+          placeholder={p.placeholder ? `e.g. ${p.placeholder}` : undefined}
           onChange={(e) => onChange(e.target.value)}
         />
       )
@@ -208,4 +240,23 @@ function ParamField({
       {control}
     </Field>
   )
+}
+
+function isEmpty(v: string | string[] | boolean | undefined): boolean {
+  return v === undefined || v === '' || (Array.isArray(v) && v.length === 0)
+}
+
+/** The policy's example, when it fits the control (a select only takes one of its own options). */
+function usableExample(p: PolicyParameterSpec): string | string[] | boolean | undefined {
+  const ex = p.example
+  if (ex === undefined) return undefined
+  if (p.kind === 'boolean') return typeof ex === 'boolean' ? ex : undefined
+  if (p.kind === 'list' || p.kind === 'multiselect') {
+    const arr = Array.isArray(ex) ? ex : typeof ex === 'string' ? [ex] : undefined
+    if (!arr) return undefined
+    return p.kind === 'multiselect' ? arr.filter((v) => p.options?.some((o) => o.value === v)) : arr
+  }
+  if (typeof ex !== 'string') return undefined
+  if (p.kind === 'select') return p.options?.some((o) => o.value === ex) ? ex : undefined
+  return ex
 }

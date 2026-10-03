@@ -116,7 +116,7 @@ export default async function AgentsPage() {
                 </Link>
                 , the open claim with the nearest deadline.
               </p>
-              <pre className="mt-3 max-h-[36rem] overflow-auto border border-rule bg-sheet p-5 font-mono text-[13px] leading-6 whitespace-pre-wrap">{md}</pre>
+              <pre tabIndex={0} aria-label="Agent brief in Markdown" className="mt-3 max-h-[36rem] overflow-auto border border-rule bg-sheet p-5 font-mono text-[13px] leading-6 whitespace-pre-wrap">{md}</pre>
             </section>
           ) : null}
         </div>

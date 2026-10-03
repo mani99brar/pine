@@ -89,6 +89,26 @@ function ManualConfirm({ onConfirm }: { onConfirm: (hash?: Hex) => void }) {
 }
 
 /**
+ * Step descriptions from the planner end manual DEX steps with an internal note and a raw URL
+ * ("Completed via Seer liquidity interface — deep link. https://…"). The "Open the DEX" button already
+ * carries that link, so the sentence is dropped from what people read.
+ */
+function readableDescription(text: string): string {
+  return text
+    .replace(/\s*Completed via [^.]*?deep link\.\s*(https?:\/\/\S+)?/gi, ' ')
+    .replace(/\s+(https?:\/\/\S+)\s*$/i, '')
+    .trim()
+}
+
+/** Wallet errors are written for developers. Say what happened and what it cost. */
+function readableError(error: string): string {
+  if (/user (rejected|denied)|rejected the request|request rejected|denied transaction/i.test(error)) {
+    return 'Your wallet declined to sign this step, so nothing was sent and nothing was spent. Retry when you are ready.'
+  }
+  return error
+}
+
+/**
  * Ordered transaction steps with live status. Steps are numbered because they run in sequence.
  */
 export function TxSteps({
@@ -138,7 +158,7 @@ export function TxSteps({
                     </span>
                   ) : null}
                 </p>
-                <p className="mt-0.5 text-[15px] leading-6 text-graphite [overflow-wrap:anywhere]">{s.description}</p>
+                <p className="mt-0.5 text-[15px] leading-6 text-graphite [overflow-wrap:anywhere]">{readableDescription(s.description)}</p>
                 <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
                   <span className={cn('font-bold', s.status === 'failed' ? 'text-red' : s.status === 'confirmed' ? 'text-ink' : 'text-graphite')}>
                     {runner.awaitingManual === s.id ? STATUS_TEXT.manual : (STATUS_TEXT[s.status] ?? s.status)}
@@ -186,7 +206,7 @@ export function TxSteps({
                 ) : null}
                 {s.status === 'failed' && s.error ? (
                   <p className="mt-1 text-sm text-red" role="alert">
-                    {s.error}
+                    {readableError(s.error)}
                   </p>
                 ) : null}
               </div>
@@ -197,7 +217,7 @@ export function TxSteps({
 
       {runner.error ? (
         <p className="mt-3 border-l-4 border-red bg-red-wash px-3 py-2 text-[15px] font-bold text-red" role="alert">
-          {runner.error}
+          {readableError(runner.error)}
         </p>
       ) : null}
       {runner.limit && !runner.limit.within ? (

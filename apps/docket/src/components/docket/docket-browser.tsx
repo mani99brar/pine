@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { ClaimQuery, ClaimSort, ClaimSummary } from '@pine/core'
 import { SUPPORTED_CHAIN_IDS, CHAINS } from '@pine/core/chains'
 import { useClaims, usePolicies } from '@pine/react'
-import { FilePlus2, Search, X } from 'lucide-react'
+import { FilePlus2, Search, SlidersHorizontal, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
 import { DOCKET_GROUPS, docketGroup, type DocketGroup } from '@/lib/stage'
 import { Input, Select } from '@/components/ui/field'
@@ -55,6 +55,8 @@ export function DocketBrowser() {
   const sp = useSearchParams()
   const now = useClientNow(60_000)
   const [search, setSearch] = useState(f.q)
+  // On a phone, five full-width selects push the first claim two screens down. They fold away until asked for.
+  const [showFilters, setShowFilters] = useState(false)
   const deferred = useDeferredValue(search)
 
   const set = (patch: Record<string, string | null>) => {
@@ -119,6 +121,7 @@ export function DocketBrowser() {
   const attention = groups.filter((g) => g.attention)
   const rest = groups.filter((g) => !g.attention)
   const filtered = !!(f.q || f.stage || f.policy || f.repo || f.chain)
+  const activeFilters = [f.stage, f.policy, f.repo, f.chain].filter(Boolean).length + (f.sort && f.sort !== 'deadline' ? 1 : 0)
 
   return (
     <div>
@@ -146,7 +149,17 @@ export function DocketBrowser() {
             autoComplete="off"
           />
         </div>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+        <button
+          type="button"
+          aria-expanded={showFilters}
+          aria-controls="docket-filters"
+          onClick={() => setShowFilters((v) => !v)}
+          className="mt-3 inline-flex items-center gap-1.5 text-sm font-bold text-violet underline underline-offset-4 sm:hidden"
+        >
+          <SlidersHorizontal aria-hidden className="size-4" />
+          {showFilters ? 'Hide filters' : `Filters and order${activeFilters ? ` (${activeFilters} on)` : ''}`}
+        </button>
+        <div id="docket-filters" className={cn('mt-4 grid gap-3 sm:grid sm:grid-cols-2 lg:grid-cols-5', !showFilters && 'hidden')}>
           <FilterSelect label="Stage" value={f.stage} onChange={(v) => set({ stage: v })} options={STAGE_FILTERS.map((s) => ({ value: s.id, label: s.label }))} />
           <FilterSelect
             label="Policy"
@@ -236,8 +249,8 @@ export function DocketBrowser() {
           </EmptyState>
         ) : f.grouped ? (
           <div className="space-y-10">
-            <p className="text-sm text-graphite">
-              Showing {items.length} claim{items.length === 1 ? '' : 's'}. Each group is a stage of the procedure.
+            <p className="text-sm text-graphite measure">
+              Showing {items.length} claim{items.length === 1 ? '' : 's'}. Each group is a stage of the procedure. “Implied chance” is the market-implied chance that a qualifying counterexample is accepted. It is not a probability that the code has bugs, and thin markets can be far from informed.
             </p>
             {attention.length > 0 ? (
               <section aria-labelledby="attention-title">
@@ -267,8 +280,8 @@ export function DocketBrowser() {
           </div>
         ) : (
           <div>
-            <p className="mb-3 text-sm text-graphite">
-              Showing {items.length} claim{items.length === 1 ? '' : 's'}, {SORTS.find((s) => s.id === f.sort)?.label.toLowerCase()}.
+            <p className="mb-3 text-sm text-graphite measure">
+              Showing {items.length} claim{items.length === 1 ? '' : 's'}, {SORTS.find((s) => s.id === f.sort)?.label.toLowerCase()}. “Implied chance” is the market-implied chance that a qualifying counterexample is accepted. It is not a probability that the code has bugs, and thin markets can be far from informed.
             </p>
             <div className="border-t border-rule">
               {items.map((c) => (

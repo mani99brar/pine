@@ -65,6 +65,7 @@ export function MyDocket() {
   const positions = portfolio.data?.positions ?? []
   const lps = portfolio.data?.liquidity ?? []
   const redeemable = positions.filter((p) => p.redeemable)
+  const sym = myClaims[0]?.collateralSymbol ?? 'sDAI'
   const attention: Attention[] = []
   for (const c of myClaims) {
     const n = formatClaimNumber(c.number)
@@ -82,7 +83,7 @@ export function MyDocket() {
   for (const p of redeemable)
     attention.push({
       key: `${p.claimId}-${p.outcome}-redeem`,
-      title: `Redeem ${formatAmount(p.redeemableAmount ?? p.value, { maxDecimals: 2 })} from ${formatClaimNumber(p.claimNumber)}`,
+      title: `Redeem ${formatAmount(p.redeemableAmount ?? p.value, { maxDecimals: 2, symbol: sym })} from ${formatClaimNumber(p.claimNumber)}`,
       detail: `${p.outcome === 'invalid' ? 'Invalid result' : p.outcome === 'yes' ? 'Yes' : 'No'} tokens pay out under the market’s rules.`,
       href: `/claims/${p.claimId}#position`,
       action: 'Redeem',
@@ -94,7 +95,6 @@ export function MyDocket() {
     .sort((a, b) => a.evidenceDeadline.localeCompare(b.evidenceDeadline))
     .slice(0, 6)
   const totals = portfolio.data?.totals
-  const sym = myClaims[0]?.collateralSymbol ?? 'sDAI'
 
   return (
     <div className="space-y-12">
@@ -106,7 +106,7 @@ export function MyDocket() {
           { k: 'Liquidity, current value', v: totals ? formatAmount(totals.liquidityValue, { symbol: sym, maxDecimals: 2 }) : '—' },
           { k: 'Ready to redeem', v: totals ? formatAmount(totals.redeemable, { symbol: sym, maxDecimals: 2 }) : '—', strong: true },
         ].map((s) => (
-          <div key={s.k} className="border-r border-b border-rule px-4 py-3">
+          <div key={s.k} className="border-r border-b border-rule px-4 py-3 last:col-span-2 md:last:col-span-1">
             <dt className="text-sm text-graphite">{s.k}</dt>
             <dd className={cn('mt-0.5 text-xl font-[800] tabular', s.strong && 'text-violet')}>{portfolio.isLoading && s.k !== 'Claims you filed' && s.k !== 'Open for evidence' ? <Skeleton className="mt-1 h-6 w-24" /> : s.v}</dd>
           </div>
@@ -216,7 +216,7 @@ export function MyDocket() {
         {lps.length === 0 ? (
           <p className="mt-3 text-graphite">No liquidity positions for this wallet.</p>
         ) : (
-          <div className="mt-4 overflow-x-auto border border-rule bg-sheet">
+          <div tabIndex={0} role="region" aria-label="Liquidity positions" className="mt-4 overflow-x-auto border border-rule bg-sheet">
             <table className="w-full min-w-[44rem] text-left text-[15px]">
               <caption className="sr-only">Liquidity positions</caption>
               <thead className="border-b border-rule bg-bond text-sm text-graphite">
@@ -264,7 +264,42 @@ export function MyDocket() {
 function PositionsTable({ positions, sym }: { positions: OutcomePosition[]; sym: string }) {
   if (positions.length === 0) return <p className="mt-3 text-graphite">No outcome tokens in this wallet.</p>
   return (
-    <div className="mt-4 overflow-x-auto border border-rule bg-sheet">
+    <>
+    {/* Phones: one ruled entry per position, so no column hides off-screen. */}
+    <ul className="mt-4 divide-y divide-rule border-y border-rule bg-sheet sm:hidden">
+      {positions.map((p, i) => (
+        <li key={`${p.claimId}-${p.outcome}-${i}`} className="px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Link href={`/claims/${p.claimId}#position`} className="link font-bold tabular">
+              {formatClaimNumber(p.claimNumber)}
+            </Link>
+            <StageTag status={p.status} />
+          </div>
+          <p className="untrusted mt-0.5 truncate text-sm text-graphite">{p.claimTitle}</p>
+          <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1 text-[15px] tabular">
+            <div>
+              <dt className="text-sm text-graphite">Outcome</dt>
+              <dd className="font-bold">{p.outcome === 'invalid' ? 'Invalid result' : p.outcome === 'yes' ? 'Yes' : 'No'}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-graphite">Tokens at mark</dt>
+              <dd>
+                {formatAmount(p.balance, { maxDecimals: 2 })} at {formatPrice(p.markPrice)}
+              </dd>
+            </div>
+            <div>
+              <dt className="text-sm text-graphite">Value</dt>
+              <dd>{formatAmount(p.value, { symbol: sym, maxDecimals: 2 })}</dd>
+            </div>
+            <div>
+              <dt className="text-sm text-graphite">Redeemable</dt>
+              <dd className="font-bold">{p.redeemable ? formatAmount(p.redeemableAmount ?? p.value, { symbol: sym, maxDecimals: 2 }) : 'Not yet'}</dd>
+            </div>
+          </dl>
+        </li>
+      ))}
+    </ul>
+    <div tabIndex={0} role="region" aria-label="Outcome token positions" className="mt-4 hidden overflow-x-auto border border-rule bg-sheet sm:block">
       <table className="w-full min-w-[44rem] text-left text-[15px]">
         <caption className="sr-only">Outcome token positions</caption>
         <thead className="border-b border-rule bg-bond text-sm text-graphite">
@@ -300,5 +335,6 @@ function PositionsTable({ positions, sym }: { positions: OutcomePosition[]; sym:
         </tbody>
       </table>
     </div>
+    </>
   )
 }

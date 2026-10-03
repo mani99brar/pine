@@ -74,6 +74,7 @@ export function ClaimView({ id, initial }: { id: string; initial: ClaimDetail | 
     return (
       <Page>
         <EmptyState
+          titleAs="h1"
           title="No claim is on the docket under this number"
           action={
             <>
@@ -166,7 +167,12 @@ function ClaimDocument({ claim }: { claim: ClaimDetail }) {
           <DocSection
             id="question"
             title="The question on record"
-            description="Exactly what the oracle will answer. It is hashed and cannot change. Select a marked term or a numbered note to see what binds."
+            description={
+              <>
+                Exactly what the oracle will answer. It is hashed and cannot change.{' '}
+                <span className="print:hidden">Select a marked term or a numbered note to see what binds.</span>
+              </>
+            }
           >
             <AnnotatedQuestion text={claim.manifest.question.text} annotations={annotations} idPrefix="claim-q" />
             <div className="mt-5 flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-graphite">

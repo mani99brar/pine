@@ -6,7 +6,7 @@ import { COPY } from '@pine/core/copy'
 import { HashValue } from '@/components/ui/copy'
 import { DefinitionList } from '@/components/ui/layout'
 import { ExternalLink } from '@/components/ui/external-link'
-import { formatTimeout } from '@/lib/format'
+import { formatTimeout, plural } from '@/lib/format'
 import { Collapsible } from '@/components/ui/collapsible'
 
 function Bullets({ items, empty = 'None stated' }: { items: string[] | undefined; empty?: string }) {
@@ -108,7 +108,7 @@ export function TermsOnRecord({
 
       <Collapsible
         title="Scope and assumptions"
-        summary={`${c.scope?.inScope?.length ?? 0} in scope, ${c.scope?.outOfScope?.length ?? 0} out of scope, ${c.assumptions?.length ?? 0} assumptions, ${params.length} policy parameters`}
+        summary={`${c.scope?.inScope?.length ?? 0} in scope, ${c.scope?.outOfScope?.length ?? 0} out of scope, ${plural(c.assumptions?.length ?? 0, 'assumption')}, ${plural(params.length, 'policy parameter')}`}
       >
         <DefinitionList
           items={[

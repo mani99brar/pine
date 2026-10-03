@@ -50,11 +50,18 @@ export default async function PoliciesPage() {
                   </h2>
                   <p className="mt-2 text-lg measure">{p.summary}</p>
                   {gated && p.gateReason ? <p className="mt-3 border-l-4 border-plum pl-3 text-[15px] text-plum">{p.gateReason}</p> : null}
-                  <ul className="mt-4 list-disc space-y-1 pl-5 text-[15px] text-graphite measure">
-                    {p.intendedUse.slice(0, 3).map((u) => (
-                      <li key={u}>{u}</li>
-                    ))}
-                  </ul>
+                  {(() => {
+                    // The summary often repeats the first intended use word for word; list only what adds something.
+                    const norm = (t: string) => t.toLowerCase().replace(/[^a-z0-9]+/g, '')
+                    const uses = p.intendedUse.filter((u) => norm(u).slice(0, 40) !== norm(p.summary).slice(0, 40)).slice(0, 3)
+                    return uses.length ? (
+                      <ul className="mt-4 list-disc space-y-1 pl-5 text-[15px] text-graphite measure">
+                        {uses.map((u) => (
+                          <li key={u}>{u}</li>
+                        ))}
+                      </ul>
+                    ) : null
+                  })()}
                   <p className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
                     <Link href={`/policies/${p.id}`} className="link font-bold">
                       Read the full policy

@@ -75,8 +75,8 @@ export default async function LandingPage() {
               </Link>
             </div>
             <p className="mt-6 max-w-[34rem] text-[15px] text-graphite">
-              Reading the docket needs no account. Filing needs GitHub sign-in to choose a public repository, and a wallet to fund the
-              market. {COPY.notAReview}
+              Reading the docket needs no account. Filing needs a wallet to fund the market. Signing in with GitHub lets you browse your
+              own repositories, or you can paste a link to any public one. {COPY.notAReview}
             </p>
           </div>
 
@@ -99,6 +99,7 @@ export default async function LandingPage() {
                     layout="stacked"
                     idPrefix="hero-q"
                     notesTitle="What binds"
+                    notesHeading={false}
                     text={flagship.manifest.question.text}
                     compact
                     collapseAfter={2}
@@ -147,6 +148,11 @@ export default async function LandingPage() {
                 </li>
               ))}
             </ul>
+            <p className="mt-4 text-[15px]">
+              <Link href="/risks" className="link font-bold">
+                Every risk you accept, and what is still undecided about Pine
+              </Link>
+            </p>
           </div>
         </div>
       </section>
@@ -212,25 +218,19 @@ export default async function LandingPage() {
             </p>
           </div>
           <dl className="space-y-3">
-            <div className="flex gap-4 border-l-8 border-red bg-red-wash px-5 py-4">
-              <div>
-                <dt className="text-lg font-[800] text-red">Yes: {COPY.outcome.yes}</dt>
-                <dd className="mt-1">{COPY.outcomeLong.yes} Read the exhibits and decide what to change.</dd>
-              </div>
+            <div className="border-l-8 border-red bg-red-wash px-5 py-4">
+              <dt className="text-lg font-[800] text-red">Yes: {COPY.outcome.yes}</dt>
+              <dd className="mt-1">{COPY.outcomeLong.yes} Read the exhibits and decide what to change.</dd>
             </div>
-            <div className="flex gap-4 border-l-8 border-slate bg-mist px-5 py-4">
-              <div>
-                <dt className="flex items-center gap-2 text-lg font-[800] text-slate">
-                  <Minus aria-hidden className="size-5" strokeWidth={3} /> No: {COPY.outcome.no}
-                </dt>
-                <dd className="mt-1">{COPY.noIsNotSafety}</dd>
-              </div>
+            <div className="border-l-8 border-slate bg-mist px-5 py-4">
+              <dt className="flex items-center gap-2 text-lg font-[800] text-slate">
+                <Minus aria-hidden className="size-5" strokeWidth={3} /> No: {COPY.outcome.no}
+              </dt>
+              <dd className="mt-1">{COPY.noIsNotSafety}</dd>
             </div>
-            <div className="hatch flex gap-4 border-l-8 border-graphite px-5 py-4">
-              <div>
-                <dt className="text-lg font-[800] text-graphite">Invalid: {COPY.outcome.invalid}</dt>
-                <dd className="mt-1">{COPY.invalidIsNotRefund}</dd>
-              </div>
+            <div className="hatch border-l-8 border-graphite px-5 py-4">
+              <dt className="text-lg font-[800] text-graphite">Invalid: {COPY.outcome.invalid}</dt>
+              <dd className="mt-1">{COPY.invalidIsNotRefund}</dd>
             </div>
           </dl>
         </div>
@@ -252,7 +252,7 @@ export default async function LandingPage() {
               <FundingTotals plan={plan} className="mt-8" />
               <p className="mt-4 text-sm text-graphite">{COPY.spendingLimit}</p>
             </div>
-            <CostBreakdown plan={plan} />
+            <CostBreakdown plan={plan} headingLevel={3} />
           </div>
         </section>
       ) : null}
@@ -267,6 +267,7 @@ export default async function LandingPage() {
             <p className="mt-2 text-lg text-graphite">
               {stats ? `${stats.openClaims} claims are open for evidence. ` : ''}Soonest deadline first.
             </p>
+            <p className="mt-1 max-w-[52rem] text-sm text-graphite">“Implied chance” is the market-implied chance that a qualifying counterexample is accepted. It is not a probability that the code has bugs, and thin markets can be far from informed.</p>
           </div>
           <Link href="/docket" className="inline-flex items-center gap-1.5 font-bold text-violet underline underline-offset-4">
             Open the full docket <ArrowRight aria-hidden className="size-4" />

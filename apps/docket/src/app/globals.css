@@ -271,6 +271,8 @@
   main { padding: 0 !important; max-width: none !important; }
   [data-print="flat"] { border: 0 !important; background: transparent !important; box-shadow: none !important; padding-left: 0 !important; padding-right: 0 !important; }
   details > *:not(summary) { display: block !important; }
+  /* Chromium hides closed <details> content in a ::details-content slot; a printed filing shows all of it. */
+  details::details-content { content-visibility: visible !important; display: block !important; height: auto !important; }
   details summary { list-style: none; }
   h1, h2, h3 { break-after: avoid; }
   * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }

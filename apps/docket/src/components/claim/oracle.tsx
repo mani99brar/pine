@@ -26,10 +26,17 @@ export function OracleSection({ claim }: { claim: ClaimDetail }) {
   if (!o) {
     return (
       <div className="space-y-4">
-        <p className="measure">
-          The oracle has not been created yet, so nobody can answer. Once the market exists, the question opens for answers on Reality.eth at{' '}
-          {params ? <strong>{formatDate(params.openingTime, 'long')}</strong> : 'its opening time'}.
-        </p>
+        {claim.status === 'failed' ? (
+          <p className="measure">
+            No oracle question was created, because filing stopped before the market existed. Nobody can answer this claim. A new filing gets
+            its own question and its own opening time.
+          </p>
+        ) : (
+          <p className="measure">
+            The oracle has not been created yet, so nobody can answer. Once the market exists, the question opens for answers on Reality.eth at{' '}
+            {params ? <strong>{formatDate(params.openingTime, 'long')}</strong> : 'its opening time'}.
+          </p>
+        )}
         <Notice tone="neutral" title="Who answers">
           {COPY.oracleActors}
         </Notice>
@@ -93,7 +100,7 @@ export function OracleSection({ claim }: { claim: ClaimDetail }) {
           <p className="mt-1 text-[15px] text-graphite">
             Each new answer must at least double the previous bond. Whoever ends up on the final answer can claim the bonds of wrong answers.
           </p>
-          <div className="mt-3 overflow-x-auto border border-rule bg-sheet">
+          <div tabIndex={0} role="region" aria-label="Answer history" className="mt-3 overflow-x-auto border border-rule bg-sheet">
             <table className="w-full min-w-[34rem] text-left text-[15px]">
               <caption className="sr-only">Answers posted on Reality.eth, oldest first</caption>
               <thead className="border-b border-rule bg-bond text-sm text-graphite">
@@ -189,9 +196,21 @@ export function OutcomeSection({ claim }: { claim: ClaimDetail }) {
       </div>
     )
   }
+  if (claim.status === 'failed') {
+    return (
+      <p className="measure">
+        There is no outcome and there will not be one. Filing stopped before the market existed, so no question was put to the oracle. Nothing
+        here says anything about the code.
+      </p>
+    )
+  }
   return (
     <div className="space-y-4">
-      <p className="measure">Not decided yet. When the oracle&rsquo;s answer becomes final, this claim resolves to one of three outcomes:</p>
+      <p className="measure">
+        {claim.status === 'publishing'
+          ? 'Not decided, and not open yet. Once filing finishes and the oracle’s answer becomes final, this claim resolves to one of three outcomes:'
+          : 'Not decided yet. When the oracle’s answer becomes final, this claim resolves to one of three outcomes:'}
+      </p>
       <dl className="grid gap-3 md:grid-cols-3">
         {(['yes', 'no', 'invalid'] as const).map((o) => (
           <div

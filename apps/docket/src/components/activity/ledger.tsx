@@ -150,7 +150,45 @@ export function Ledger() {
             {wallet.isConnected ? 'Nothing recorded for this wallet in this category.' : 'No activity yet.'}
           </EmptyState>
         ) : (
-          <div className="mt-4 overflow-x-auto border border-rule bg-sheet">
+          <>
+          {/* Phones: each entry as a ruled row, amount beside the label, so nothing hides off-screen. */}
+          <ol className="mt-4 divide-y divide-rule border-y border-rule bg-sheet sm:hidden" aria-label="Ledger entries, newest first">
+            {items.map((a: ActivityItem) => {
+              const n = a.amount ? Number(a.amount) : 0
+              const bal = withBalance.get(a.id) ?? 0n
+              return (
+                <li key={a.id} className={cn('px-4 py-3', a.status === 'failed' && 'bg-red-wash')}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="font-bold">{activityLabel(a.type)}</span>
+                    {a.amount ? (
+                      <span className={cn('shrink-0 font-bold whitespace-nowrap tabular', n < 0 ? 'text-ink' : 'text-violet')}>
+                        {n > 0 ? '+' : n < 0 ? '−' : ''}
+                        {formatAmount(a.amount.replace(/^-/, ''), { symbol: a.token, maxDecimals: 4 })}
+                      </span>
+                    ) : null}
+                  </div>
+                  <p className="untrusted text-sm text-graphite">{a.summary}</p>
+                  {a.status === 'failed' ? <p className="text-sm font-bold text-red">Failed, nothing moved</p> : a.status === 'pending' ? <p className="text-sm font-bold text-ochre">Pending</p> : null}
+                  <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-graphite">
+                    <span className="tabular">{formatDate(a.at, 'utc')}</span>
+                    <a href={`/claims/${a.claimId}`} className="link tabular">
+                      {formatClaimNumber(a.claimNumber)}
+                    </a>
+                    <ExternalLink href={explorerTxUrl(a.chainId, a.txHash)} icon={false}>
+                      {shortHash(a.txHash, 4)}
+                    </ExternalLink>
+                    {wallet.isConnected ? (
+                      <span className="tabular">
+                        Balance {bal < 0n ? '−' : ''}
+                        {formatAmount(fromScaled(bal < 0n ? -bal : bal, S), { maxDecimals: 2 })}
+                      </span>
+                    ) : null}
+                  </p>
+                </li>
+              )
+            })}
+          </ol>
+          <div tabIndex={0} role="region" aria-label="Ledger entries" className="mt-4 hidden overflow-x-auto border border-rule bg-sheet sm:block">
             <table className="w-full min-w-[52rem] text-left text-[15px]">
               <caption className="sr-only">Ledger entries, newest first</caption>
               <thead className="border-b border-rule bg-bond text-sm text-graphite">
@@ -175,7 +213,7 @@ export function Ledger() {
                         <span className="untrusted block text-sm text-graphite">{a.summary}</span>
                         {a.status === 'failed' ? <span className="text-sm font-bold text-red">Failed, nothing moved</span> : a.status === 'pending' ? <span className="text-sm font-bold text-ochre">Pending</span> : null}
                       </td>
-                      <td className="px-4 py-2.5 text-sm">
+                      <td className="px-4 py-2.5 text-sm whitespace-nowrap">
                         <a href={`/claims/${a.claimId}`} className="link tabular">
                           {formatClaimNumber(a.claimNumber)}
                         </a>
@@ -207,6 +245,7 @@ export function Ledger() {
               </tbody>
             </table>
           </div>
+          </>
         )}
       </section>
     </div>

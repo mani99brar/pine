@@ -78,7 +78,13 @@ export default async function PolicyPage({ params, searchParams }: Props) {
           <DefinitionList
             items={[
               { term: 'Text hash', value: <HashValue value={p.contentHash} wrap label="policy text hash" />, note: 'keccak256 of the exact policy text below. Markets cite this hash.' },
-              { term: 'Durable location', value: <code className="font-mono text-[14px] break-all">{p.uri}</code> },
+              p.uri.startsWith('ipfs://pending')
+                ? {
+                    term: 'Durable location',
+                    value: 'Not pinned yet',
+                    note: 'The text is not on IPFS yet. Until it is, the hash above is what identifies it. Pinning policy text is an open launch gate.',
+                  }
+                : { term: 'Durable location', value: <code className="font-mono text-[14px] break-all">{p.uri}</code> },
               { term: 'Status', value: gated ? 'Gated' : 'Enabled for new claims' },
               ...(p.supersedes ? [{ term: 'Supersedes', value: p.supersedes }] : []),
             ]}
@@ -118,7 +124,7 @@ export default async function PolicyPage({ params, searchParams }: Props) {
           ) : null}
           <section>
             <h2 className="text-2xl">What a filer must specify</h2>
-            <div className="mt-3 overflow-x-auto">
+            <div tabIndex={0} role="region" aria-label="Policy parameters" className="mt-3 overflow-x-auto">
               <table className="w-full min-w-[36rem] text-left text-[15px]">
                 <thead className="border-b-2 border-ink text-sm text-graphite">
                   <tr>

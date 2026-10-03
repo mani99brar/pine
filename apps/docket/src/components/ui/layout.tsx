@@ -159,17 +159,20 @@ export function EmptyState({
   action,
   className,
   icon,
+  titleAs: Title = 'p',
 }: {
   title: ReactNode
   children?: ReactNode
   action?: ReactNode
   className?: string
   icon?: ReactNode
+  /** Use h1 when the empty state is the whole page, such as a missing claim */
+  titleAs?: 'p' | 'h1' | 'h2'
 }) {
   return (
     <div className={cn('border border-dashed border-rule-strong bg-sheet px-6 py-10 text-center', className)}>
       {icon ? <div className="mx-auto mb-3 flex justify-center text-graphite">{icon}</div> : null}
-      <p className="text-lg font-bold">{title}</p>
+      <Title className={cn('font-bold', Title === 'h1' ? 'text-2xl' : 'text-lg')}>{title}</Title>
       {children ? <div className="mx-auto mt-2 max-w-[42ch] text-graphite">{children}</div> : null}
       {action ? <div className="mt-5 flex flex-wrap justify-center gap-3">{action}</div> : null}
     </div>

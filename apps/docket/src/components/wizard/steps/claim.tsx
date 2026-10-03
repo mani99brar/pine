@@ -36,7 +36,7 @@ export function ClaimStep() {
           maxLength={90}
           onChange={(e) => set({ title: e.target.value })}
           aria-invalid={!!errorFor('spec.title')}
-          placeholder="Reporter deposits never draw on arbitration or gas reserves"
+          placeholder="e.g. Reporter deposits never draw on arbitration or gas reserves"
         />
         <p className="mt-1 text-right text-sm text-graphite tabular">{(spec.title ?? '').length} of 90</p>
       </Field>
@@ -60,7 +60,7 @@ export function ClaimStep() {
           value={spec.requirement ?? ''}
           onChange={(e) => set({ requirement: e.target.value })}
           aria-invalid={!!errorFor('spec.requirement')}
-          placeholder="For the frozen configuration and allowed states, each reporter-funding deposit’s principal is allocated only from eligible bridging funds…"
+          placeholder="e.g. For the frozen configuration and allowed states, each reporter-funding deposit’s principal is allocated only from eligible bridging funds…"
         />
       </Field>
 
@@ -86,7 +86,7 @@ export function ClaimStep() {
           value={spec.violation ?? ''}
           onChange={(e) => set({ violation: e.target.value.replace(/[\r\n]+/g, ' ') })}
           aria-invalid={!!errorFor('spec.violation')}
-          placeholder="reporter-deposit principal can consume arbitration funds or the operator gas reserve"
+          placeholder="e.g. reporter-deposit principal can consume arbitration funds or the operator gas reserve"
         />
         {q ? (
           <div className="mt-3 border-l-4 border-violet-line bg-bond px-4 py-3">
@@ -107,7 +107,7 @@ export function ClaimStep() {
           error={errorFor('spec.scope.inScope') ?? errorFor('spec.scope')}
           guidance={<p>Be concrete: paths, function names, API routes. Investigators read this to decide where to look.</p>}
         >
-          <ListInput id="f-inscope" value={scope.inScope} onChange={(x) => set({ scope: { ...scope, inScope: x } })} placeholder="src/planner/reporter-funding.ts" />
+          <ListInput id="f-inscope" value={scope.inScope} onChange={(x) => set({ scope: { ...scope, inScope: x } })} placeholder="e.g. src/planner/reporter-funding.ts" />
         </Field>
         <Field
           id="f-outscope"
@@ -116,7 +116,7 @@ export function ClaimStep() {
           error={errorFor('spec.scope.outOfScope')}
           guidance={<p>Anything that could look related but is not part of this claim. Exhibits that rely on it do not count.</p>}
         >
-          <ListInput id="f-outscope" value={scope.outOfScope} onChange={(x) => set({ scope: { ...scope, outOfScope: x } })} placeholder="Live LI.FI routing and bridge execution" />
+          <ListInput id="f-outscope" value={scope.outOfScope} onChange={(x) => set({ scope: { ...scope, outOfScope: x } })} placeholder="e.g. Live LI.FI routing and bridge execution" />
         </Field>
       </div>
 
@@ -146,7 +146,7 @@ export function ClaimStep() {
           error={errorFor('spec.assumptions')}
           guidance={<p>What is taken as given: trusted roles, starting balances, external services that behave correctly.</p>}
         >
-          <ListInput id="f-assumptions" value={spec.assumptions ?? []} onChange={(x) => set({ assumptions: x })} placeholder="Price feeds return fresh observations" />
+          <ListInput id="f-assumptions" value={spec.assumptions ?? []} onChange={(x) => set({ assumptions: x })} placeholder="e.g. Price feeds return fresh observations" />
         </Field>
         <Field
           id="f-exclusions"
@@ -155,7 +155,7 @@ export function ClaimStep() {
           error={errorFor('spec.exclusions')}
           guidance={<p>On top of the policy&rsquo;s own exclusions. Keep this short: every exclusion narrows what investigators can find.</p>}
         >
-          <ListInput id="f-exclusions" value={spec.exclusions ?? []} onChange={(x) => set({ exclusions: x })} placeholder="Paying the reporter transaction’s own gas fee" />
+          <ListInput id="f-exclusions" value={spec.exclusions ?? []} onChange={(x) => set({ exclusions: x })} placeholder="e.g. Paying the reporter transaction’s own gas fee" />
         </Field>
         <Field
           id="f-specref"
@@ -169,7 +169,7 @@ export function ClaimStep() {
             <Input
               id="f-specref"
               aria-label="Document name"
-              placeholder="Keeper spec, section 4.2"
+              placeholder="e.g. Keeper spec, section 4.2"
               value={spec.specReference?.label ?? ''}
               onChange={(e) =>
                 set({ specReference: e.target.value || spec.specReference?.url ? { label: e.target.value, url: spec.specReference?.url ?? '' } : undefined })
@@ -178,7 +178,7 @@ export function ClaimStep() {
             <Input
               aria-label="Document link"
               type="url"
-              placeholder="https://github.com/…/spec.md"
+              placeholder="e.g. https://github.com/…/spec.md"
               value={spec.specReference?.url ?? ''}
               onChange={(e) =>
                 set({ specReference: e.target.value || spec.specReference?.label ? { label: spec.specReference?.label ?? '', url: e.target.value } : undefined })

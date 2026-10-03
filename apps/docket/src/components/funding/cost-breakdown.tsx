@@ -39,7 +39,19 @@ const PAYER: Record<CostLine['payer'], string> = {
  * Every cost line from a FundingPlan, grouped by what happens to the money.
  * Nothing in fine print: payer, estimate flag and whether it counts toward the limit are on every line.
  */
-export function CostBreakdown({ plan, className, dense = false }: { plan: FundingPlan; className?: string; dense?: boolean }) {
+export function CostBreakdown({
+  plan,
+  className,
+  dense = false,
+  headingLevel = 4,
+}: {
+  plan: FundingPlan
+  className?: string
+  dense?: boolean
+  /** Heading level for each group, so the outline stays in order wherever the breakdown is placed */
+  headingLevel?: 3 | 4
+}) {
+  const H = headingLevel === 3 ? 'h3' : 'h4'
   const groups = KIND_ORDER.map((k) => ({ kind: k, lines: plan.costs.filter((c) => c.kind === k) })).filter((g) => g.lines.length)
   return (
     <div className={cn('space-y-5', className)}>
@@ -48,9 +60,9 @@ export function CostBreakdown({ plan, className, dense = false }: { plan: Fundin
           <div className="flex items-start gap-3">
             <span aria-hidden className={cn('mt-1 h-5 w-1.5 shrink-0', KIND_META[g.kind].bar)} />
             <div className="min-w-0">
-              <h4 id={`cost-${g.kind}`} className="font-bold">
+              <H id={`cost-${g.kind}`} className="font-bold">
                 {KIND_META[g.kind].title}
-              </h4>
+              </H>
               {!dense ? <p className="text-sm text-graphite">{KIND_META[g.kind].plain}</p> : null}
             </div>
           </div>

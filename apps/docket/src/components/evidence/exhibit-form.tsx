@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClaimDetail, EvidenceDraft, EvidenceKind } from '@pine/core'
 import { formatClaimNumber, formatDate, getPolicy, shortHash, shortSha } from '@pine/core'
 import { CHAINS } from '@pine/core/chains'
@@ -27,7 +27,7 @@ export function ExhibitFiling({ claimId, initial }: { claimId: string; initial: 
   if (!claim) {
     if (q.isLoading) return <Skeleton className="h-96 w-full" />
     return (
-      <EmptyState title="There is no claim with this number" action={<ButtonLink href="/docket">Search the docket</ButtonLink>}>
+      <EmptyState titleAs="h1" title="There is no claim with this number" action={<ButtonLink href="/docket">Search the docket</ButtonLink>}>
         Exhibits are filed against a claim on the docket.
       </EmptyState>
     )
@@ -81,6 +81,14 @@ function Form({ claim }: { claim: ClaimDetail }) {
 
   const running = ev.runner.state === 'running' || ev.runner.state === 'paused' || ev.runner.state === 'failed'
   const done = ev.runner.state === 'done'
+  const headingRef = useRef<HTMLHeadingElement>(null)
+  // The form collapses into a short confirmation when filing finishes. Without this the reader is left
+  // where the File button was, which on a phone is the footer.
+  useEffect(() => {
+    if (!done) return
+    window.scrollTo({ top: 0 })
+    headingRef.current?.focus()
+  }, [done])
 
   const onSubmit = async () => {
     setTried(true)
@@ -126,19 +134,21 @@ function Form({ claim }: { claim: ClaimDetail }) {
           <span className="font-[800] text-violet tabular">{formatClaimNumber(claim.number)}</span>
           <StageTag status={claim.status} outcome={claim.outcome} />
         </p>
-        <h1 className="mt-2 text-[2rem] leading-[2.4rem] sm:text-3xl">{done ? `Exhibit ${shownLetter} is filed` : `File exhibit ${shownLetter}`}</h1>
+        <h1 ref={headingRef} tabIndex={-1} className="mt-2 text-[2rem] leading-[2.4rem] outline-none sm:text-3xl">{done ? `Exhibit ${shownLetter} is filed` : `File exhibit ${shownLetter}`}</h1>
         <p className="record-title untrusted mt-2 text-xl text-graphite">{claim.title}</p>
       </header>
 
       <div className={cn('mb-8 border-l-8 px-5 py-4', late ? 'border-ochre bg-wheat' : 'border-violet bg-violet-wash')}>
         <p className="text-lg font-bold">
-          {late ? 'The evidence deadline has passed' : 'Timely if filed before '}
+          {done && !late ? 'Filed before the deadline of ' : late ? 'The evidence deadline has passed' : 'Timely if filed before '}
           {!late ? <When at={claim.evidenceDeadline} /> : null}
         </p>
         <p className="mt-1 measure">
           {late
             ? `Anything filed now is recorded but marked not timely, so it cannot decide this claim. ${COPY.lateEvidence}`
-            : 'The block timestamp of your transaction on Ethereum decides whether the exhibit is on time, not when you wrote it. Leave margin for confirmation.'}
+            : done
+              ? 'The block timestamp of your transaction on Ethereum is the proof of when it was filed.'
+              : 'The block timestamp of your transaction on Ethereum decides whether the exhibit is on time, not when you wrote it. Leave margin for confirmation.'}
         </p>
       </div>
 
@@ -342,7 +352,7 @@ function Form({ claim }: { claim: ClaimDetail }) {
                   <Textarea id="ex-actual" rows={3} value={actual} onChange={(e) => setActual(e.target.value)} aria-invalid={!!show('actual')} />
                 </Field>
                 <Field id="ex-steps" label="Steps" optional guidance={<p>Setup beyond the claim&rsquo;s own steps, in order.</p>}>
-                  <ListInput id="ex-steps" value={steps} onChange={setSteps} mono placeholder="pnpm vitest run test/repro.spec.ts" />
+                  <ListInput id="ex-steps" value={steps} onChange={setSteps} mono placeholder="e.g. pnpm vitest run test/repro.spec.ts" />
                 </Field>
                 <Field
                   id="ex-files"

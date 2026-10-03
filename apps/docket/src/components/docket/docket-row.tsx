@@ -12,6 +12,16 @@ export function DocketRow({ claim: c, compact = false }: { claim: ClaimSummary; 
   const number = formatClaimNumber(c.number)
   const open = c.status === 'open'
   const hasPrice = typeof c.yesPrice === 'number' && c.status !== 'publishing' && c.status !== 'failed'
+  const decided = c.status === 'resolved' || c.status === 'settled'
+  // The label follows the stage, not the clock: an unfinished filing's deadline may still be ahead.
+  const deadlineLabel =
+    c.status === 'open'
+      ? 'Evidence deadline'
+      : c.status === 'publishing'
+        ? 'Evidence deadline, once filed'
+        : c.status === 'failed'
+          ? 'Evidence deadline, never opened'
+          : 'Evidence deadline passed'
   return (
     <article
       className={cn(
@@ -54,7 +64,7 @@ export function DocketRow({ claim: c, compact = false }: { claim: ClaimSummary; 
 
       <div className={cn('grid grid-cols-2 gap-x-4 gap-y-3 md:grid-cols-1', !compact && 'xl:grid-cols-[11.5rem_minmax(0,1fr)]')}>
       <div className="text-sm">
-        <p className="text-graphite">{open ? 'Evidence deadline' : 'Evidence deadline passed'}</p>
+        <p className="text-graphite">{deadlineLabel}</p>
         <p className="font-bold tabular">{formatCompactUtc(c.evidenceDeadline)}</p>
         {open ? (
           <p className={cn('font-bold', isClosingSoon(c.evidenceDeadline) ? 'text-ochre' : 'text-graphite')}>
@@ -67,7 +77,10 @@ export function DocketRow({ claim: c, compact = false }: { claim: ClaimSummary; 
         <div className="text-sm xl:text-right">
           {hasPrice ? (
             <>
-              <p className="text-graphite">Implied chance</p>
+              <p className="text-graphite">
+                {decided ? 'Last Yes price' : 'Implied chance'}
+                {decided ? null : <span className="sr-only"> that a qualifying counterexample is accepted</span>}
+              </p>
               <p className="text-lg leading-6 font-[800] tabular">{formatPrice(c.yesPrice!)}</p>
               <p className="text-graphite">{formatAmount(c.liquidity, { symbol: c.collateralSymbol, compact: true })} liquidity</p>
             </>

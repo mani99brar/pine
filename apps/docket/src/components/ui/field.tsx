@@ -5,7 +5,7 @@ import { forwardRef, useId, useState, type ComponentProps, type ReactNode } from
 import { cn } from '@/lib/cn'
 
 const control =
-  'block w-full rounded-xs border-2 border-ink bg-sheet px-3 text-base text-ink placeholder:text-graphite/80 aria-[invalid=true]:border-red'
+  'block w-full rounded-xs border-2 border-ink bg-sheet px-3 text-base text-ink placeholder:text-graphite/80 placeholder:italic aria-[invalid=true]:border-red'
 
 export const Input = forwardRef<HTMLInputElement, ComponentProps<'input'> & { mono?: boolean }>(function Input(
   { className, mono, ...props },
@@ -201,9 +201,9 @@ export function Field({
         <div className="mt-2">{children}</div>
       </div>
       {guidance ? (
-        <aside aria-label={guidanceTitle ?? 'Guidance'} className="hidden pt-0.5 lg:block">
+        <div className="hidden pt-0.5 lg:block">
           <MarginNote title={guidanceTitle}>{guidance}</MarginNote>
-        </aside>
+        </div>
       ) : (
         <div className="hidden lg:block" />
       )}

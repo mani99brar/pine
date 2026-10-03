@@ -127,7 +127,7 @@ export function Exhibit({ evidence: e, index, gatewayUrl }: { evidence: Evidence
               <div className="grid gap-1 py-2.5 sm:grid-cols-[9rem_minmax(0,1fr)] sm:gap-4">
                 <dt className="font-bold text-graphite">Command</dt>
                 <dd className="min-w-0">
-                  <pre className="untrusted max-h-48 overflow-y-auto bg-bond px-3 py-2 font-mono text-[13.5px] leading-6 whitespace-pre-wrap">
+                  <pre tabIndex={0} className="untrusted max-h-48 overflow-y-auto bg-bond px-3 py-2 font-mono text-[13.5px] leading-6 whitespace-pre-wrap">
                     {clamp(e.reproduction.command, 2000)}
                   </pre>
                 </dd>

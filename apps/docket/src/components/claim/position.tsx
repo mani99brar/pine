@@ -17,17 +17,25 @@ export function PositionSection({ claim }: { claim: ClaimDetail }) {
   const positions = portfolio.data?.positions.filter((p) => p.claimId === claim.id) ?? []
   const lps = portfolio.data?.liquidity.filter((p) => p.claimId === claim.id) ?? []
   const decided = claim.status === 'resolved' || claim.status === 'settled'
+  const unfinished = claim.status === 'publishing' || claim.status === 'failed'
 
   return (
     <div className="space-y-8">
       {claim.funding ? (
         <div>
-          <h3 className="text-xl">What the filer committed</h3>
+          <h3 className="text-xl">{unfinished ? 'What the filer planned' : 'What the filer committed'}</h3>
+          {unfinished ? (
+            <p className="mt-1 text-[15px] text-graphite measure">
+              {claim.status === 'failed'
+                ? 'Filing stopped before the liquidity was added, so these are the planned amounts, not money in a market.'
+                : 'Filing has not finished, so some of this liquidity may not be in the pools yet. The steps above show what is confirmed.'}
+            </p>
+          ) : null}
           <DefinitionList
             className="mt-3"
             items={[
               {
-                term: 'Liquidity deposited',
+                term: unfinished ? 'Liquidity planned' : 'Liquidity deposited',
                 value: formatAmount(claim.funding.liquidity, { symbol: sym }),
                 note: 'Capital at risk. It subsidizes informed trading; it is not a bounty.',
               },
@@ -63,7 +71,7 @@ export function PositionSection({ claim }: { claim: ClaimDetail }) {
         ) : (
           <div className="mt-3 space-y-4">
             {positions.length > 0 ? (
-              <div className="overflow-x-auto border border-rule bg-sheet">
+              <div tabIndex={0} role="region" aria-label="Your positions" className="overflow-x-auto border border-rule bg-sheet">
                 <table className="w-full min-w-[32rem] text-left text-[15px]">
                   <caption className="sr-only">Outcome tokens held</caption>
                   <thead className="border-b border-rule bg-bond text-sm text-graphite">

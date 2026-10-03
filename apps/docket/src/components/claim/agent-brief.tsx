@@ -75,7 +75,7 @@ export function AgentBriefSection({ claim }: { claim: ClaimDetail }) {
         {md ? (
           <details className="mt-4">
             <summary className="text-sm font-bold text-violet underline underline-offset-4">Preview the Markdown brief</summary>
-            <pre className="mt-2 max-h-96 overflow-auto border border-rule bg-bond p-4 font-mono text-[13px] leading-6 whitespace-pre-wrap">
+            <pre tabIndex={0} aria-label="Agent brief in Markdown" className="mt-2 max-h-96 overflow-auto border border-rule bg-bond p-4 font-mono text-[13px] leading-6 whitespace-pre-wrap">
               {md}
             </pre>
           </details>

@@ -10,6 +10,14 @@ import { ExternalLink } from '@/components/ui/external-link'
 import { When, useClientNow } from '@/components/ui/when'
 import { ACTOR_EXPLAINER, ACTOR_LABEL } from '@/lib/procedure'
 
+/** An oracle answer with what it means, so "Yes" is never read as "yes, the code works". */
+function answerWithMeaning(a: keyof typeof REALITY_ANSWER_LABEL | undefined): string {
+  if (!a) return '?'
+  if (a === 'yes') return `“Yes” (${COPY.outcome.yes.toLowerCase()})`
+  if (a === 'no') return `“No” (${COPY.outcome.no.toLowerCase()})`
+  return `“${REALITY_ANSWER_LABEL[a]}”`
+}
+
 /** One plain sentence: where the claim stands right now. */
 export function standingSentence(c: ClaimDetail): string {
   const timely = c.evidence.filter((e) => e.timely).length
@@ -27,25 +35,34 @@ export function standingSentence(c: ClaimDetail): string {
     }
     case 'failed':
       return 'This filing failed and cannot be resumed. What reached the chain, and why it stopped, is set out under “Filing failed” below.'
-    case 'open':
-      return timely === 0
-        ? 'The evidence window is open. No exhibits have been filed yet.'
-        : `The evidence window is open. ${timely} exhibit${timely === 1 ? ' has' : 's have'} been filed so far, ${counter} of them presented as counterexamples.`
+    case 'open': {
+      if (timely === 0) return 'The evidence window is open. No exhibits have been filed yet.'
+      const sealed = c.evidence.filter((e) => e.timely && e.kind === 'commitment').length
+      const parts = [
+        counter ? `${counter} presented as ${counter === 1 ? 'a counterexample' : 'counterexamples'}` : 'none presented as a counterexample',
+        sealed ? `${sealed} sealed, so ${sealed === 1 ? 'its' : 'their'} contents stay hidden until revealed` : '',
+      ].filter(Boolean)
+      return `The evidence window is open. ${timely} exhibit${timely === 1 ? ' has' : 's have'} been filed so far: ${parts.join(', and ')}.`
+    }
     case 'awaiting_answer':
       return `The evidence deadline passed on ${formatDate(c.evidenceDeadline, 'long')}. ${timely} timely exhibit${timely === 1 ? ' is' : 's are'} on file. The question now needs an answer on Reality.eth.`
     case 'answer_proposed': {
       const a = o?.history[o.history.length - 1]
       return a
-        ? `An answer of “${REALITY_ANSWER_LABEL[a.answer]}” was posted on ${formatDate(a.at, 'long')}, backed by a bond of ${formatAmount(a.bond)} ${bondToken}.`
+        ? `An answer of ${answerWithMeaning(a.answer)} was posted on ${formatDate(a.at, 'long')}, backed by a bond of ${formatAmount(a.bond)} ${bondToken}.`
         : 'An answer has been posted and is in its challenge window.'
     }
     case 'disputed': {
       const n = o?.history.length ?? 0
-      return `The answer has changed ${Math.max(0, n - 1)} time${n - 1 === 1 ? '' : 's'}. The current answer is “${o?.currentAnswer ? REALITY_ANSWER_LABEL[o.currentAnswer] : '?'}”, backed by ${formatAmount(o?.currentBond ?? '0')} ${bondToken}.`
+      return `The answer has changed ${Math.max(0, n - 1)} time${n - 1 === 1 ? '' : 's'}. The current answer is ${answerWithMeaning(o?.currentAnswer)}, backed by ${formatAmount(o?.currentBond ?? '0')} ${bondToken}.`
     }
     case 'arbitration': {
       const arb = o?.arbitration
-      return `Arbitration was requested${arb?.requestedAt ? ` on ${formatDate(arb.requestedAt, 'long')}` : ''}${arb?.disputeId ? ` as Kleros dispute #${arb.disputeId}` : ''}. Jurors are reviewing the timely exhibits.`
+      const opened = `Arbitration was requested${arb?.requestedAt ? ` on ${formatDate(arb.requestedAt, 'long')}` : ''}${arb?.disputeId ? ` as Kleros dispute #${arb.disputeId}` : ''}.`
+      const ruling = arb?.ruling ? answerWithMeaning(arb.ruling) : 'on the question'
+      if (arb?.status === 'appeal_period') return `${opened} Jurors have ruled ${ruling}. The ruling can still be appealed.`
+      if (arb?.status === 'ruled') return `${opened} Jurors have ruled ${ruling}. The ruling now has to be reported to Reality.eth.`
+      return `${opened} Jurors are reviewing the timely exhibits.`
     }
     case 'resolved':
     case 'settled':
@@ -107,8 +124,17 @@ function PrimaryAction({ claim }: { claim: ClaimDetail }) {
   }
 }
 
+/** Package details write machine dates ("2026-10-05 22:00 UTC"); the rest of the page reads "Oct 5, 2026, 22:00 UTC". */
+function humanDates(text: string): string {
+  return text.replace(/\b(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2})(?::\d{2})?(?:Z| UTC)/g, (m, d: string, t: string) => {
+    const iso = `${d}T${t}:00Z`
+    return Number.isNaN(Date.parse(iso)) ? m : formatDate(iso, 'long')
+  })
+}
+
 /** Name the next event rather than repeating the current stage, which the band above already states. */
-function forwardLooking(claim: ClaimDetail, raw: ReturnType<typeof nextStep>): ReturnType<typeof nextStep> {
+function forwardLooking(claim: ClaimDetail, input: ReturnType<typeof nextStep>): ReturnType<typeof nextStep> {
+  const raw = { ...input, detail: humanDates(input.detail) }
   switch (claim.status) {
     case 'open':
       return {
@@ -125,7 +151,7 @@ function forwardLooking(claim: ClaimDetail, raw: ReturnType<typeof nextStep>): R
     case 'arbitration':
       return { ...raw, title: raw.title === 'Appeal period' ? 'The ruling stands, unless appealed' : raw.title === 'Ruling given' ? 'The ruling is reported to Reality.eth' : 'Kleros jurors rule' }
     case 'publishing':
-      return { ...raw, title: 'The filer finishes filing' }
+      return { ...raw, title: 'The filer finishes filing', detail: raw.detail.replace(/\bThe creator\b/g, 'The filer').replace(/\bthe creator\b/g, 'the filer') }
     case 'failed':
       return {
         ...raw,
@@ -133,7 +159,22 @@ function forwardLooking(claim: ClaimDetail, raw: ReturnType<typeof nextStep>): R
         detail: 'A claim that never reached its market cannot be revived. A new filing, with a new deadline, gets a new market.',
       }
     case 'resolved':
-      return { ...raw, title: 'Holders redeem' }
+      return {
+        ...raw,
+        title: 'Holders redeem',
+        detail:
+          claim.outcome === 'yes'
+            ? 'Yes tokens redeem for collateral; No and Invalid-result tokens pay nothing. Liquidity providers can withdraw what their positions are worth.'
+            : claim.outcome === 'no'
+              ? 'No tokens redeem for collateral; Yes and Invalid-result tokens pay nothing. Liquidity providers can withdraw what their positions are worth.'
+              : 'Only Invalid-result tokens redeem for collateral; Yes and No tokens pay nothing. Liquidity providers can withdraw what their positions are worth.',
+      }
+    case 'settled':
+      return {
+        ...raw,
+        title: 'Nothing is pending',
+        detail: 'The outcome is final and this claim’s positions have been redeemed or withdrawn. Anyone still holding winning tokens can redeem them at any time.',
+      }
     default:
       return raw
   }

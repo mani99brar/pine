@@ -117,7 +117,8 @@ export function ProcedureStrip({ stages, className }: { stages: ProcedureStage[]
   useEffect(() => {
     const el = ref.current?.querySelector<HTMLElement>('[aria-current="step"]')
     if (el && ref.current) {
-      ref.current.scrollLeft = Math.max(0, el.offsetLeft - 16)
+      // Leave part of the previous stage showing, so it is obvious the strip scrolls back to earlier stages.
+      ref.current.scrollLeft = Math.max(0, el.offsetLeft - 64)
     }
   }, [stages])
   return (

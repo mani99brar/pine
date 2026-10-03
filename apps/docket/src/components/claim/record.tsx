@@ -93,7 +93,7 @@ export function activityLabel(t: ActivityItem['type']) {
 
 export function ActivityTable({ items, showClaim = true }: { items: ActivityItem[]; showClaim?: boolean }) {
   return (
-    <div className="mt-3 overflow-x-auto border border-rule bg-sheet">
+    <div tabIndex={0} role="region" aria-label="Record of events" className="mt-3 overflow-x-auto border border-rule bg-sheet">
       <table className="w-full min-w-[40rem] text-left text-[15px]">
         <caption className="sr-only">Transactions</caption>
         <thead className="border-b border-rule bg-bond text-sm text-graphite">

@@ -95,6 +95,9 @@ node apps/docket/qa/flow-finish.mjs     # finish a partially published claim (PI
 node apps/docket/qa/flow-redeem.mjs     # redeem a winning position on a resolved claim
 node apps/docket/qa/flow-caret.mjs      # mid-text edits keep the caret in composer fields
 node apps/docket/qa/flow-focus.mjs      # keyboard tab order and focus ring
+node apps/docket/qa/flow-keyboard.mjs   # tick the six risk acknowledgements and continue to Publish without a mouse
+node apps/docket/qa/journeys.mjs        # first-time-user journeys at 1440 and 390 with axe-core: land, account, wizard, publish, exhibit, mydocket, states, misc, print → .qa/j/
+node apps/docket/qa/journeys.mjs wizard --vp=mobile --no-axe   # one journey, one viewport
 node apps/docket/qa/errors.mjs / /docket  # console and page errors for given paths
 ```
 

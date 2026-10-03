@@ -5,7 +5,7 @@ import type { AccountPreferences } from '@pine/core'
 import { formatDate } from '@pine/core'
 import { CHAINS, SUPPORTED_CHAIN_IDS } from '@pine/core/chains'
 import { SIWE_STATEMENT, useAccount, useAccountData, useLinkWallet, useUpdatePreferences, useWallet } from '@pine/react'
-import { Download, LogOut, Star, Trash2, Wallet } from 'lucide-react'
+import { Check, Download, LogOut, Star, Trash2, Wallet } from 'lucide-react'
 import { GitHubMark } from '@/components/ui/github-mark'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
@@ -126,6 +126,16 @@ function SignedIn() {
   const prefs: AccountPreferences = { ...account.preferences, ...edits }
   const setPrefs = (next: AccountPreferences) => setEdits(diffPrefs(account.preferences, next))
   const dirty = Object.keys(edits).length > 0
+  // Mirror the server's rules so mistakes show beside the field, not in a toast that disappears.
+  const limitError = !/^\d+(\.\d{1,18})?$/.test(prefs.defaultSpendingLimit ?? '')
+    ? 'Enter an amount such as 50 or 12.5, with no currency sign.'
+    : Number(prefs.defaultSpendingLimit) <= 0
+      ? 'The limit has to be more than zero.'
+      : undefined
+  const emailError =
+    prefs.notificationEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(prefs.notificationEmail) ? 'Enter a full email address, like you@example.com.' : undefined
+  const invalid = !!limitError || !!emailError
+  const connectedLinked = !!wallet.address && account.wallets.some((w) => w.address.toLowerCase() === wallet.address!.toLowerCase())
 
   return (
     <div className="space-y-12">
@@ -172,6 +182,11 @@ function SignedIn() {
               Linking proves you control an address by signing a message. It does not authorize any transaction or spending.
             </p>
           </div>
+          {connectedLinked ? (
+            <p className="inline-flex items-center gap-1.5 text-[15px] font-bold text-ink">
+              <Check aria-hidden className="size-4 text-violet" strokeWidth={3} /> The connected wallet is linked
+            </p>
+          ) : (
           <Button
             icon={<Wallet aria-hidden />}
             disabled={link.status === 'signing' || link.status === 'verifying'}
@@ -186,6 +201,7 @@ function SignedIn() {
           >
             {link.status === 'signing' ? 'Sign the message in your wallet' : link.status === 'verifying' ? 'Checking the signature' : wallet.isConnected ? 'Link the connected wallet' : 'Connect and link a wallet'}
           </Button>
+          )}
         </div>
         {link.error ? (
           <Notice tone="critical" className="mt-4" title="The wallet was not linked">
@@ -248,6 +264,10 @@ function SignedIn() {
           className="space-y-7 px-5 py-6 sm:px-7"
           onSubmit={(e) => {
             e.preventDefault()
+            if (invalid) {
+              document.getElementById(limitError ? 'p-limit' : 'p-email')?.focus()
+              return
+            }
             prefsMut.mutate(prefs, { onSuccess: () => { setEdits({}); toast('Preferences saved') }, onError: (err) => toast('Preferences were not saved', { description: err.message }) })
           }}
         >
@@ -269,10 +289,11 @@ function SignedIn() {
           <Field
             id="p-limit"
             label="Default spending limit"
+            error={limitError}
             hint={`In ${CHAINS[prefs.defaultChainId]?.collateral.symbol ?? 'collateral'}.`}
             guidance={<p>New filings start with this limit. Every step is checked against it before your wallet is asked to sign.</p>}
           >
-            <Input id="p-limit" inputMode="decimal" className="w-40" value={prefs.defaultSpendingLimit} onChange={(e) => setPrefs({ ...prefs, defaultSpendingLimit: e.target.value.trim() })} />
+            <Input id="p-limit" inputMode="decimal" className="w-40" aria-invalid={!!limitError} aria-describedby={limitError ? 'p-limit-error' : 'p-limit-hint'} value={prefs.defaultSpendingLimit} onChange={(e) => setPrefs({ ...prefs, defaultSpendingLimit: e.target.value.trim() })} />
           </Field>
           <div role="group" aria-labelledby="notify-legend" className="grid gap-x-10 lg:grid-cols-[minmax(0,1fr)_17rem] xl:grid-cols-[minmax(0,1fr)_19rem]">
             <div className="space-y-3">
@@ -289,17 +310,15 @@ function SignedIn() {
               </MarginNote>
             </aside>
           </div>
-          <Field id="p-email" label="Email for notifications" optional guidance={<p>Used only for the alerts above.</p>}>
-            <Input id="p-email" type="email" className="max-w-md" value={prefs.notificationEmail ?? ''} onChange={(e) => setPrefs({ ...prefs, notificationEmail: e.target.value || undefined })} />
+          <Field id="p-email" label="Email for notifications" optional error={emailError} guidance={<p>Used only for the alerts above.</p>}>
+            <Input id="p-email" type="email" className="max-w-md" aria-invalid={!!emailError} aria-describedby={emailError ? 'p-email-error' : undefined} value={prefs.notificationEmail ?? ''} onChange={(e) => setPrefs({ ...prefs, notificationEmail: e.target.value || undefined })} />
           </Field>
-          <Field id="p-cur" label="Show amounts in">
-            <Select id="p-cur" className="max-w-xs" value={prefs.displayCurrency} onChange={(e) => setPrefs({ ...prefs, displayCurrency: e.target.value as AccountPreferences['displayCurrency'] })}>
-              <option value="collateral">The market&rsquo;s collateral (sDAI)</option>
-              <option value="usd">US dollars, approximate</option>
-            </Select>
-          </Field>
+          <p className="text-sm text-graphite measure">
+            Amounts are always shown in the market&rsquo;s own collateral ({CHAINS[prefs.defaultChainId]?.collateral.symbol ?? 'sDAI'}), the unit
+            your wallet signs for. Pine does not convert them.
+          </p>
           <div className="flex flex-wrap items-center gap-3 border-t border-rule pt-5">
-            <Button type="submit" disabled={!dirty || prefsMut.isPending}>
+            <Button type="submit" disabled={!dirty || invalid || prefsMut.isPending}>
               {prefsMut.isPending ? 'Saving' : 'Save preferences'}
             </Button>
             {dirty ? (

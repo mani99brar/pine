@@ -40,11 +40,11 @@ export function EnvironmentStep() {
         error={errorFor('spec.environment.runtime')}
         guidance={<p>For example &ldquo;node 22.14.0&rdquo;, &ldquo;python 3.12.4&rdquo; or &ldquo;rustc 1.81.0&rdquo;. A range like &ldquo;node 22&rdquo; is too loose.</p>}
       >
-        <Input id="f-runtime" value={env.runtime ?? ''} onChange={(e) => set({ runtime: e.target.value })} placeholder="node 22.14.0" mono />
+        <Input id="f-runtime" value={env.runtime ?? ''} onChange={(e) => set({ runtime: e.target.value })} placeholder="e.g. node 22.14.0" mono />
       </Field>
 
       <Field id="f-pm" label="Package manager" optional guidance={<p>The tool and version that installs dependencies from the lockfile.</p>}>
-        <Input id="f-pm" value={env.packageManager ?? ''} onChange={(e) => set({ packageManager: e.target.value || undefined })} placeholder="pnpm 10.9.2" mono />
+        <Input id="f-pm" value={env.packageManager ?? ''} onChange={(e) => set({ packageManager: e.target.value || undefined })} placeholder="e.g. pnpm 10.9.2" mono />
       </Field>
 
       <LockfileField env={env} set={set} error={errorFor('spec.environment.dependencyLock')} />
@@ -57,7 +57,7 @@ export function EnvironmentStep() {
         error={errorFor('spec.environment.containerImage')}
         guidance={<p>Use the immutable form image@sha256:…, not a tag like :latest. Tags can be moved after filing.</p>}
       >
-        <Input id="f-image" value={env.containerImage ?? ''} onChange={(e) => set({ containerImage: e.target.value || undefined })} placeholder="ghcr.io/org/app@sha256:…" mono />
+        <Input id="f-image" value={env.containerImage ?? ''} onChange={(e) => set({ containerImage: e.target.value || undefined })} placeholder="e.g. ghcr.io/org/app@sha256:…" mono />
       </Field>
 
       <Field
@@ -67,7 +67,7 @@ export function EnvironmentStep() {
         hint="Snapshots or outside systems the reproduction depends on, or none."
         guidance={<p>For example a chain block number, a database fixture, or &ldquo;none&rdquo;. Investigators must be able to recreate it.</p>}
       >
-        <Input id="f-external" value={env.externalState ?? ''} onChange={(e) => set({ externalState: e.target.value || undefined })} placeholder="none" />
+        <Input id="f-external" value={env.externalState ?? ''} onChange={(e) => set({ externalState: e.target.value || undefined })} placeholder="none, or a pinned snapshot such as a block number" />
       </Field>
 
       <ConfigField env={env} set={set} error={errorFor('spec.environment.config')} />
@@ -85,7 +85,7 @@ export function EnvironmentStep() {
           rows={2}
           value={env.reproductionCommand ?? ''}
           onChange={(e) => set({ reproductionCommand: e.target.value })}
-          placeholder="pnpm vitest run test/reporter-funding.spec.ts"
+          placeholder="e.g. pnpm vitest run test/reporter-funding.spec.ts"
         />
       </Field>
 
@@ -97,7 +97,7 @@ export function EnvironmentStep() {
         error={errorFor('spec.environment.setupSteps')}
         guidance={<p>Anything that must happen before the command: install, seed fixtures, start a local node.</p>}
       >
-        <ListInput id="f-setup" mono value={env.setupSteps ?? []} onChange={(x) => set({ setupSteps: x })} placeholder="pnpm install --frozen-lockfile" />
+        <ListInput id="f-setup" mono value={env.setupSteps ?? []} onChange={(x) => set({ setupSteps: x })} placeholder="e.g. pnpm install --frozen-lockfile" />
       </Field>
 
       <Field id="f-notes" label="Notes for investigators" optional guidance={<p>Anything else that helps someone reproduce your environment faithfully.</p>}>
@@ -144,7 +144,7 @@ function LockfileField({ env, set, error }: { env: EnvironmentPin; set: (p: Part
         <Input
           id="f-lock"
           mono
-          placeholder="pnpm-lock.yaml"
+          placeholder="e.g. pnpm-lock.yaml"
           value={lock?.path ?? ''}
           onChange={(e) => set({ dependencyLock: e.target.value ? { path: e.target.value, hash: (lock?.hash ?? ('0x' + '0'.repeat(64))) as Hex } : undefined })}
         />

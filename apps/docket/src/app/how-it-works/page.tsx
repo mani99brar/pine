@@ -32,8 +32,11 @@ const GLOSSARY: { term: string; def: string }[] = [
   { term: 'Docket number', def: 'The claim’s public number, like PINE-0042. It never changes.' },
   { term: 'Environment hash', def: 'A fingerprint of the runtime, dependencies, configuration and reproduction command. Exhibits must reproduce under it.' },
   { term: 'Evidence deadline', def: 'The absolute UTC time after which exhibits are not timely. It is not a trading cutoff.' },
+  { term: 'Gas', def: 'The network fee for every transaction you sign. It is paid in the chain’s own token (xDAI on Gnosis, ETH on Ethereum) and is gone whatever the outcome.' },
+  { term: 'Gnosis', def: 'The blockchain Pine markets use by default. Fees there are a fraction of a cent. Exhibits and arbitration still happen on Ethereum.' },
   { term: 'Exhibit', def: 'Something filed against a claim: a counterexample, a rebuttal or a clarification. Lettered A, B, C in filing order.' },
   { term: 'Invalid result', def: 'A third outcome Seer adds to every market, used when the question cannot be answered. Only Invalid-result tokens redeem then; it is not a refund.' },
+  { term: 'Kleros', def: 'A decentralized court. Its jurors rule on a disputed answer when someone pays for arbitration.' },
   { term: 'Liquidity', def: 'Collateral placed in the market’s pools so trades can happen. It is capital at risk, not a bounty or a reward.' },
   { term: 'Manifest', def: 'The complete, hashed record of a claim: source, policy, requirement, environment, deadline and question. Stored durably and referenced by the market.' },
   { term: 'Market-implied chance', def: 'The Yes price, read as the market’s estimate that a qualifying counterexample is accepted. It is not the probability that the code has bugs.' },
@@ -42,9 +45,13 @@ const GLOSSARY: { term: string; def: string }[] = [
   { term: 'Policy', def: 'A reviewed, versioned rulebook that says what evidence counts and what is excluded. Its hash is part of the question.' },
   { term: 'Price impact', def: 'How much a trade moves the price. A big trade in a thin market gets a much worse average price than the headline.' },
   { term: 'Redeem', def: 'Exchanging winning outcome tokens for collateral after the market resolves.' },
+  { term: 'Reality.eth', def: 'The oracle Pine uses. Anyone can post the answer to the market question with a bond, and anyone can challenge it with a bigger one.' },
+  { term: 'Sealed exhibit', def: 'An exhibit filed as a hash first and revealed later, so nobody can copy it before it is timestamped. Its rules are still a launch gate.' },
   { term: 'Seer', def: 'The prediction-market protocol Pine uses to create markets and outcome tokens.' },
   { term: 'Spending limit', def: 'The most a filing may spend, set by you. Every step is checked against it, and approvals are for the exact amount only.' },
-]
+  { term: 'Wallet', def: 'The app that holds your funds and signs transactions, such as a browser extension. Pine asks it to sign; it never holds your keys.' },
+  { term: 'xDAI', def: 'The token that pays gas on Gnosis, worth about one US dollar. Oracle bonds on Gnosis are also posted in xDAI.' },
+].sort((a, b) => a.term.localeCompare(b.term, 'en', { sensitivity: 'base' }))
 
 const DURATION: Record<string, string> = {
   evidence: 'Set by the filer, at least 24 hours',
@@ -68,8 +75,9 @@ export default function HowItWorksPage() {
             </h2>
             <p className="mt-3 text-lg leading-8 measure">
               You pin one commit and state one thing it must never do. A prediction market then asks: will someone demonstrate that it does, before
-              the deadline? If you are right, the market resolves No. If you are wrong, an investigator who finds the counterexample can buy Yes while it is
-              cheap and profit when the market resolves. That possibility, not a fee from you, is what draws people to look. An oracle answers the question, and Kleros settles disputes about
+              the deadline? If the code does fail, an investigator who finds the counterexample can buy Yes while it is cheap and profit when the market
+              resolves. That possibility, not a fee from you, is what draws people to look. If nobody demonstrates it in time, the market resolves No,
+              which means only that: no qualifying counterexample was submitted. An oracle answers the question, and Kleros settles disputes about
               the answer.
             </p>
             <p className="mt-4 text-[15px] text-graphite measure">{COPY.notAReview}</p>
