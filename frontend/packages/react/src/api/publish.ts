@@ -23,7 +23,7 @@ import { isoNow } from '../internal/util'
 import { useDraftQuery } from '../composer/use-claim-composer'
 import { upsertDraftInCache } from '../composer/drafts'
 import type { ApiPlanRunner } from './use-plan-runner'
-import { composerPathOf, toDraftInput, type DraftFieldError } from './draft-input'
+import { chosenEvidenceDeadline, composerPathOf, toDraftInput, toDraftTerms, type DraftFieldError, type DraftTerms, type DraftTermsResult } from './draft-input'
 import { checkCreateClaimPlan, verifyPreview, type PreviewIssue, type VerifiedPreview } from './verify-preview'
 import {
   readOnChainClaim,
@@ -128,9 +128,30 @@ function isStoredPreview(value: unknown): value is StoredPreview {
 }
 
 /** The input without the evidence window (it is relative to the time of saving). */
-function composedTerms(input: DraftInput): string {
+function termsOf(input: DraftInput): DraftTerms {
   const { evidenceWindowSeconds: _window, ...terms } = input
-  return canonicalJson(terms as unknown as JsonValue)
+  return terms
+}
+
+const termsJson = (terms: DraftTerms): string => canonicalJson(terms as unknown as JsonValue)
+
+/**
+ * SEC-CLAIM-04: a preview is publishable only while the current draft composes exactly the terms it was made from and
+ * keeps its evidence deadline. Fails closed: a draft that cannot be mapped any more (for any reason but the evidence
+ * window drifting with the clock, which toDraftTerms ignores) makes the preview stale too.
+ */
+function staleIssues(stored: StoredPreview, live: DraftTermsResult, deadline: number | undefined): PreviewIssue[] {
+  const issues: PreviewIssue[] = []
+  if (!live.ok) {
+    const first = live.errors[0]?.message
+    issues.push({ code: 'stale_preview', message: `The claim changed after this preview and cannot be sent to Pine as it is${first ? ` (${first})` : ''}. Fix it, then request a new preview.` })
+  } else if (termsJson(live.terms) !== termsJson(termsOf(stored.input))) {
+    issues.push({ code: 'stale_preview', message: 'You edited the claim after this preview. Request a new preview to publish the current terms.' })
+  }
+  if (deadline !== stored.chosenEvidenceDeadline) {
+    issues.push({ code: 'stale_preview', field: 'evidence.evidenceDeadline', message: 'You changed the evidence deadline after this preview. Request a new preview to publish the new deadline.' })
+  }
+  return issues
 }
 
 function upsertStep(steps: PublicationStep[] | undefined, step: PublicationStep): PublicationStep[] {
@@ -184,11 +205,17 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
     [draft, options.defaultBranch, env.defaultChainId, now],
   )
   const fieldErrors = useMemo(() => [...(live && !live.ok ? live.errors : []), ...backendIssues], [live, backendIssues])
-  const liveTerms = useMemo(() => (live?.ok ? composedTerms(live.input) : null), [live])
+  // What the preview is compared with: the current terms (clock-independent) and the absolute deadline chosen.
+  const liveTerms = useMemo(
+    () => (draft ? toDraftTerms(draft, { defaultBranch: options.defaultBranch, chainId: env.defaultChainId }) : null),
+    [draft, options.defaultBranch, env.defaultChainId],
+  )
+  const liveDeadline = draft ? chosenEvidenceDeadline(draft) : undefined
 
-  // The preview, verified again on every load and whenever the wallet changes.
+  // The preview, verified again on every load and whenever the wallet changes. Until the draft is loaded there is
+  // nothing to compare it with, so none is shown.
   const verified = useMemo(() => {
-    if (!stored || !manifest) return null
+    if (!stored || !manifest || !liveTerms) return null
     const result = verifyPreview(stored.response, {
       input: stored.input,
       account,
@@ -201,11 +228,9 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
     if (stored.backendDraftId !== backend?.draftId || stored.revision !== backend?.revision) {
       issues.push({ code: 'stale_preview', message: 'The draft was saved again after this preview. Request a new preview.' })
     }
-    if (liveTerms !== null && liveTerms !== composedTerms(stored.input)) {
-      issues.push({ code: 'stale_preview', message: 'You edited the claim after this preview. Request a new preview to publish the current terms.' })
-    }
+    issues.push(...staleIssues(stored, liveTerms, liveDeadline))
     return { preview: result.preview, issues }
-  }, [stored, manifest, account, env.defaultChainId, backend?.draftId, backend?.revision, liveTerms])
+  }, [stored, manifest, account, env.defaultChainId, backend?.draftId, backend?.revision, liveTerms, liveDeadline])
   const preview = verified?.preview ?? null
   const verifyIssues = useMemo(() => verified?.issues ?? [], [verified])
 
@@ -373,13 +398,12 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
       setOp('previewing')
       try {
         const response = await requireWriteApi(api).preview(saved.view.id, { liveSystemImpactNone: true })
-        const deadline = draft.spec.evidence?.deadline ? Math.floor(Date.parse(draft.spec.evidence.deadline) / 1000) : undefined
         setStored({
           v: 1,
           backendDraftId: saved.view.id,
           revision: saved.view.revision,
           input: saved.input,
-          chosenEvidenceDeadline: deadline !== undefined && Number.isFinite(deadline) ? deadline : undefined,
+          chosenEvidenceDeadline: chosenEvidenceDeadline(draft),
           response,
         })
         await writeDraft((p) => ({

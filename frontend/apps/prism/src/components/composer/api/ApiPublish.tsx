@@ -115,7 +115,11 @@ export function ApiStagePublish({ c, nav, acknowledged }: { c: ClaimComposer; na
   const locked = publicationLocked(pub)
   const ready = identityReady(id, 'publish')
   const failedRun = runner.state === 'failed' && !locked
-  const canPublish = pub.status === 'reviewable' && acknowledged && ready
+  // Defence in depth (the hook already marks such a preview stale): never publish while the composed claim has issues.
+  // The evidence window alone may drift with the clock: what is published is the preview's own deadline, and moving
+  // the deadline makes the preview stale.
+  const termIssues = c.validation.issues.filter((i) => i.path !== 'spec.evidence.deadline')
+  const canPublish = pub.status === 'reviewable' && acknowledged && ready && termIssues.length === 0
   const needsPreview = !preview || pub.status === 'blocked' || pub.status === 'expired' || pub.status === 'failed' || pub.status === 'invalid'
 
   return (
@@ -131,6 +135,19 @@ export function ApiStagePublish({ c, nav, acknowledged }: { c: ClaimComposer; na
             <button type="button" className="link font-semibold" onClick={() => nav.go('review')}>
               Back to review
             </button>
+          </Notice>
+        )}
+        {!locked && !needsPreview && termIssues.length > 0 && (
+          <Notice
+            tone="caution"
+            title="The claim has unresolved issues"
+            action={
+              <Button size="sm" onClick={() => nav.go('review')} icon={<ArrowLeft size={14} aria-hidden />}>
+                Back to review
+              </Button>
+            }
+          >
+            <span className="[overflow-wrap:anywhere]">{termIssues[0]?.message}</span> Fix the claim, then request a new preview.
           </Notice>
         )}
         {!locked && needsPreview && (

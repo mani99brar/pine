@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ClaimDraft, Hex } from '@pine/core'
 import { draftInputSchema } from '@pine/data'
-import { composerPathOf, toDraftInput, type DraftFieldError } from '../src/api/draft-input'
+import { chosenEvidenceDeadline, composerPathOf, toDraftInput, toDraftTerms, type DraftFieldError } from '../src/api/draft-input'
 import { COMMIT, NOW } from './api-write-chain'
 
 const DAY_MS = 86_400_000
@@ -254,6 +254,35 @@ describe('toDraftInput', () => {
   it('collects every error at once', () => {
     const errs = errorsOf(edit((d) => ((d.spec.title = 'a"b'), (d.spec.violation = ''), (d.spec.oracle!.minBond = '0'))))
     expect(errs.map((e) => e.field).sort()).toEqual(['minBondWei', 'title', 'violation'])
+  })
+})
+
+describe('toDraftTerms', () => {
+  it('is the draft input without the evidence window, whatever the clock', () => {
+    const d = baseDraft()
+    const input = toDraftInput(d, { now: NOW })
+    const terms = toDraftTerms(d)
+    expect(input.ok && terms.ok).toBe(true)
+    if (!input.ok || !terms.ok) return
+    const { evidenceWindowSeconds: _window, ...expected } = input.input
+    expect(terms.terms).toEqual(expected)
+    expect('evidenceWindowSeconds' in terms.terms).toBe(false)
+    // A deadline that drifted under the backend minimum, or passed, does not change or hide the terms.
+    const drifted = edit((x) => (x.spec.evidence = { mechanism: 'erc1497-arbitrator-proxy', deadline: at(-DAY_MS) }))
+    expect(toDraftInput(drifted, { now: NOW }).ok).toBe(false)
+    expect(toDraftTerms(drifted)).toEqual(terms)
+  })
+
+  it('SEC-CLAIM-04 reports every other problem like toDraftInput (fails closed)', () => {
+    const r = toDraftTerms(edit((x) => ((x.spec.scope = { inScope: [], outOfScope: [] }), (x.spec.title = 'a"b'))))
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.errors.map((e) => e.field).sort()).toEqual(['scope.components', 'title'])
+  })
+
+  it('reads the chosen evidence deadline as unix seconds', () => {
+    expect(chosenEvidenceDeadline(baseDraft())).toBe(Math.floor((NOW.getTime() + 7 * DAY_MS) / 1000))
+    expect(chosenEvidenceDeadline(edit((x) => (x.spec.evidence = undefined)))).toBeUndefined()
+    expect(chosenEvidenceDeadline(edit((x) => (x.spec.evidence = { mechanism: 'erc1497-arbitrator-proxy', deadline: 'not a date' })))).toBeUndefined()
   })
 })
 
