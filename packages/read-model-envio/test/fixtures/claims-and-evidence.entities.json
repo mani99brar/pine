@@ -1,0 +1,190 @@
+{
+  "scenario": "claims-and-evidence",
+  "eventsSha256": "2a246f89daeba8028f7920e94107d3f530abeaef9c456ac3a095e58cc90ba8e3",
+  "entities": {
+    "AnswerCommitment": [],
+    "Arbitration": [],
+    "ArbitrationStage": [],
+    "Claim": [
+      {
+        "claimDocumentSha256": "0xd5755e7062193b292734175a97a48e760984f59b9a9bc406d4a6099ce5fe00bf",
+        "commit": "abababababababababababababababababababab",
+        "conditionId": "0xb1d932e7946ee464ba52002614ef875129dadb2ce60b9af22cb1fb46ffbd4314",
+        "createdAt": "1800000000",
+        "createdBlock": "1000",
+        "createdLogIndex": "0",
+        "createdTxHash": "0x58bed4110eb9b8d3414898eed0988898a7e91c39cfdc4a2b327fc036822fb4d9",
+        "creator": "0x5efb1ca6fe60c1136cf0aa6adab473b8aa649a15",
+        "evidenceDeadline": "1800604800",
+        "id": "0x24f559c5fddd07e32902f6b0bba2026a3a43d84e",
+        "invalidToken": "0xc08f4d53da31b3fbdfff0e25eeacd65fc970ad0c",
+        "marketName": "Pine claim [Claim alpha]: was a reproducible counterexample submitted?",
+        "marketNameHash": "0xc9008abdfbf8712585ee21b3761a88c5b70c2c18613eabc63faa93bcdab80332",
+        "minBond": "1000000000000000000",
+        "noToken": "0x62e85b2265b0abfb9f96df54d8e2182174161f11",
+        "policyDocumentSha256": "0xff1c9ed88c493f35ccedb6df7f957433cf568a873458a45eb62a995e160a692b",
+        "questionId": "0x024ef283519833a7ce8de7cc80b43f99c8d540d941ba963d8b24a9905a643def",
+        "registry": "0x00000000000000000000000000000000000c1a10",
+        "repositoryId": "123456789",
+        "revealDeadline": "1800777600",
+        "title": "Claim alpha",
+        "yesToken": "0x1c221f957575140c8a8bccbc60977baea412289f"
+      },
+      {
+        "claimDocumentSha256": "0x219fa7cf9c69a88683e7016c7873783a9df008f3962b8318819314e78e28d482",
+        "commit": "abababababababababababababababababababab",
+        "conditionId": "0x7d444b3601a9c6af7cc0ee36c17581f74b5c80482705ba5ad1bffe9c95747332",
+        "createdAt": "1800000005",
+        "createdBlock": "1001",
+        "createdLogIndex": "1",
+        "createdTxHash": "0x3f04e3935d8ab20e52538e1269ad0040a9fe348e9e24d264ecde786d4788ab18",
+        "creator": "0x995027884bb38a834e813786749cbf573c722b9d",
+        "evidenceDeadline": "1800259205",
+        "id": "0x8154b4a9a2adaa2f186a349a451ac59fac1093cb",
+        "invalidToken": "0x94c33df5354699dc1820da7c168fea1cc6c6065a",
+        "marketName": "Pine claim [Claim beta]: was a reproducible counterexample submitted?",
+        "marketNameHash": "0x21fefafbe0cc7f5bc267f9e96722a945bbba27708eb6679da41ee9ef81c4d518",
+        "minBond": "1000000000000000000",
+        "noToken": "0x46224b966248a71c1e2a6eddf587f16d55cb80bd",
+        "policyDocumentSha256": "0xff1c9ed88c493f35ccedb6df7f957433cf568a873458a45eb62a995e160a692b",
+        "questionId": "0x631b6054127b4a4b47a7e52c0befdb697f2fe384942c191dea0c4cd4b30f8a89",
+        "registry": "0x00000000000000000000000000000000000c1a10",
+        "repositoryId": "123456789",
+        "revealDeadline": "1800345605",
+        "title": "Claim beta",
+        "yesToken": "0x7b4e436b22ea8d245c398bb46b1a55da251ec483"
+      },
+      {
+        "claimDocumentSha256": "0xa6e3211191d450a70033330d9b4f6c27caaf6b74335f7c437d910fd854efc778",
+        "commit": "abababababababababababababababababababab",
+        "conditionId": "0xb1d932e7946ee464ba52002614ef875129dadb2ce60b9af22cb1fb46ffbd4314",
+        "createdAt": "1800000005",
+        "createdBlock": "1001",
+        "createdLogIndex": "0",
+        "createdTxHash": "0x5ea3a0f39a69d50396a88f6ec81b004aa54545b6d72722238f4ab24f80f7dcd5",
+        "creator": "0x6ea4fc21d15f5d9fb500625420daef75c6d1b6f0",
+        "evidenceDeadline": "1800604800",
+        "id": "0xbecdab9c8c6e1698ff52f3f95dd524a39cd97233",
+        "invalidToken": "0xad17a5745f96b1838c1d4c6240934bb0d8c1c3cb",
+        "marketName": "Pine claim [Claim alpha-twin]: was a reproducible counterexample submitted?",
+        "marketNameHash": "0xcd0b3394609a3354dd7564687111c1497ec4ba9d2025ec0895e3f460f1a3f92e",
+        "minBond": "1000000000000000000",
+        "noToken": "0xf20f489b23d66db390a8d8cc79f19b257ee56ad9",
+        "policyDocumentSha256": "0xff1c9ed88c493f35ccedb6df7f957433cf568a873458a45eb62a995e160a692b",
+        "questionId": "0x024ef283519833a7ce8de7cc80b43f99c8d540d941ba963d8b24a9905a643def",
+        "registry": "0x00000000000000000000000000000000000c1a10",
+        "repositoryId": "123456789",
+        "revealDeadline": "1800777600",
+        "title": "Claim alpha-twin",
+        "yesToken": "0xfeca30bfb5f2b778c587b01708592b9137f0a614"
+      }
+    ],
+    "ConditionResolution": [],
+    "EvidenceSubmission": [
+      {
+        "commitment": "0x7c1b16802b304761acd81e033c1db5a9721da4b32959e4a8361983cfacacbbec",
+        "committedAt": "1800000010",
+        "committedBlock": "1002",
+        "committedLogIndex": "0",
+        "committedTxHash": "0x24a9cf1d1fc92f87594edf068c24b09715873df6133cd2c990e4c6d47d1395aa",
+        "contentSha256": "0x397377778b65288382218837c69247cd1ec792d2e67be47ed45514d529e1c239",
+        "id": "0x00000000000000000000000000000000000e01de:1",
+        "market": "0x24f559c5fddd07e32902f6b0bba2026a3a43d84e",
+        "registry": "0x00000000000000000000000000000000000e01de",
+        "revealedAt": "1800090010",
+        "status": "revealed",
+        "submissionId": "1",
+        "submitter": "0xf0c6e4896c80bf338d769ddf545f871d7af9ef11"
+      },
+      {
+        "commitment": null,
+        "committedAt": "1800000010",
+        "committedBlock": "1002",
+        "committedLogIndex": "1",
+        "committedTxHash": "0x42ffc6a53c7456b09b0d2d2206961fea054afc17b61a650024f34654db776f31",
+        "contentSha256": "0x2e112640cec37046c7d1362ca75798a78b0d31a73d08359539ae1ec9b0053824",
+        "id": "0x00000000000000000000000000000000000e01de:2",
+        "market": "0x8154b4a9a2adaa2f186a349a451ac59fac1093cb",
+        "registry": "0x00000000000000000000000000000000000e01de",
+        "revealedAt": "1800000010",
+        "status": "published",
+        "submissionId": "2",
+        "submitter": "0x89b795640a977077a3c25b246fe0448f42ce4ec0"
+      },
+      {
+        "commitment": "0xc6d4d0e29c6abc6af1b615fa6b86f4df4395538149a0e1f8acdd602dc5702394",
+        "committedAt": "1800003610",
+        "committedBlock": "1003",
+        "committedLogIndex": "0",
+        "committedTxHash": "0xefe7d7530d2e2a8a43037ad8afa0cb8cbc63792cb4abb94d8c79f1f6d387da38",
+        "contentSha256": null,
+        "id": "0x00000000000000000000000000000000000e01de:3",
+        "market": "0x24f559c5fddd07e32902f6b0bba2026a3a43d84e",
+        "registry": "0x00000000000000000000000000000000000e01de",
+        "revealedAt": null,
+        "status": "committed",
+        "submissionId": "3",
+        "submitter": "0x89b795640a977077a3c25b246fe0448f42ce4ec0"
+      }
+    ],
+    "IndexerProgress": [
+      {
+        "blockNumber": "1004",
+        "blockTimestamp": "1800090010",
+        "id": "100"
+      }
+    ],
+    "OracleAnswer": [],
+    "OracleQuestion": [
+      {
+        "answerCount": "0",
+        "answeredByArbitrator": false,
+        "arbitrationRequestedBy": null,
+        "bestAnswer": null,
+        "bond": "0",
+        "bounty": "0",
+        "finalizeTs": "0",
+        "id": "0x024ef283519833a7ce8de7cc80b43f99c8d540d941ba963d8b24a9905a643def",
+        "lastEventBlock": "0",
+        "markets": [
+          "0x24f559c5fddd07e32902f6b0bba2026a3a43d84e",
+          "0xbecdab9c8c6e1698ff52f3f95dd524a39cd97233"
+        ],
+        "minBond": "1000000000000000000",
+        "openingTs": "1800777600",
+        "pendingArbitration": false,
+        "reopenedBy": null,
+        "reopens": null,
+        "timeout": "302400"
+      },
+      {
+        "answerCount": "0",
+        "answeredByArbitrator": false,
+        "arbitrationRequestedBy": null,
+        "bestAnswer": null,
+        "bond": "0",
+        "bounty": "0",
+        "finalizeTs": "0",
+        "id": "0x631b6054127b4a4b47a7e52c0befdb697f2fe384942c191dea0c4cd4b30f8a89",
+        "lastEventBlock": "0",
+        "markets": [
+          "0x8154b4a9a2adaa2f186a349a451ac59fac1093cb"
+        ],
+        "minBond": "1000000000000000000",
+        "openingTs": "1800345605",
+        "pendingArbitration": false,
+        "reopenedBy": null,
+        "reopens": null,
+        "timeout": "302400"
+      }
+    ],
+    "TrackedCondition": [
+      {
+        "id": "0x7d444b3601a9c6af7cc0ee36c17581f74b5c80482705ba5ad1bffe9c95747332"
+      },
+      {
+        "id": "0xb1d932e7946ee464ba52002614ef875129dadb2ce60b9af22cb1fb46ffbd4314"
+      }
+    ]
+  }
+}
