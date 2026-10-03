@@ -1,0 +1,174 @@
+# yaml-language-server: $schema=./node_modules/envio/evm.schema.json
+#
+# Pine — Envio HyperIndex v3 config (EXAMPLE, not a working indexer).
+#
+# Contract for the indexer the Pine frontends read in `envio` mode. Entities: ./schema.graphql.
+# Addresses and event signatures come from docs/research/seer-integration.md (read on-chain
+# 2026-10-03, seer-pm/demo @ 60423441, kleros/cross-chain-realitio-proxy @ 07a63a43). Entries marked
+# UNVERIFIED must be checked against the deployed ABI before use. Re-read factory immutables at launch.
+#
+# HOW PINE CLAIMS ARE RECOGNIZED
+#   1. MarketFactory.NewMarket from the OFFICIAL factory (non-official factories use a 60 s Reality
+#      timeout and are ignored).
+#   2. marketName ends with " — Terms: ipfs://<cid>[/path] (manifest keccak256 0x<64 hex>)"
+#      (@pine/core buildMarketName). Regex:
+#        / — Terms: (ipfs:\/\/[^\s]+) \(manifest keccak256 (0x[0-9a-fA-F]{64})\)$/
+#   3. The handler calls the `fetchManifest` Effect (context.effect) to GET
+#      ${PINE_IPFS_GATEWAY}/ipfs/<cid>[/path], checks keccak256(canonicalJson(manifest)) == hash and that
+#      the market name starts with manifest.question.text, then writes Claim (manifestValid = true,
+#      manifest = JSON, denormalized fields). Failed checks keep Market.isPine = false and write no Claim.
+#   Effects are cached and retried by Envio; IPFS reads never block on a single gateway (try a fallback).
+#
+# Sketch of the Effect (envio >= 3):
+#   import { createEffect, S } from "envio";
+#   export const fetchManifest = createEffect(
+#     { name: "fetchManifest", input: S.string, output: S.nullable(S.string), cache: true, rateLimit: false },
+#     async ({ input: uri }) => {
+#       const res = await fetch(`${process.env.PINE_IPFS_GATEWAY}/ipfs/${uri.replace("ipfs://", "")}`);
+#       return res.ok ? await res.text() : null;           // raw text: hash after canonicalization
+#     });
+#   // in the NewMarket handler:  const raw = await context.effect(fetchManifest, manifestUri);
+#
+# HANDLERS are registered in code with the v3 API (`indexer.onEvent({ contract, event }, handler)`,
+# `indexer.contractRegister(...)` for dynamic contracts); suggested layout src/handlers/<contract>.ts.
+#
+# IDS follow seer-pm/seer-indexer: "<chainId>:<lowercase hex>" (see schema.graphql).
+
+name: pine-indexer
+description: Pine claim markets on Seer — Reality.eth answers, Kleros arbitration, ERC-1497 evidence, Swapr pools
+address_format: lowercase
+# One set of entity tables across chains; ids carry the chain prefix.
+# disable_default_cross_chain: false
+
+contracts:
+  # ---------------------------------------------------------------- Gnosis (100)
+  - name: MarketFactory
+    events:
+      # Recognize Pine markets; register outcome tokens and the Reality question; fetch the manifest (Effect).
+      - event: NewMarket(address indexed market, string marketName, address parentMarket, bytes32 conditionId, bytes32 questionId, bytes32[] questionsIds)
+        field_selection:
+          transaction_fields: [hash, from]
+
+  - name: Reality
+    events:
+      # Filter with `where: { params: [{ user: <MarketFactory> }] }` — `user` is msg.sender (the factory).
+      - event: LogNewQuestion(bytes32 indexed question_id, address indexed user, uint256 template_id, string question, bytes32 indexed content_hash, address arbitrator, uint32 timeout, uint32 opening_ts, uint256 nonce, uint256 created)
+      # Each answer: bond doubles; finalize_ts = ts + timeout. Updates Claim.phase (answered → disputed), currentAnswer, finalizeTs.
+      - event: LogNewAnswer(bytes32 answer, bytes32 indexed question_id, bytes32 history_hash, address indexed user, uint256 bond, uint256 ts, bool is_commitment)
+      - event: LogAnswerReveal(bytes32 indexed question_id, address indexed user, bytes32 indexed answer_hash, bytes32 answer, uint256 nonce, uint256 bond)
+      # Arbitration accepted on Gnosis (question frozen) → Claim.phase = arbitration.
+      - event: LogNotifyOfArbitrationRequest(bytes32 indexed question_id, address indexed user)
+      - event: LogCancelArbitration(bytes32 indexed question_id)
+      # Emitted only when the ARBITRATOR answers; timeout finalization emits nothing (derive from finalize_ts).
+      - event: LogFinalize(bytes32 indexed question_id, bytes32 indexed answer)
+      # "Answered too soon" → reopened question; follow the replacement id.
+      - event: LogReopenQuestion(bytes32 indexed question_id, bytes32 indexed reopened_question_id)
+
+  - name: ConditionalTokens
+    events:
+      # Seer's Router is the stakeholder; attribute flows to transaction.from.
+      - event: PositionSplit(address indexed stakeholder, address collateralToken, bytes32 indexed parentCollectionId, bytes32 indexed conditionId, uint256[] partition, uint256 amount)
+        field_selection:
+          transaction_fields: [hash, from]
+      - event: PositionsMerge(address indexed stakeholder, address collateralToken, bytes32 indexed parentCollectionId, bytes32 indexed conditionId, uint256[] partition, uint256 amount)
+        field_selection:
+          transaction_fields: [hash, from]
+      - event: PayoutRedemption(address indexed redeemer, address indexed collateralToken, bytes32 indexed parentCollectionId, bytes32 conditionId, uint256[] indexSets, uint256 payout)
+        field_selection:
+          transaction_fields: [hash, from]
+      # Payout reported → Claim.phase = finalized, outcome from payoutNumerators ([1,0,0] yes, [0,1,0] no, [0,0,1] invalid).
+      - event: ConditionResolution(bytes32 indexed conditionId, address indexed oracle, bytes32 indexed questionId, uint256 outcomeSlotCount, uint256[] payoutNumerators)
+
+  - name: OutcomeToken
+    events:
+      # Wrapped ERC-1155 outcome tokens (ERC-20). Registered dynamically from NewMarket. Maintains Position balances.
+      - event: Transfer(address indexed from, address indexed to, uint256 value)
+
+  - name: AlgebraFactory
+    events:
+      # UNVERIFIED signature (Algebra v1). Register pools whose token pair is (outcome token, sDAI) of a Pine market.
+      - event: Pool(address indexed token0, address indexed token1, address pool)
+
+  - name: AlgebraPool
+    events:
+      # UNVERIFIED signatures (Algebra v1). Swap → Trade, PriceCandle, Claim prices/volume, DailyStats.
+      - event: Swap(address indexed sender, address indexed recipient, int256 amount0, int256 amount1, uint160 price, uint128 liquidity, int24 tick)
+        field_selection:
+          transaction_fields: [hash, from]
+      - event: Mint(address sender, address indexed owner, int24 indexed bottomTick, int24 indexed topTick, uint128 liquidityAmount, uint256 amount0, uint256 amount1)
+      - event: Burn(address indexed owner, int24 indexed bottomTick, int24 indexed topTick, uint128 liquidityAmount, uint256 amount0, uint256 amount1)
+
+  - name: PositionManager
+    events:
+      # UNVERIFIED signatures (Algebra NonfungiblePositionManager "Algebra Positions NFT-V1"). LiquidityPosition + liquidity_added/removed activity.
+      - event: IncreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint128 actualLiquidity, uint256 amount0, uint256 amount1, address pool)
+        field_selection:
+          transaction_fields: [hash, from]
+      - event: DecreaseLiquidity(uint256 indexed tokenId, uint128 liquidity, uint256 amount0, uint256 amount1)
+      - event: Collect(uint256 indexed tokenId, address recipient, uint256 amount0, uint256 amount1)
+      - event: Transfer(address indexed from, address indexed to, uint256 indexed tokenId)
+
+  - name: HomeProxy
+    events:
+      # RealitioHomeArbitrationProxy on Gnosis: bridge-side arbitration status.
+      - event: RequestNotified(bytes32 indexed _questionID, address indexed _requester, uint256 _maxPrevious)
+      - event: RequestRejected(bytes32 indexed _questionID, address indexed _requester, uint256 _maxPrevious, string _reason)
+      - event: ArbitratorAnswered(bytes32 indexed _questionID, bytes32 _answer)
+
+  # ---------------------------------------------------------------- Ethereum (1)
+  - name: ForeignProxy
+    events:
+      # RealitioForeignArbitrationProxyWithAppeals: requests are paid in ETH on Ethereum for Gnosis markets.
+      - event: ArbitrationRequested(bytes32 indexed _questionID, address indexed _requester, uint256 _maxPrevious)
+        field_selection:
+          transaction_fields: [hash, from, value]
+      - event: ArbitrationCreated(bytes32 indexed _questionID, address indexed _requester, uint256 indexed _disputeID)
+      - event: ArbitrationFailed(bytes32 indexed _questionID, address indexed _requester)
+      - event: Ruling(address indexed _arbitrator, uint256 indexed _disputeID, uint256 _ruling)
+      # ERC-1497 evidence: _evidenceGroupID = uint256(Reality question id). Permissionless, no status check;
+      # the block timestamp is the timeliness proof. The handler hydrates the evidence JSON via an Effect
+      # (`fetchEvidence`) and stores it as UNTRUSTED content (Evidence.hydrated/title/summary/...).
+      - event: Evidence(address indexed _arbitrator, uint256 indexed _evidenceGroupID, address indexed _party, string _evidence)
+        field_selection:
+          transaction_fields: [hash, from]
+
+  - name: KlerosLiquid
+    events:
+      # Appeal period bookkeeping (Arbitration.appealPeriodEnd via an Effect reading appealPeriod(disputeId)).
+      - event: NewPeriod(uint256 indexed _disputeID, uint8 _period)
+      - event: AppealPossible(uint256 indexed _disputeID, address indexed _arbitrable)
+      - event: AppealDecision(uint256 indexed _disputeID, address indexed _arbitrable)
+
+chains:
+  - id: 100 # Gnosis
+    # Use the block of Pine's first market in production; the MarketFactory deploy block is 36404701.
+    start_block: ${PINE_GNOSIS_START_BLOCK}
+    # rpc: ${ENVIO_GNOSIS_RPC}            # optional; HyperSync is the default source (needs ENVIO_API_TOKEN)
+    contracts:
+      - name: MarketFactory
+        address: 0x83183da839ce8228e31ae41222ead9edbb5cdcf1 # official Seer MarketFactory (questionTimeout 302400 s)
+      - name: Reality
+        address: 0xe78996a233895be74a66f451f1019ca9734205cc # Reality.eth v3.0 (bonds in xDAI)
+      - name: ConditionalTokens
+        address: 0xceafdd6bc0bef976fdcd1112955828e00543c0ce
+      - name: OutcomeToken # dynamic: registered from NewMarket.wrappedTokens (contractRegister)
+      - name: AlgebraFactory
+        address: 0xa0864cca6e114013ab0e27cbd5b6f4c8947da766 # Swapr v3 (Algebra v1)
+      - name: AlgebraPool # dynamic: registered from AlgebraFactory.Pool when a token is a Pine outcome token
+      - name: PositionManager
+        address: 0x91fd594c46d8b01e62dbdebed2401dde01817834 # Algebra NonfungiblePositionManager
+      - name: HomeProxy
+        address: 0x68154ea682f95bf582b80dd6453fa401737491dc # RealitioHomeArbitrationProxy (the Reality arbitrator)
+
+  - id: 1 # Ethereum — arbitration and ERC-1497 evidence for Gnosis markets
+    start_block: ${PINE_ETHEREUM_START_BLOCK} # foreign proxy deploy block: 20922529
+    contracts:
+      - name: ForeignProxy
+        address: 0xfe0eb5fc686f929eb26d541d75bb59f816c0aa68 # RealitioForeignArbitrationProxyWithAppeals
+      - name: KlerosLiquid
+        address: 0x988b3a538b618c7a603e1c11ab82cd16dbe28069 # Kleros v1 court (General Court, 31 jurors)
+
+# Handler environment (read with process.env inside handlers/effects):
+#   PINE_IPFS_GATEWAY          https://cdn.kleros.link   gateway for manifest/evidence Effects
+#   PINE_SPONSOR_ADDRESSES     comma-separated lowercase addresses → Claim.sponsored when they fund liquidity
+#   ENVIO_API_TOKEN            HyperSync token

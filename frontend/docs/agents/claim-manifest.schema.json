@@ -1,0 +1,498 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pine.dev/schemas/claim-manifest/v1.json",
+  "title": "Pine claim manifest",
+  "description": "Immutable record of one bounded, policy-versioned claim about an exact GitHub commit. manifestHash = keccak256(UTF-8(RFC 8785 canonical JSON of this document)).",
+  "type": "object",
+  "required": [
+    "$schema",
+    "manifestVersion",
+    "claimId",
+    "createdAt",
+    "creator",
+    "source",
+    "policy",
+    "claim",
+    "question",
+    "disclaimers"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://pine.dev/schemas/claim-manifest/v1.json"
+    },
+    "manifestVersion": {
+      "const": "1"
+    },
+    "claimId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "createdAt": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "creator": {
+      "type": "string",
+      "pattern": "^0x[0-9a-fA-F]{40}$"
+    },
+    "source": {
+      "$ref": "#/$defs/SourceRef"
+    },
+    "policy": {
+      "type": "object",
+      "required": [
+        "id",
+        "version",
+        "hash",
+        "uri"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Z]+-[0-9]{3}$"
+        },
+        "version": {
+          "type": "string"
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{64}$"
+        },
+        "uri": {
+          "type": "string"
+        }
+      }
+    },
+    "claim": {
+      "$ref": "#/$defs/ClaimSpec"
+    },
+    "question": {
+      "$ref": "#/$defs/ClaimQuestion"
+    },
+    "disclaimers": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  },
+  "$defs": {
+    "SourceRef": {
+      "type": "object",
+      "required": [
+        "provider",
+        "owner",
+        "repo",
+        "commit"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "const": "github"
+        },
+        "owner": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repo": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repoId": {
+          "type": "integer"
+        },
+        "pullRequest": {
+          "type": "object",
+          "required": [
+            "number",
+            "title",
+            "htmlUrl",
+            "author",
+            "state"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "number": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "title": {
+              "type": "string"
+            },
+            "htmlUrl": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "state": {
+              "enum": [
+                "open",
+                "closed",
+                "merged"
+              ]
+            }
+          }
+        },
+        "commit": {
+          "type": "object",
+          "required": [
+            "sha",
+            "message",
+            "author",
+            "committedAt",
+            "htmlUrl"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "sha": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$"
+            },
+            "message": {
+              "type": "string"
+            },
+            "author": {
+              "type": "string"
+            },
+            "committedAt": {
+              "type": "string"
+            },
+            "htmlUrl": {
+              "type": "string"
+            }
+          }
+        },
+        "baseCommit": {
+          "type": "object",
+          "required": [
+            "sha",
+            "htmlUrl"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "sha": {
+              "type": "string",
+              "pattern": "^[0-9a-fA-F]{40}$"
+            },
+            "htmlUrl": {
+              "type": "string"
+            }
+          }
+        },
+        "license": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "EnvironmentPin": {
+      "type": "object",
+      "required": [
+        "runtime",
+        "config",
+        "configHash",
+        "reproductionCommand",
+        "setupSteps",
+        "envHash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "runtime": {
+          "type": "string",
+          "minLength": 1
+        },
+        "packageManager": {
+          "type": "string"
+        },
+        "dependencyLock": {
+          "type": "object",
+          "required": [
+            "path",
+            "hash"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "hash": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{64}$"
+            }
+          }
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "configHash": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{64}$",
+          "description": "keccak256(canonical JSON of config)"
+        },
+        "containerImage": {
+          "type": "string"
+        },
+        "externalState": {
+          "type": "string"
+        },
+        "reproductionCommand": {
+          "type": "string",
+          "minLength": 1
+        },
+        "setupSteps": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "notes": {
+          "type": "string"
+        },
+        "envHash": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{64}$",
+          "description": "keccak256(canonical JSON of this object without envHash)"
+        }
+      }
+    },
+    "OracleParams": {
+      "type": "object",
+      "required": [
+        "chainId",
+        "openingTime",
+        "timeoutSeconds",
+        "minBond",
+        "bondToken",
+        "arbitrator",
+        "arbitratorName",
+        "language",
+        "category"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "chainId": {
+          "type": "integer"
+        },
+        "openingTime": {
+          "type": "string",
+          "format": "date-time",
+          "pattern": "Z$"
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 3600
+        },
+        "minBond": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "bondToken": {
+          "type": "string"
+        },
+        "arbitrator": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "arbitratorName": {
+          "type": "string"
+        },
+        "language": {
+          "type": "string"
+        },
+        "category": {
+          "type": "string"
+        }
+      }
+    },
+    "ClaimSpec": {
+      "type": "object",
+      "required": [
+        "title",
+        "policyId",
+        "policyVersion",
+        "requirement",
+        "violation",
+        "scope",
+        "parameters",
+        "assumptions",
+        "exclusions",
+        "environment",
+        "regressionOnly",
+        "evidence",
+        "oracle"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 90
+        },
+        "policyId": {
+          "type": "string"
+        },
+        "policyVersion": {
+          "type": "string"
+        },
+        "claimClass": {
+          "type": "string"
+        },
+        "requirement": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 4000
+        },
+        "violation": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "scope": {
+          "type": "object",
+          "required": [
+            "inScope",
+            "outOfScope"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "inScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "outOfScope": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "parameters": {
+          "type": "object",
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          }
+        },
+        "faultModel": {
+          "type": "string"
+        },
+        "allowedInputs": {
+          "type": "string"
+        },
+        "assumptions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "exclusions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "environment": {
+          "$ref": "#/$defs/EnvironmentPin"
+        },
+        "regressionOnly": {
+          "type": "boolean"
+        },
+        "evidence": {
+          "type": "object",
+          "required": [
+            "mechanism",
+            "deadline"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "mechanism": {
+              "enum": [
+                "erc1497-arbitrator-proxy",
+                "commit-reveal"
+              ]
+            },
+            "deadline": {
+              "type": "string",
+              "format": "date-time",
+              "pattern": "Z$"
+            }
+          }
+        },
+        "oracle": {
+          "$ref": "#/$defs/OracleParams"
+        },
+        "specReference": {
+          "type": "object",
+          "required": [
+            "label",
+            "url"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "hash": {
+              "type": "string",
+              "pattern": "^0x[0-9a-fA-F]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "ClaimQuestion": {
+      "type": "object",
+      "required": [
+        "text",
+        "outcomes",
+        "hash"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "outcomes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 2
+        },
+        "hash": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{64}$",
+          "description": "keccak256(UTF-8(text))"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["vite/client", "node"],
+    "paths": {
+      "@/*": ["../prism/src/*"],
+      "@prism/*": ["../prism/src/*"],
+      "@pine-real/react": ["../../packages/react/src/index.ts"],
+      "@pine-server-src/*": ["../../packages/server/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

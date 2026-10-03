@@ -1,0 +1,38 @@
+/*
+ * What next/font/google generates for Prism's three families, minus the self-hosted files (the font files
+ * themselves load from Google Fonts through the <link> in index.html). Values copied from Prism's build.
+ */
+@font-face {
+  font-family: 'Geologica Fallback';
+  src: local('Arial');
+  ascent-override: 90.18%;
+  descent-override: 25.43%;
+  line-gap-override: 0%;
+  size-adjust: 108.12%;
+}
+@font-face {
+  font-family: 'Instrument Sans Fallback';
+  src: local('Arial');
+  ascent-override: 94.42%;
+  descent-override: 24.33%;
+  line-gap-override: 0%;
+  size-adjust: 102.74%;
+}
+@font-face {
+  font-family: 'Azeret Mono Fallback';
+  src: local('Arial');
+  ascent-override: 64.26%;
+  descent-override: 15.77%;
+  line-gap-override: 0%;
+  size-adjust: 145.81%;
+}
+
+.ps-font-geologica-variable {
+  --font-geologica: 'Geologica', 'Geologica Fallback';
+}
+.ps-font-instrument-sans-variable {
+  --font-instrument: 'Instrument Sans', 'Instrument Sans Fallback';
+}
+.ps-font-azeret-mono-variable {
+  --font-azeret: 'Azeret Mono', 'Azeret Mono Fallback';
+}

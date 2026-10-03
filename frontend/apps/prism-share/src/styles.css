@@ -1,0 +1,44 @@
+/*
+ * Prism's global stylesheet, unchanged, plus what the static build needs around it.
+ * Replaces the root layout's `import './globals.css'` (see prismOverrides in vite.config.ts).
+ */
+@import "../../prism/src/app/globals.css";
+@import "./fonts.css";
+
+/* Tailwind must see the class names used in Prism's source, which lives outside this package. */
+@source "../../prism/src";
+@source "./";
+
+/* The static-preview line under the demo banner: one strip, hidden together with the banner. */
+.ps-banner > :first-child:not(.ps-banner-line) {
+  border-bottom-color: transparent;
+}
+.ps-banner > .ps-banner-line:first-child {
+  display: none;
+}
+
+/*
+ * Artifact host wrapper. The published page is wrapped in a skeleton whose small reset is unlayered
+ * (`:root { color-scheme: light }`, `body { background: off-white; font: 14px system-ui; margin: 0 }`).
+ * Prism's own html/body rules live in `@layer base`, and unlayered rules always win over layered ones,
+ * so restate the base surface here, unlayered, to match the live app exactly.
+ */
+:root {
+  color-scheme: dark;
+  background: var(--umbra);
+}
+html,
+body {
+  background: var(--umbra);
+  color: var(--lumen);
+}
+body {
+  margin: 0;
+  min-height: 100dvh;
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: 1.6;
+  font-feature-settings: 'ss01', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}

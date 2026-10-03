@@ -1,0 +1,17 @@
+{
+  "name": "pine-frontend",
+  "private": true,
+  "packageManager": "pnpm@11.0.9",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './apps/*' build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r --filter './packages/*' test",
+    "dev:prism": "pnpm --filter @pine/app-prism dev",
+    "build:share": "pnpm --filter @pine/app-prism-share build"
+  },
+  "description": "Pine frontend: Pine Prism (Next.js) and its static, browser-only build, on shared domain/data packages"
+}
