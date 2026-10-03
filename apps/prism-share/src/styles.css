@@ -1,0 +1,18 @@
+/*
+ * Prism's global stylesheet, unchanged, plus what the static build needs around it.
+ * Replaces the root layout's `import './globals.css'` (see prismOverrides in vite.config.ts).
+ */
+@import "../../prism/src/app/globals.css";
+@import "./fonts.css";
+
+/* Tailwind must see the class names used in Prism's source, which lives outside this package. */
+@source "../../prism/src";
+@source "./";
+
+/* The static-preview line under the demo banner: one strip, hidden together with the banner. */
+.ps-banner > :first-child:not(.ps-banner-line) {
+  border-bottom-color: transparent;
+}
+.ps-banner > .ps-banner-line:first-child {
+  display: none;
+}

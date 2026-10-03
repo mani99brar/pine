@@ -326,13 +326,23 @@ export function EvidenceForm({ id }: { id: string }) {
             )}
             <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-5">
               {!mounted ? null : !wallet.isConnected ? (
-                <Button onClick={() => wallet.connect()}>{wallet.isDemo ? 'Connect demo wallet' : 'Connect wallet'}</Button>
+                <Button
+                  key="connect"
+                  type="button"
+                  onClick={(e) => {
+                    // Connecting swaps this button for the submit button; don't let the same click submit the form.
+                    e.preventDefault()
+                    wallet.connect()
+                  }}
+                >
+                  {wallet.isDemo ? 'Connect demo wallet' : 'Connect wallet'}
+                </Button>
               ) : sub.runner.state === 'failed' ? (
                 <Button onClick={() => void sub.runner.retry()} icon={<RotateCw size={15} aria-hidden />}>
                   Retry the failed step
                 </Button>
               ) : (
-                <Button type="submit" loading={running} disabled={!ready || running} icon={mode === 'commit' ? <Lock size={15} aria-hidden /> : undefined}>
+                <Button key="submit" type="submit" loading={running} disabled={!ready || running} icon={mode === 'commit' ? <Lock size={15} aria-hidden /> : undefined}>
                   {mode === 'commit' ? 'Commit the evidence hash' : `Submit on ${evChain.name}`}
                 </Button>
               )}
