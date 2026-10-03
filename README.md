@@ -90,10 +90,10 @@ node scripts/smoke.mjs   # crawl all running apps + agent endpoints, check statu
 
 ## Verification (2026-10-03)
 
-- `pnpm test`: 420 tests passing (core 204, data 104, react 57, server 55), including security regression suites.
+- `pnpm test`: 421 tests passing (core 204, data 104, react 58, server 55), including security regression suites.
 - `pnpm typecheck` and `pnpm lint`: clean for every package and app.
 - `pnpm build`: all four apps build for production.
-- `node scripts/smoke.mjs` against the three production servers: 80 pages crawled plus every agent endpoint, all 200, no forbidden outcome wording.
+- `node scripts/smoke.mjs` against the four production servers: 100 pages crawled plus every agent endpoint, all 200, no forbidden outcome wording.
 - Each app was QA'd by its builder with Playwright screenshots at 1440px and 390px. A fresh reviewer then walked every journey (account, compose and publish with failure, reload and resume, evidence, redeem, all claim states, keyboard) and fixed what it found. Docket reports 0 axe violations.
 
 ## Known issues
