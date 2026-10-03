@@ -100,6 +100,25 @@ in-process, and documents deployment. Everything it touches that other features 
   noise, latency, total cost). They also state that Pine executes no submitted code in v1, and that staging runs on an anvil fork
   where testers use throwaway keys only (a fork keeping chain id 100 could replay anything a real key signs there).
 
+## 3a. assembly-004 review fixes (carried by assembly-005; composition)
+- CI tests (coverage P1): assert that ci.yml triggers on both `push` and `pull_request`; that the fork/e2e forge commands that
+  need `GNOSIS_RPC_URL` live only in their own job, which runs only when the secret is available; and that no other job
+  references the secret. Each assertion fails when the property is removed (parse the YAML structure, not substrings).
+- E2E database cleanup (coverage P1): a failed `DROP DATABASE` is reported (the suite fails in afterAll with a redacted message),
+  never swallowed; a PostgreSQL test asserts that no `pine_e2e_*` database of the run remains after cleanup.
+- Disposable-cluster guard: `bootstrapRoles` (which sets fixed test passwords on the production role names) refuses to run
+  unless the database URL host is loopback (127.0.0.1, ::1, localhost) or `PINE_E2E_DISPOSABLE_CLUSTER=1` is set; test it.
+- nginx: `log_format pine_noquery` moves to an http-context snippet (e.g. deploy/proxy/nginx-http.conf, included from the http
+  block) so the server file passes `nginx -t`; deploy/README.md documents both includes.
+- Static proxy checks: a test asserts in deploy/proxy/nginx.conf and Caddyfile the PRD-06 section 3 properties: same-origin API,
+  a separate user-content host, per-IP limits on the user-content host, TLS, and no query strings in access logs.
+- Least privilege (SEC-OPS-10): separate OS users for pine-api, pine-indexer-native and pine-migrate in deploy/systemd; each
+  secrets file is readable only by its unit's user (0640 root:<user>); the env file headers and deploy/README.md agree.
+- Allowance bound: a journey test asserts the residual allowance after the ladder mint is at most 10 wei and only toward the
+  position manager (decision 6), failing if the approval amount grows.
+- The PGlite configuration is verified as its own check (`e2e-pglite`), alongside the PostgreSQL run.
+- gitleaks: not installed on the verification host; it stays a CI job and a launch gate (record as untested in the matrix).
+
 ## 4. Checks
 - deploy-e2e: `forge build --root contracts` (build), `node scripts/forge-test-tap.mjs --match-path "test/e2e/**/*.sol"`
   (integration), `node scripts/export-abis.mjs --check` (typecheck), `node scripts/check-forbidden.mjs` (unit). The plan-vector

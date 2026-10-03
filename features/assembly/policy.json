@@ -161,6 +161,26 @@
           "scenarios": []
         },
         {
+          "id": "e2e-pglite",
+          "kind": "integration",
+          "argv": [
+            "env",
+            "-u",
+            "PINE_E2E_DATABASE_URL",
+            "-u",
+            "PINE_E2E_REQUIRE_PG",
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "vitest",
+            "run",
+            "test/e2e"
+          ],
+          "timeout_seconds": 2400,
+          "scenarios": []
+        },
+        {
           "id": "api-unit",
           "kind": "unit",
           "argv": [
