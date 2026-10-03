@@ -317,6 +317,11 @@ export interface ApiClaimFacts {
   evidenceDeadline: number
   revealDeadline: number
   minBondWei: string
+  /**
+   * The backend's integrity verdict (document vs chain). Only `verified` claims are listed and show their terms; any
+   * other claim is reachable by direct link only, without terms, and labelled with a policy only when its on-chain
+   * digest is a catalog policy (else `policy.unknown`): warn prominently (SEC-AGENT-03).
+   */
   integrity: { status: 'pending' | 'verified' | 'mismatch' | 'document_unavailable'; mismatchFields: string[]; final: boolean }
   /** Moderated (hidden or blocked): every user-supplied text is withheld. */
   hidden: boolean

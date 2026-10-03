@@ -300,8 +300,8 @@ function sortClaims(items: ApiClaimSummary[], sort: ClaimSort | undefined): ApiC
 /**
  * Pine backend (`packages/api`, same-origin `/api/v1`) as a PineDataProvider. Claims are identified by their Seer
  * market address; every response is validated with zod (malformed → PineBackendError BAD_RESPONSE); user-supplied text
- * is shown only from documents that match their on-chain digests and never for moderated claims or evidence.
- * Server-side instances call public GET routes only and never carry cookies.
+ * is shown only from documents that match their on-chain digests, never for moderated claims or evidence nor for claims
+ * that are not integrity-verified. Server-side instances call public GET routes only and never carry cookies.
  */
 export class ApiDataProvider implements PineDataProvider {
   readonly kind: DataSourceKind = 'api'
@@ -343,7 +343,7 @@ export class ApiDataProvider implements PineDataProvider {
     return value
   }
 
-  /** Policy lookups for claims degrade to the indexed policy id when the catalog cannot be read. */
+  /** Without the catalog, verified claims keep their indexed policy id and others show the unknown policy (policyRefOf). */
   private catalogOrEmpty(client: PineApiClient): Promise<WirePolicySummary[]> {
     return this.catalog(client).catch(() => [])
   }
