@@ -30,8 +30,14 @@ test('walkthrough: Pine Prism on the Pine backend', async ({ page, context }, in
   )
 
   await page.goto('/claims?view=list')
+  // Wait until the table has really rendered (the search bar replaces the loading skeleton), then let it settle.
+  await expect(page.getByPlaceholder(/search titles/i)).toBeVisible({ timeout: 60_000 })
+  await expect(page.getByText(/loading claims/i)).toHaveCount(0, { timeout: 90_000 })
+  await expect(page.getByRole('main').getByRole('link', { name: /keeper retry budget/i }).first()).toBeVisible({ timeout: 60_000 })
+  await page.waitForTimeout(1200)
   await caption(page, 'The light table lists the claims indexed from the chain, served by the backend')
-  await page.waitForTimeout(1500)
+  await page.mouse.wheel(0, 320)
+  await page.waitForTimeout(2200)
   await page.goto('/policies/FUNC-001')
   await caption(page, 'Policies come from the backend catalog: each claim pins the policy text by its sha256')
   await page.waitForTimeout(1200)

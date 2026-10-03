@@ -8,6 +8,9 @@ export default defineConfig({
   outputDir: '../.qa/video-results',
   use: {
     ...base.use,
+    // Static posters instead of WebGL scenes: headless software rendering stalls the screencast on the 3D crystals,
+    // so the recording would freeze on loading states the page has long left.
+    reducedMotion: 'reduce',
     launchOptions: { ...base.use?.launchOptions, slowMo: Number(process.env.PINE_E2E_SLOWMO ?? 140) },
   },
 })
