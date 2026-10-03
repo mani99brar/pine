@@ -158,6 +158,7 @@ export {
 } from './api/plans'
 export { useApiPlanRunner, type ApiPlanSpec, type ApiPlanRunner, type ApiPlanPhase, type CreatedPlan } from './api/use-plan-runner'
 export * from './api/actions'
+export * from './api/identity'
 
 // misc
 export { useNow, useCopy, useHotkeys } from './misc'
