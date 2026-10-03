@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.37;
 
+import {SafeCast} from "@openzeppelin/contracts/utils/math/SafeCast.sol";
 import {IClaimRegistry} from "./interfaces/IClaimRegistry.sol";
 import {IEvidenceRegistry} from "./interfaces/IEvidenceRegistry.sol";
 
@@ -38,8 +39,8 @@ contract EvidenceRegistry is IEvidenceRegistry {
         if (block.timestamp >= claim.evidenceDeadline) revert EvidenceWindowClosed(market, claim.evidenceDeadline);
         if (commitment == bytes32(0)) revert ZeroValue();
 
-        // block.timestamp < evidenceDeadline <= type(uint64).max, so the cast is exact.
-        uint64 committedAt = uint64(block.timestamp);
+        // block.timestamp < evidenceDeadline <= type(uint64).max: SafeCast cannot revert (narrowing rule).
+        uint64 committedAt = SafeCast.toUint64(block.timestamp);
         submissionId = ++submissionCount;
         Submission storage submission = _submissions[submissionId];
         submission.market = market;
@@ -65,8 +66,8 @@ contract EvidenceRegistry is IEvidenceRegistry {
             revert CommitmentMismatch(submissionId);
         }
 
-        // block.timestamp < revealDeadline <= type(uint64).max, so the cast is exact.
-        uint64 revealedAt = uint64(block.timestamp);
+        // block.timestamp < revealDeadline <= type(uint64).max: SafeCast cannot revert (narrowing rule).
+        uint64 revealedAt = SafeCast.toUint64(block.timestamp);
         submission.status = Status.Revealed;
         submission.revealedAt = revealedAt;
         submission.contentSha256 = contentSha256;
@@ -80,8 +81,8 @@ contract EvidenceRegistry is IEvidenceRegistry {
         if (block.timestamp >= claim.evidenceDeadline) revert EvidenceWindowClosed(market, claim.evidenceDeadline);
         if (contentSha256 == bytes32(0)) revert ZeroValue();
 
-        // block.timestamp < evidenceDeadline <= type(uint64).max, so the cast is exact.
-        uint64 publishedAt = uint64(block.timestamp);
+        // block.timestamp < evidenceDeadline <= type(uint64).max: SafeCast cannot revert (narrowing rule).
+        uint64 publishedAt = SafeCast.toUint64(block.timestamp);
         submissionId = ++submissionCount;
         Submission storage submission = _submissions[submissionId];
         submission.market = market;

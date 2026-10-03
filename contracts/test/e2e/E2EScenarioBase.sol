@@ -34,6 +34,8 @@ abstract contract E2EScenarioBase is E2EFork {
     bytes32 internal constant ANSWER_YES = bytes32(uint256(0));
     bytes32 internal constant ANSWER_NO = bytes32(uint256(1));
     bytes32 internal constant ANSWER_INVALID = bytes32(type(uint256).max);
+    /// RealityETH v3 `resultFor` revert that RealityProxy.resolve bubbles up before the question is finalized.
+    string internal constant NOT_FINALIZED = "question must be finalized";
     /// Lower bound of the ladder's YES price (1.0001^-16080 ~ 0.2003 sDAI per YES), rounded down to 0.2.
     uint256 internal constant LADDER_LOWER_PRICE_FLOOR_WAD = 0.2 ether;
 
@@ -339,7 +341,7 @@ abstract contract E2EScenarioBase is E2EFork {
 
         vm.warp(finalizeTs - 1);
         assertFalse(reality.isFinalized(s.questionId));
-        vm.expectRevert();
+        vm.expectRevert(bytes(NOT_FINALIZED));
         E2EIRealityProxy(REALITY_PROXY).resolve(s.market);
 
         vm.warp(finalizeTs);

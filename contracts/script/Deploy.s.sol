@@ -13,11 +13,12 @@ import {ISeerMarketFactory} from "../src/interfaces/external/ISeer.sol";
 /// Seer immutables in its constructor. The script additionally pins the Seer MarketFactory by address AND runtime code
 /// hash (the constructor only compares getters, chain-005 security review P2), checks code at every external contract,
 /// and prints a JSON deployment record.
-/// Usage (operator, hardware wallet; never from tests):
+/// Usage (operator, hardware wallet; tests only dry-run `run()`, which `forge test` never broadcasts):
 ///   PINE_DEPLOYER=0x... forge script script/Deploy.s.sol --rpc-url gnosis --ledger --sender $PINE_DEPLOYER --broadcast
 /// @dev Every external read before the second CREATE is a view call or a cheatcode: under broadcast a non-view call
 /// would consume a deployer nonce and break the n / n+1 prediction only in production. Tests inherit this contract
-/// and run `_deploy` under `vm.startPrank(deployer)` so both CREATEs happen in the test's own frame.
+/// and run `_deploy` under `vm.startPrank(deployer)` so both CREATEs happen in the test's own frame; the dry run
+/// E2EDeployTest.test_deploy_runDryRun_twoCreatesAtNoncesNAndNPlusOneBound checks that `run()` makes exactly those two.
 contract Deploy is Script {
     uint256 internal constant GNOSIS_CHAIN_ID = 100;
 

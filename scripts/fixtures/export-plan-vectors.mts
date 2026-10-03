@@ -4,14 +4,17 @@
 //   pnpm --filter @pine/api exec node --import tsx ../../scripts/fixtures/export-plan-vectors.mts --check   compare
 //
 // Bootstrap without filesystem cheatcodes (contracts/foundry.toml keeps fs_permissions = []), in two generated files:
-//   1. Every input is a constant below. They are emitted into contracts/test/e2e/generated/PlanInputs.sol first.
+//   1. Every input is a constant below. They are emitted into contracts/test/e2e/generated/PlanInputs.sol first,
+//      together with the GNOSIS_EXTERNAL values contracts/script/Deploy.s.sol pins (E2EDeployConstants.t.sol asserts
+//      the script's constants equal them).
 //   2. The probe test (contracts/test/e2e/E2EProbe.t.sol, imports only PlanInputs.sol) replays the exact fork sequence
 //      of the e2e tests (deployer label and nonce, deploy the pair, createClaim, split) at block 48550000 and prints
-//      the fork-dependent values; they are committed in scripts/fixtures/fork-observations.json.
+//      the fork-dependent values; they are committed in scripts/fixtures/fork-observations.json, which this script
+//      validates and rewrites canonically (sorted keys, two-space indent, trailing newline).
 //   3. This script reads the observations, builds the createClaim, commit, reveal and ladder funding plans with
 //      @pine/shared/tx-plan (buildStep/newPlan/verifyPlan/planToWire) and writes scripts/fixtures/plan-vectors.json
 //      plus contracts/test/e2e/generated/PlanVectors.sol, whose calldata the e2e tests replay byte for byte.
-// --check regenerates all three files in memory and fails on any difference. Output is deterministic: sorted JSON keys,
+// --check regenerates all four files in memory and fails on any difference. Output is deterministic: sorted JSON keys,
 // bigints as decimal strings, fixed plan ids, no clock and no randomness.
 
 import { createHash } from "node:crypto";
@@ -554,6 +557,21 @@ function emitInputs(): string {
   c(`string internal constant CREATOR_LABEL = ${solString(LABELS.creator)}`);
   c(`string internal constant SUBMITTER_LABEL = ${solString(LABELS.submitter)}`);
   c(`string internal constant FUNDER_LABEL = ${solString(LABELS.funder)}`);
+  const { seer, amm } = GNOSIS_EXTERNAL;
+  lines.push("", "    // GNOSIS_EXTERNAL (packages/shared/src/deployment.ts): every value contracts/script/Deploy.s.sol pins.");
+  c(`uint256 internal constant GNOSIS_CHAIN_ID = ${GNOSIS_EXTERNAL.chainId}`);
+  c(`address internal constant SEER_MARKET_FACTORY = ${solAddress(seer.marketFactory)}`);
+  c(`address internal constant SEER_MARKET_IMPLEMENTATION = ${solAddress(seer.marketImplementation)}`);
+  c(`address internal constant REALITIO = ${solAddress(seer.realitio)}`);
+  c(`address internal constant ARBITRATOR = ${solAddress(seer.arbitrator)}`);
+  c(`address internal constant REALITY_PROXY = ${solAddress(seer.realityProxy)}`);
+  c(`address internal constant CONDITIONAL_TOKENS = ${solAddress(seer.conditionalTokens)}`);
+  c(`address internal constant WRAPPED_1155_FACTORY = ${solAddress(seer.wrapped1155Factory)}`);
+  c(`address internal constant COLLATERAL_TOKEN = ${solAddress(seer.collateralToken)}`);
+  c(`address internal constant GNOSIS_ROUTER = ${solAddress(seer.gnosisRouter)}`);
+  c(`address internal constant ALGEBRA_FACTORY = ${solAddress(amm.factory)}`);
+  c(`address internal constant POSITION_MANAGER = ${solAddress(amm.positionManager)}`);
+  c(`uint32 internal constant QUESTION_TIMEOUT = ${solInt(BigInt(seer.questionTimeoutSeconds))}`);
   for (const key of SCENARIOS) {
     const claim = CLAIMS[key];
     const p = key.toUpperCase();
@@ -724,6 +742,8 @@ const outputs: [string, string][] = [[INPUTS_SOL_PATH, emitInputs()]];
 if (existsSync(OBSERVATIONS_PATH)) {
   const observations = parseObservations(JSON.parse(readFileSync(OBSERVATIONS_PATH, "utf8")));
   const built = build(observations);
+  // The validated observations, canonically: what the probe printed, re-serialised with sorted keys.
+  outputs.push([OBSERVATIONS_PATH, stringify(observations)]);
   outputs.push([VECTORS_JSON_PATH, emitVectorsJson(observations, built)], [VECTORS_SOL_PATH, emitVectors(observations, built)]);
 } else if (check) {
   console.error("scripts/fixtures/fork-observations.json is missing; run the probe test and commit its observations.");

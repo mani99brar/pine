@@ -97,14 +97,22 @@ contract ERHandler is Test {
         }
     }
 
-    /// Reveals with the true preimage by the true submitter; only this may change a record.
+    /// Reveals with the true preimage by the true submitter; only this may change a record. Picks the first id from
+    /// the seed onward that is revealable, so nearly every run reveals (ERInvariantTest.afterInvariant requires one);
+    /// when none is, the seed's own id is attempted anyway and must revert.
     function revealHonest(uint256 idSeed) external {
-        if (_expected.length == 0) return;
-        uint256 id = idSeed % _expected.length + 1;
+        uint256 count = _expected.length;
+        if (count == 0) return;
+        uint256 id = idSeed % count + 1;
+        for (uint256 i = 0; i < count; ++i) {
+            uint256 candidate = (idSeed % count + i) % count + 1;
+            if (_revealable(candidate)) {
+                id = candidate;
+                break;
+            }
+        }
         IEvidenceRegistry.Submission storage record = _expected[id - 1];
-        bool valid = record.status == IEvidenceRegistry.Status.Committed
-            && block.timestamp < claims.getClaim(record.market).revealDeadline && _digests[id] != bytes32(0)
-            && _salts[id] != bytes32(0);
+        bool valid = _revealable(id);
         vm.prank(record.submitter);
         try registry.revealEvidence(id, _digests[id], _salts[id]) {
             if (!valid) {
@@ -148,6 +156,14 @@ contract ERHandler is Test {
         } catch {}
     }
 
+    /// An honest reveal of `id` must succeed: Committed, timely, and a preimage the registry accepts (nonzero).
+    function _revealable(uint256 id) internal view returns (bool) {
+        IEvidenceRegistry.Submission storage record = _expected[id - 1];
+        return record.status == IEvidenceRegistry.Status.Committed
+            && block.timestamp < claims.getClaim(record.market).revealDeadline && _digests[id] != bytes32(0)
+            && _salts[id] != bytes32(0);
+    }
+
     function warp(uint256 seconds_) external {
         vm.warp(block.timestamp + bound(seconds_, 0, 3 days));
     }
@@ -169,6 +185,11 @@ contract ERInvariantTest is Test {
         claims.setClaim(markets[1], START + 7 days, START + 9 days);
         claims.setClaim(markets[2], START + 30 days, START + 37 days);
         handler = new ERHandler(registry, claims, markets);
+        // One well-formed commitment on the longest-window market (revealable for 37 days), recorded through the
+        // handler like any other: every run starts with something an honest reveal can open, so afterInvariant does
+        // not depend on the fuzzer happening to commit nonzero preimages before the windows close.
+        handler.commit(0, 2, keccak256("pine invariant seed digest"), keccak256("pine invariant seed salt"));
+        assertEq(registry.submissionCount(), 1);
         targetContract(address(handler));
     }
 
@@ -201,6 +222,12 @@ contract ERInvariantTest is Test {
             assertEq(actual.contentSha256, want.contentSha256, "contentSha256");
             _assertShape(id, actual);
         }
+    }
+
+    /// Runs after every invariant run: the run revealed at least one commitment through the registry, so the
+    /// Committed -> Revealed checks above compared real reveals rather than passing vacuously.
+    function afterInvariant() public view {
+        assertGt(handler.reveals(), 0, "no reveal succeeded in this run: the transition invariant was vacuous");
     }
 
     function _assertShape(uint256 id, IEvidenceRegistry.Submission memory s) internal view {
