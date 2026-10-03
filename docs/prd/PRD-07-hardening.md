@@ -166,17 +166,23 @@ Contracts are immutable once deployed, so every contract change here lands befor
   if its outbox INSERT is moved out of the write's statement or transaction. Map the COVERAGE.md rows to these tests.
 
 ## 3f. hardening-cl-002 security follow-up (carried by hardening-cl-003; claims)
-- Finality of `mined` (SEC-IDX-01, SEC-IDX-06; `mined` is permanent since 3b): a publication moves to `mined` only when the read
-  model serves the claim for this creator and document digest AND its creation block is at or below F, where F is the read
-  model's `status().finalizedBlock` when non-null, otherwise `ctx.chain.finalizedBlock()` (a failure of that call means no
-  transition). The read-model `indexedBlock` is never used as finality (Envio serves non-final rows). A hint receipt alone
-  never moves a publication to `mined`; a succeeded receipt only withholds the plan (503 NOT_READY, retryAfterSeconds 30) until
-  the read model confirms the claim. Tests: Envio-like status (finalizedBlock null) with the claim above the chain's finalized
-  block → not mined; at/below → mined; a succeeded receipt whose claim the read model does not serve → not mined, no plan;
-  finalizedBlock() failure → unchanged. Existing tests that expected `mined` from a receipt alone are rewritten to this rule
-  and listed in the completion (operator decision; no other existing test may change).
-- Request path: POST /publications and POST /publications/:id/submitted trigger the audit flush without awaiting it (as markets
-  and funding do since 3c; errors caught and logged through the redactor); the claims test helpers await the module's
+- Finality of every final decision (SEC-IDX-01, SEC-IDX-06; operator decision after the design challenge): compute one bound
+  per reconcile run and per request, F = `status().finalizedBlock` ?? `await ctx.chain.finalizedBlock()` (null on failure,
+  meaning no final decision), and route EVERY irreversible decision through one predicate `isFinal(block) = F !== null &&
+  block <= F`: the request-path `mined` transition and reconcile step-1 `confirmed` (on the claim's creation block, with the
+  read model serving the claim for this creator and digest), hint `succeeded`/`reverted` (replacing `coverage.indexedBlock`),
+  and the expiry coverage. The read-model `indexedBlock` is never used as finality (Envio serves non-final rows and reports
+  finalizedBlock null). Drop the hint→mined transaction entirely: a hint only sets its own status and withholds the plan
+  (503 NOT_READY, retryAfterSeconds 30) or holds back expiry.
+- Test harness default (operator decision): the claims helpers' markFresh/markIndexedAt pass finalized = indexedBlock
+  (native-like), so existing tests keep their meaning; the Envio fallback (finalizedBlock null → `eth_getBlockByNumber`
+  'finalized') is tested only in NEW tests that script that call. Tests: Envio-like status with the claim above the chain's
+  finalized block → not mined/confirmed; at or below → mined/confirmed; finalizedBlock() failure → unchanged; a reverted or
+  succeeded receipt above F → hint stays unknown; a succeeded receipt whose claim the read model does not serve → no plan, not
+  mined. Existing tests that expected `mined` from a receipt alone are rewritten to this rule and listed in the completion; no
+  other existing test may change beyond the harness default.
+- Request path: POST /publications and POST /publications/:id/submitted trigger the audit flush without awaiting it (copy the
+  markets flushAuditInBackground / settled-audit / raw-inject pattern unchanged; errors caught and logged through the redactor); the claims test helpers await the module's
   single-flight flush after each response so the existing audit tests stay unchanged; a test proves a never-resolving audit
   store does not delay the response.
 - `outboxSelect` generates the outbox id per row (`gen_random_uuid()` in SQL, or one id per returned row), not one constant;
