@@ -12,15 +12,21 @@ import { TxSteps } from '@/components/tx/TxSteps'
 import { DemoFailToggle } from '@/components/tx/DemoFailToggle'
 import { Button, ButtonLink } from '@/components/ui/Button'
 import { Notice, Skeleton } from '@/components/ui/primitives'
-import { isResolved } from '@/lib/claims'
+import { apiFactsOf, isResolved } from '@/lib/claims'
 import { OUTCOME_HEX } from '@/lib/crystal'
 import { useMounted } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
+import { ApiPositionPanel } from './ApiPosition'
 
 const OUTCOME_NAME = { yes: 'Yes', no: 'No', invalid: 'Invalid result' } as const
 
 /** The connected wallet's position in this market, with redemption once resolved. */
 export function PositionPanel({ claim }: { claim: ClaimDetail }) {
+  if (apiFactsOf(claim)) return <ApiPositionPanel claim={claim} />
+  return <LocalPositionPanel claim={claim} />
+}
+
+function LocalPositionPanel({ claim }: { claim: ClaimDetail }) {
   const mounted = useMounted()
   const wallet = useWallet()
   const portfolio = usePortfolio(wallet.address)

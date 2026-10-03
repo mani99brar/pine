@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
 import type { ClaimSummary } from '@pine/core'
-import { formatClaimNumber, formatPrice, shortSha } from '@pine/core'
+import { formatPrice, shortSha } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { ClaimCrystal } from '@/components/crystal/ClaimCrystal'
 import { PrismMini, pricesFrom } from '@/components/prism/PrismBeam'
@@ -12,7 +12,7 @@ import { StatusBadge } from '@/components/claim/StatusBadge'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { FamilyIcon } from '@/components/icons'
 import { FAMILY_HEX, FAMILY_NAME, FAMILY_VAR, type FacetId } from '@/lib/crystal'
-import { isResolved, pulseSeconds, shortRepo, statusLabel, timeLeft } from '@/lib/claims'
+import { apiFactsOf, apiOutcomePrices, apiStatusLabel, claimLabel, isResolved, pulseSeconds, repoLabel, statusLabel, timeLeft } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 import { useElementWidth, useReduceMotion } from '@/lib/hooks'
 
@@ -42,6 +42,20 @@ const Y_TOP = 0.17
 const Y_BOTTOM = 0.74
 const Y_LANE = 0.86
 const yOfPrice = (p: number) => Y_TOP + (1 - p) * (Y_BOTTOM - Y_TOP)
+// When nothing on the table has a price (backend listings carry none), the unpriced lane widens into the middle band
+// and the price scale is not drawn: height then means nothing, and crystals spread to stay apart.
+const LANE_WIDE = { lo: 0.26, mid: 0.52, hi: 0.8 }
+
+/** The Yes price a crystal may be placed by: backend claims only with a reported price, never a stand-in. */
+function yesOf(c: ClaimSummary): number | undefined {
+  if (apiFactsOf(c)) return apiOutcomePrices(c).yes
+  return c.status === 'publishing' || c.status === 'failed' ? undefined : c.yesPrice
+}
+
+/** Backend listings without any price: no crystal can be placed by price or outcome, so the table shows time only. */
+export function nothingPriced(claims: ClaimSummary[]): boolean {
+  return claims.length > 0 && claims.every((c) => apiFactsOf(c) !== null && yesOf(c) === undefined && !isResolved(c.status))
+}
 
 interface Placed {
   claim: ClaimSummary
@@ -52,20 +66,25 @@ interface Placed {
 }
 
 function layout(claims: ClaimSummary[], nowMs: number, w: number, h: number, compact: boolean, scale = 1, span = 0.43): Placed[] {
-  const maxLiq = Math.max(1, ...claims.map((c) => Number(c.liquidity) || 0))
-  const placed: Placed[] = claims.map((c) => {
+  const wide = nothingPriced(claims)
+  // Backend claims carry no liquidity figure: every crystal gets the same size instead of a size from "0".
+  const liqOf = (c: ClaimSummary) => (apiFactsOf(c) ? 0 : Number(c.liquidity) || 0)
+  const maxLiq = Math.max(1, ...claims.map(liqOf))
+  const placed: Placed[] = claims.map((c, i) => {
     const dt = Date.parse(c.evidenceDeadline) - nowMs
     const x = xOf(dt, span)
-    const priced = c.yesPrice !== undefined && c.status !== 'publishing' && c.status !== 'failed'
-    const p = isResolved(c.status) ? (c.outcome === 'yes' ? 0.96 : c.outcome === 'no' ? 0.06 : 0.5) : (c.yesPrice ?? 0.5)
-    const y = priced || isResolved(c.status) ? yOfPrice(p) : Y_LANE
-    const liq = Number(c.liquidity) || 0
+    const yes = yesOf(c)
+    const priced = yes !== undefined
+    const p = isResolved(c.status) ? (c.outcome === 'yes' ? 0.96 : c.outcome === 'no' ? 0.06 : 0.5) : (yes ?? 0.5)
+    // Unpriced crystals in the wide band start on alternating sides of its middle, so equal deadlines fan out.
+    const y = priced || isResolved(c.status) ? yOfPrice(p) : wide ? LANE_WIDE.mid + (i % 2 ? 1 : -1) * 0.04 * Math.min(i, 5) : Y_LANE
+    const liq = liqOf(c)
     const size = ((compact ? 44 : 60) + (compact ? 40 : 64) * (Math.log10(1 + liq) / Math.log10(1 + maxLiq))) * scale
     return { claim: c, x, y, size, priced }
   })
   const onLane = (p: Placed) => !p.priced && !isResolved(p.claim.status)
-  const loOf = (p: Placed) => (onLane(p) ? Y_LANE - 0.03 : 0.14)
-  const hiOf = (p: Placed) => (onLane(p) ? 0.9 : Y_BOTTOM + 0.05)
+  const loOf = (p: Placed) => (onLane(p) ? (wide ? LANE_WIDE.lo : Y_LANE - 0.03) : 0.14)
+  const hiOf = (p: Placed) => (onLane(p) ? (wide ? LANE_WIDE.hi : 0.9) : Y_BOTTOM + 0.05)
   // Deterministic relaxation so crystals never sit on top of each other.
   for (let iter = 0; iter < 60; iter++) {
     let moved = false
@@ -104,18 +123,20 @@ function layout(claims: ClaimSummary[], nowMs: number, w: number, h: number, com
 
 function Card({ p, nowMs }: { p: Placed; nowMs: number }) {
   const c = p.claim
-  const prices = pricesFrom(c)
+  const api = apiFactsOf(c)
+  const yes = yesOf(c)
+  const prices = api ? (yes !== undefined ? { yes, no: 0, invalid: 0 } : undefined) : pricesFrom(c)
   const resolved = isResolved(c.status)
   const tl = timeLeft(c.evidenceDeadline, nowMs)
   return (
     <div className="glass-float cut-lg w-[19rem] max-w-[calc(100vw-3rem)] !bg-[rgba(26,20,18,0.97)] p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="tnum text-[0.8125rem] font-semibold text-lumen-3">{formatClaimNumber(c.number)}</span>
-        <StatusBadge status={c.status} outcome={c.outcome} size="sm" />
+        <span className={cn('tnum text-[0.8125rem] font-semibold text-lumen-3', api && 't-code font-normal')}>{claimLabel(c)}</span>
+        <StatusBadge status={c.status} outcome={c.outcome} size="sm" label={apiStatusLabel(c)} />
       </div>
       <p className="mt-2 text-[0.96875rem] font-semibold leading-snug text-lumen">{c.title}</p>
       <p className="mt-1 text-[0.8125rem] text-lumen-3">
-        {shortRepo(c)} <span className="t-code text-[0.75rem] text-lumen-2">{shortSha(c.source.commitSha)}</span>
+        {repoLabel(c)} <span className="t-code text-[0.75rem] text-lumen-2">{shortSha(c.source.commitSha)}</span>
       </p>
       <div className="mt-3 flex items-center gap-3">
         <PrismMini prices={resolved ? undefined : prices} outcome={resolved ? c.outcome : undefined} />
@@ -125,10 +146,10 @@ function Card({ p, nowMs }: { p: Placed; nowMs: number }) {
           ) : prices ? (
             <>
               <span className="t-figure text-[1.3rem] text-lumen">{formatPrice(prices.yes)}</span>
-              <span className="block text-lumen-3">{COPY.priceLabelShort}</span>
+              <span className="block text-lumen-3">{api ? 'Yes pool price' : COPY.priceLabelShort}</span>
             </>
           ) : (
-            <span className="text-lumen-3">No price yet</span>
+            <span className="text-lumen-3">{api ? 'Not priced in this list: open the claim for its pool price' : 'No price yet'}</span>
           )}
         </div>
       </div>
@@ -159,6 +180,7 @@ export function Constellation({ claims, nowMs, compact = false, className }: { c
   const placed = useMemo(() => layout(claims, nowMs, w, w * ratio, compact, scale, span), [claims, nowMs, w, ratio, compact, scale, span])
   const [hover, setHover] = useState<string | null>(null)
   const active = placed.find((p) => p.claim.id === hover)
+  const wide = nothingPriced(claims)
 
   return (
     <div ref={boxRef} className={cn('relative', className)}>
@@ -181,10 +203,11 @@ export function Constellation({ claims, nowMs, compact = false, className }: { c
             </linearGradient>
           </defs>
           <rect x="0" y="0" width={W / 2} height={H} fill="url(#past)" />
-          {[Y_TOP, (Y_TOP + Y_BOTTOM) / 2, Y_BOTTOM].map((t) => (
-            <line key={t} x1="0" x2={W} y1={H * t} y2={H * t} stroke="#F5EDE4" strokeOpacity="0.07" strokeDasharray="2 6" />
-          ))}
-          <line x1="0" x2={W} y1={H * Y_LANE} y2={H * Y_LANE} stroke="#A69789" strokeOpacity="0.22" strokeDasharray="6 5" />
+          {!wide &&
+            [Y_TOP, (Y_TOP + Y_BOTTOM) / 2, Y_BOTTOM].map((t) => (
+              <line key={t} x1="0" x2={W} y1={H * t} y2={H * t} stroke="#F5EDE4" strokeOpacity="0.07" strokeDasharray="2 6" />
+            ))}
+          <line x1="0" x2={W} y1={H * (wide ? LANE_WIDE.mid : Y_LANE)} y2={H * (wide ? LANE_WIDE.mid : Y_LANE)} stroke="#A69789" strokeOpacity="0.22" strokeDasharray="6 5" />
           {TICKS.map((t) => {
             const x = xOf(t.dt, span) * W
             return <line key={t.dt} x1={x} x2={x} y1={14} y2={H - 14} stroke="#F5EDE4" strokeOpacity="0.05" />
@@ -202,13 +225,14 @@ export function Constellation({ claims, nowMs, compact = false, className }: { c
         </div>
         {/* Yes-price scale and the unpriced lane */}
         <div aria-hidden className="pointer-events-none absolute inset-y-0 left-3 text-[0.72rem] leading-none text-lumen-3">
-          {(
-            [
-              [Y_TOP, narrow ? '100%' : 'Yes 100%'],
-              [(Y_TOP + Y_BOTTOM) / 2, '50%'],
-              [Y_BOTTOM, '0%'],
-              [Y_LANE, 'No price yet'],
-            ] as const
+          {(wide
+            ? ([[LANE_WIDE.mid, narrow ? 'Not priced here' : 'Not priced in this list']] as const)
+            : ([
+                [Y_TOP, narrow ? '100%' : 'Yes 100%'],
+                [(Y_TOP + Y_BOTTOM) / 2, '50%'],
+                [Y_BOTTOM, '0%'],
+                [Y_LANE, 'No price yet'],
+              ] as const)
           ).map(([t, label]) => (
             <span key={label} className="absolute -translate-y-[130%] whitespace-nowrap" style={{ top: `${t * 100}%` }}>
               {label}
@@ -227,8 +251,9 @@ export function Constellation({ claims, nowMs, compact = false, className }: { c
           {placed.map((p, i) => {
             const c = p.claim
             const resolved = isResolved(c.status)
-            const label = `${formatClaimNumber(c.number)}: ${c.title}. ${statusLabel(c.status, c.outcome)}. ${c.policy.id}, ${FAMILY_NAME[c.policy.family].toLowerCase()}. ${
-              p.priced && !resolved ? `Yes price ${formatPrice(c.yesPrice ?? 0)}.` : ''
+            const yes = yesOf(c)
+            const label = `${claimLabel(c)}: ${c.title}. ${apiStatusLabel(c) ?? statusLabel(c.status, c.outcome)}. ${c.policy.id}, ${FAMILY_NAME[c.policy.family].toLowerCase()}. ${
+              p.priced && !resolved && yes !== undefined ? `Yes price ${formatPrice(yes)}.` : ''
             } ${c.status === 'open' ? `Evidence window: ${timeLeft(c.evidenceDeadline, nowMs).label}.` : ''}`.trim()
             return (
               <motion.li

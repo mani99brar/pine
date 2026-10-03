@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { useMemo } from 'react'
 import type { ActivityItem, AgentClaimBrief, ClaimDetail } from '@pine/core'
 import { explorerTxUrl, formatDate, shortHash } from '@pine/core'
@@ -8,7 +9,9 @@ import { useActivity, usePine } from '@pine/react'
 import { CopyButton, HashChip } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/primitives'
 import { clientSiteUrl } from '@/lib/site-client'
+import { apiFactsOf } from '@/lib/claims'
 import { cn } from '@/lib/cn'
+import { ApiTimeline } from './ApiTimeline'
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
 const POLICY_ID = /^[A-Z]{2,8}-\d{3}$/
@@ -169,7 +172,7 @@ const TYPE_LABEL: Record<ActivityItem['type'], string> = {
   approval: 'Exact approval',
 }
 
-export function ActivityRows({ items, showClaim = false }: { items: ActivityItem[]; showClaim?: boolean }) {
+export function ActivityRows({ items, showClaim = false, linkClaims = false }: { items: ActivityItem[]; showClaim?: boolean; linkClaims?: boolean }) {
   return (
     <ul className="divide-y divide-[var(--edge)]">
       {items.map((a) => {
@@ -183,7 +186,14 @@ export function ActivityRows({ items, showClaim = false }: { items: ActivityItem
             </p>
             <p className="order-3 col-span-2 min-w-0 text-[0.84375rem] text-lumen-2 sm:order-none sm:col-span-1">
               <span className="[overflow-wrap:anywhere]">{a.summary}</span>
-              {showClaim && <span className="block text-[0.78rem] text-lumen-3">{a.claimTitle}</span>}
+              {showClaim &&
+                (linkClaims ? (
+                  <Link href={`/claims/${a.claimId}`} className="link block w-fit text-[0.78rem] text-lumen-3">
+                    {a.claimTitle}
+                  </Link>
+                ) : (
+                  <span className="block text-[0.78rem] text-lumen-3">{a.claimTitle}</span>
+                ))}
             </p>
             <p className={cn('tnum text-right text-[0.875rem]', amt === null ? 'text-lumen-3' : amt < 0 ? 'text-lumen' : 'text-hb')}>
               {amt === null ? '—' : `${amt > 0 ? '+' : ''}${a.amount} ${a.token ?? ''}`}
@@ -203,6 +213,12 @@ export function ActivityRows({ items, showClaim = false }: { items: ActivityItem
 }
 
 export function ClaimActivity({ claim }: { claim: ClaimDetail }) {
+  // Backend claims: the backend lists activity per account only, so the claim's own indexed history is shown.
+  if (apiFactsOf(claim)) return <ApiTimeline claim={claim} />
+  return <MarketActivity claim={claim} />
+}
+
+function MarketActivity({ claim }: { claim: ClaimDetail }) {
   const q = useActivity({ claimId: claim.id, limit: 40 })
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
   if (q.isLoading) return <LoadingBlock lines={5} />

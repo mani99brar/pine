@@ -1,12 +1,17 @@
 import type { Metadata } from 'next'
 import { Suspense } from 'react'
+import { readPineEnv } from '@pine/data'
 import { LightTable } from '@/components/table/LightTable'
 import { Container, PageHeader, Skeleton } from '@/components/ui/primitives'
 
-export const metadata: Metadata = {
-  title: 'Light table',
-  description: 'Every published claim as a crystal around the present moment: Yes price, liquidity, policy family and time left in the evidence window. Filter, search and sort, or use the list.',
-  alternates: { canonical: '/claims', types: { 'application/json': '/api/agent/v1/claims' } },
+export function generateMetadata(): Metadata {
+  // `api` mode: the machine-readable claim list is the backend's agent feed.
+  const json = readPineEnv().dataSource === 'api' ? '/api/v1/agents/claims' : '/api/agent/v1/claims'
+  return {
+    title: 'Light table',
+    description: 'Every published claim as a crystal around the present moment: Yes price, liquidity, policy family and time left in the evidence window. Filter, search and sort, or use the list.',
+    alternates: { canonical: '/claims', types: { 'application/json': json } },
+  }
 }
 
 export default function ClaimsPage() {

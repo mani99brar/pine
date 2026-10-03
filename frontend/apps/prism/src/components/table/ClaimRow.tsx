@@ -2,17 +2,20 @@
 
 import Link from 'next/link'
 import type { ClaimSummary } from '@pine/core'
-import { formatAmount, formatClaimNumber, formatPrice, shortSha } from '@pine/core'
+import { formatAmount, formatPrice, shortSha } from '@pine/core'
 import { ClaimCrystal } from '@/components/crystal/ClaimCrystal'
 import { PrismMini, pricesFrom } from '@/components/prism/PrismBeam'
 import { StatusBadge } from '@/components/claim/StatusBadge'
 import { FamilyIcon } from '@/components/icons'
 import { FAMILY_VAR } from '@/lib/crystal'
-import { isResolved, pulseSeconds, shortRepo, timeLeft } from '@/lib/claims'
+import { apiFactsOf, apiOutcomePrices, apiStatusLabel, claimLabel, isResolved, pulseSeconds, repoLabel, timeLeft } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 
 export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; nowMs: number | null; className?: string }) {
-  const prices = pricesFrom(claim)
+  const api = apiFactsOf(claim)
+  // Backend listings carry no prices, liquidity or evidence counts: those read "—" or are left out, never 0.
+  const yes = api ? apiOutcomePrices(claim).yes : undefined
+  const prices = api ? (yes !== undefined ? { yes, no: 0, invalid: 0 } : undefined) : pricesFrom(claim)
   const resolved = isResolved(claim.status)
   const tl = nowMs ? timeLeft(claim.evidenceDeadline, nowMs) : null
   return (
@@ -23,8 +26,10 @@ export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; now
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <span className="tnum text-[0.8125rem] font-semibold text-lumen-3">{formatClaimNumber(claim.number)}</span>
-            <StatusBadge status={claim.status} outcome={claim.outcome} size="sm" />
+            <span className={cn('tnum text-[0.8125rem] font-semibold text-lumen-3', api && 't-code font-normal')} title={api ? `Market ${claim.marketAddress ?? claim.id}` : undefined}>
+              {claimLabel(claim)}
+            </span>
+            <StatusBadge status={claim.status} outcome={claim.outcome} size="sm" label={apiStatusLabel(claim)} />
             {claim.sponsored && <span className="tag text-[0.75rem]">Sponsored</span>}
           </div>
           <Link href={`/claims/${claim.id}`} className="mt-1 block text-[1.02rem] font-semibold leading-snug text-lumen after:absolute after:inset-0 after:content-[''] hover:underline hover:decoration-[rgba(90,216,255,0.6)] hover:underline-offset-4 focus-visible:outline-none">
@@ -34,10 +39,11 @@ export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; now
             <span className="inline-flex items-center gap-1.5" style={{ color: FAMILY_VAR[claim.policy.family] }}>
               <FamilyIcon family={claim.policy.family} size={14} />
               <span className="text-lumen-2">
-                {claim.policy.id}@{claim.policy.version}
+                {claim.policy.id}
+                {claim.policy.version ? `@${claim.policy.version}` : ''}
               </span>
             </span>
-            <span className="truncate">{shortRepo(claim)}</span>
+            <span className="truncate">{repoLabel(claim)}</span>
             <span className="t-code text-[0.75rem] text-lumen-2">{shortSha(claim.source.commitSha)}</span>
             {claim.source.prNumber && <span>PR #{claim.source.prNumber}</span>}
           </p>
@@ -50,7 +56,14 @@ export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; now
             ) : prices ? (
               <>
                 <p className="t-figure text-[1.35rem] leading-none text-lumen">{formatPrice(prices.yes)}</p>
-                <p className="mt-0.5 text-[0.75rem] leading-tight text-lumen-3">implied chance</p>
+                <p className="mt-0.5 text-[0.75rem] leading-tight text-lumen-3">{api ? 'Yes pool price' : 'implied chance'}</p>
+              </>
+            ) : api ? (
+              <>
+                <p className="t-figure text-[1.35rem] leading-none text-lumen-3" aria-label="Not priced in this list">
+                  —
+                </p>
+                <p className="mt-0.5 text-[0.75rem] leading-tight text-lumen-3">price on the claim</p>
               </>
             ) : (
               <p className="text-[0.8125rem] leading-tight text-lumen-3">No price yet</p>
@@ -58,8 +71,17 @@ export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; now
           </div>
         </div>
         <div className="col-start-2 hidden md:col-start-auto md:block">
-          <p className="tnum text-[0.9375rem] text-lumen">{formatAmount(claim.liquidity, { maxDecimals: 0 })}</p>
-          <p className="text-[0.75rem] text-lumen-3">{claim.collateralSymbol} liquidity</p>
+          {api ? (
+            <>
+              <p className="tnum text-[0.9375rem] text-lumen-3">—</p>
+              <p className="text-[0.75rem] text-lumen-3">liquidity not indexed</p>
+            </>
+          ) : (
+            <>
+              <p className="tnum text-[0.9375rem] text-lumen">{formatAmount(claim.liquidity, { maxDecimals: 0 })}</p>
+              <p className="text-[0.75rem] text-lumen-3">{claim.collateralSymbol} liquidity</p>
+            </>
+          )}
         </div>
         <div className="col-start-2 md:col-start-auto">
           {tl ? (
@@ -69,7 +91,7 @@ export function ClaimRow({ claim, nowMs, className }: { claim: ClaimSummary; now
           ) : (
             <span className="skeleton inline-block h-4 w-20" aria-hidden />
           )}
-          <p className="text-[0.75rem] text-lumen-3">{claim.evidenceCount} evidence</p>
+          {!api && <p className="text-[0.75rem] text-lumen-3">{claim.evidenceCount} evidence</p>}
         </div>
       </div>
     </li>

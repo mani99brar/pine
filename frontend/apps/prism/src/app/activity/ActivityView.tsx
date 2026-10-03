@@ -3,11 +3,12 @@
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
 import type { ActivityType } from '@pine/core'
-import { formatAmount, formatClaimNumber } from '@pine/core'
-import { useActivity, usePortfolio, useWallet } from '@pine/react'
+import { formatAmount } from '@pine/core'
+import { useActivity, usePine, usePortfolio, useWallet } from '@pine/react'
 import { ActivityRows } from '@/components/claim/AgentAndActivity'
 import { Button } from '@/components/ui/Button'
 import { EmptyState, ErrorState, LoadingBlock, Skeleton } from '@/components/ui/primitives'
+import { claimLabel } from '@/lib/claims'
 import { useMounted } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 
@@ -21,6 +22,100 @@ const FILTERS: { id: string; label: string; types?: ActivityType[] }[] = [
 ]
 
 export function ActivityView() {
+  const { env } = usePine()
+  if (env.dataSource === 'api') return <AccountActivity />
+  return <LedgerActivity />
+}
+
+const API_FILTERS: { id: string; label: string; types?: ActivityType[] }[] = [
+  { id: 'all', label: 'Everything' },
+  { id: 'claims', label: 'Claims published', types: ['market_created'] },
+  { id: 'evidence', label: 'Evidence', types: ['evidence_submitted'] },
+]
+
+/**
+ * `api` mode: the backend keeps activity per wallet (claims it published, evidence it recorded), newest first and
+ * paged by cursor. It records no amounts, trades, liquidity or oracle answers per account, so there is nothing to
+ * reconcile here.
+ */
+function AccountActivity() {
+  const mounted = useMounted()
+  const wallet = useWallet()
+  const [filter, setFilter] = useState('all')
+  const [cursors, setCursors] = useState<string[]>([])
+  const types = API_FILTERS.find((f) => f.id === filter)?.types
+  const account = wallet.isConnected ? wallet.address : undefined
+  const cursor = cursors[cursors.length - 1]
+  const q = useActivity({ account, types, ...(cursor ? { cursor } : {}) })
+  const items = q.data?.items ?? []
+  const next = q.data?.nextCursor
+  if (!mounted) return <Skeleton className="h-40 w-full" />
+  if (!account) {
+    return (
+      <div className="glass cut-lg flex flex-wrap items-center justify-between gap-4 p-5">
+        <p className="max-w-[60ch] text-lumen-2">Connect a wallet to see its activity: the claims it published and the evidence it recorded. Pine keeps no public feed of everyone&apos;s activity.</p>
+        <Button variant="glass" onClick={() => wallet.connect()}>
+          Connect wallet
+        </Button>
+      </div>
+    )
+  }
+  return (
+    <section aria-labelledby="ledger-title" className="grid gap-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 id="ledger-title" className="t-h3">
+          This wallet&apos;s activity
+        </h2>
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Filter by type">
+          {API_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className="chip"
+              aria-pressed={filter === f.id}
+              onClick={() => {
+                setFilter(f.id)
+                setCursors([])
+              }}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="max-w-[72ch] text-[0.875rem] text-lumen-3">
+        From Pine&apos;s indexer. Trades, liquidity, oracle answers and redemptions happen on Seer and Reality.eth and are not listed per wallet here; each claim page shows its own history and what you hold in its market.
+      </p>
+      {q.isError ? (
+        <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+      ) : q.isLoading ? (
+        <LoadingBlock lines={6} />
+      ) : items.length === 0 ? (
+        <EmptyState title="Nothing here yet">{cursors.length > 0 ? 'No older activity.' : 'Claims this wallet publishes and evidence it records appear here once they are indexed.'}</EmptyState>
+      ) : (
+        <div className="glass cut-xl px-4 sm:px-5">
+          <ActivityRows items={items} showClaim linkClaims />
+        </div>
+      )}
+      {(cursors.length > 0 || next) && (
+        <div className="flex flex-wrap gap-2">
+          {cursors.length > 0 && (
+            <Button variant="ghost" size="sm" onClick={() => setCursors((c) => c.slice(0, -1))}>
+              Newer
+            </Button>
+          )}
+          {next && (
+            <Button variant="glass" size="sm" onClick={() => setCursors((c) => [...c, next])}>
+              Older activity
+            </Button>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function LedgerActivity() {
   const mounted = useMounted()
   const wallet = useWallet()
   const [filter, setFilter] = useState('all')
@@ -116,7 +211,7 @@ export function ActivityView() {
                 {recon.rows.map(([id, r]) => (
                   <li key={id} className="grid grid-cols-[minmax(0,1fr)_auto_auto] gap-4">
                     <Link href={`/claims/${id}`} className="link truncate text-lumen-2">
-                      {formatClaimNumber(r.number)} {r.title}
+                      {claimLabel({ number: r.number, id })} {r.title}
                     </Link>
                     <span className="tnum text-lumen">−{formatAmount(r.out, { maxDecimals: 2 })}</span>
                     <span className="tnum text-hb">+{formatAmount(r.inn, { maxDecimals: 2 })}</span>

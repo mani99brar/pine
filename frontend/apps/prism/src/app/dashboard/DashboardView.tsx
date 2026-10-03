@@ -3,9 +3,9 @@
 import Link from 'next/link'
 import { useMemo } from 'react'
 import type { ClaimSummary, OutcomePosition } from '@pine/core'
-import { formatAmount, formatClaimNumber, formatPriceCents } from '@pine/core'
+import { formatAmount, formatPriceCents } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { useClaims, useDrafts, usePortfolio, useWallet } from '@pine/react'
+import { useClaims, useDrafts, usePine, usePortfolio, useWallet } from '@pine/react'
 import { AlertTriangle, Coins, Hourglass, Wrench } from 'lucide-react'
 import { ClaimRow } from '@/components/table/ClaimRow'
 import { StatusBadge } from '@/components/claim/StatusBadge'
@@ -14,7 +14,7 @@ import { Button, ButtonLink } from '@/components/ui/Button'
 import { AnimatedNumber } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, LoadingBlock, Skeleton } from '@/components/ui/primitives'
 import { OUTCOME_HEX } from '@/lib/crystal'
-import { timeLeft } from '@/lib/claims'
+import { claimLabel, isResolved, timeLeft } from '@/lib/claims'
 import { useMounted, useNowMs } from '@/lib/hooks'
 
 interface Alert {
@@ -33,7 +33,7 @@ function alertsFor(mine: ClaimSummary[], positions: OutcomePosition[], unfinishe
     out.push({
       id: `redeem-${p.claimId}-${p.outcome}`,
       icon: <Coins size={16} aria-hidden className="text-hb" />,
-      title: `Redeemable: ${formatClaimNumber(p.claimNumber)}`,
+      title: `Redeemable: ${claimLabel({ number: p.claimNumber, id: p.claimId })}`,
       detail: `${formatAmount(p.redeemableAmount ?? p.value, { maxDecimals: 2 })} ${sym} redeemable under Seer's native payout rules.`,
       href: `/claims/${p.claimId}`,
       action: 'Redeem',
@@ -44,14 +44,14 @@ function alertsFor(mine: ClaimSummary[], positions: OutcomePosition[], unfinishe
     if (c.status === 'open') {
       const tl = timeLeft(c.evidenceDeadline, now)
       if (!tl.past && tl.ms < 24 * 3_600_000)
-        out.push({ id: `deadline-${c.id}`, icon: <Hourglass size={16} aria-hidden className="text-na" />, title: `Evidence closes soon: ${formatClaimNumber(c.number)}`, detail: `${tl.label} on “${c.title}”.`, href: `/claims/${c.id}`, action: 'Open claim', tone: 'caution' })
+        out.push({ id: `deadline-${c.id}`, icon: <Hourglass size={16} aria-hidden className="text-na" />, title: `Evidence closes soon: ${claimLabel(c)}`, detail: `${tl.label} on “${c.title}”.`, href: `/claims/${c.id}`, action: 'Open claim', tone: 'caution' })
     }
     if (c.status === 'answer_proposed')
-      out.push({ id: `answer-${c.id}`, icon: <AlertTriangle size={16} aria-hidden className="text-na" />, title: `Answer proposed: ${formatClaimNumber(c.number)}`, detail: 'An oracle answer is standing. It finalizes unless challenged within the fixed 3.5-day timeout.', href: `/claims/${c.id}#oracle`, action: 'Review answer', tone: 'caution' })
+      out.push({ id: `answer-${c.id}`, icon: <AlertTriangle size={16} aria-hidden className="text-na" />, title: `Answer proposed: ${claimLabel(c)}`, detail: 'An oracle answer is standing. It finalizes unless challenged within the fixed 3.5-day timeout.', href: `/claims/${c.id}#oracle`, action: 'Review answer', tone: 'caution' })
     if (c.status === 'disputed' || c.status === 'arbitration')
-      out.push({ id: `dispute-${c.id}`, icon: <AlertTriangle size={16} aria-hidden className="text-ha" />, title: `${c.status === 'arbitration' ? 'In arbitration' : 'Disputed'}: ${formatClaimNumber(c.number)}`, detail: 'Bonds are escalating or Kleros jurors are reviewing evidence.', href: `/claims/${c.id}#oracle`, action: 'Follow it', tone: 'critical' })
+      out.push({ id: `dispute-${c.id}`, icon: <AlertTriangle size={16} aria-hidden className="text-ha" />, title: `${c.status === 'arbitration' ? 'In arbitration' : 'Disputed'}: ${claimLabel(c)}`, detail: 'Bonds are escalating or Kleros jurors are reviewing evidence.', href: `/claims/${c.id}#oracle`, action: 'Follow it', tone: 'critical' })
     if (c.status === 'publishing')
-      out.push({ id: `pub-${c.id}`, icon: <Wrench size={16} aria-hidden className="text-na" />, title: `Finish publishing: ${formatClaimNumber(c.number)}`, detail: 'The market was partly created. Resume the remaining steps.', href: `/claims/${c.id}`, action: 'Finish publishing', tone: 'caution' })
+      out.push({ id: `pub-${c.id}`, icon: <Wrench size={16} aria-hidden className="text-na" />, title: `Finish publishing: ${claimLabel(c)}`, detail: 'The market was partly created. Resume the remaining steps.', href: `/claims/${c.id}`, action: 'Finish publishing', tone: 'caution' })
   }
   if (unfinished > 0)
     out.push({ id: 'drafts', icon: <Wrench size={16} aria-hidden className="text-na" />, title: `${unfinished} unfinished publication${unfinished === 1 ? '' : 's'} in drafts`, detail: 'Resume from the step where it stopped.', href: '/drafts', action: 'Open drafts', tone: 'caution' })
@@ -61,6 +61,9 @@ function alertsFor(mine: ClaimSummary[], positions: OutcomePosition[], unfinishe
 export function DashboardView() {
   const mounted = useMounted()
   const wallet = useWallet()
+  // `api` mode: holdings come from the markets this wallet published or filed evidence on, valued at pool prices;
+  // the backend does not value liquidity positions or keep deposit and fee totals.
+  const backend = usePine().env.dataSource === 'api'
   const now = useNowMs()
   const portfolio = usePortfolio(wallet.address)
   const mine = useClaims(wallet.address ? { creator: wallet.address, sort: 'newest', limit: 50 } : { limit: 0 })
@@ -94,14 +97,27 @@ export function DashboardView() {
   return (
     <div className="grid gap-12">
       <dl className="grid gap-3 sm:grid-cols-3">
-        {[
-          ['Outcome positions', t?.positionsValue],
-          ['Liquidity positions', t?.liquidityValue],
-          ['Redeemable now', t?.redeemable],
-        ].map(([label, v]) => (
+        {(
+          [
+            ['Outcome positions', t?.positionsValue, backend ? 'at pool prices; unpriced outcomes count 0' : undefined],
+            ['Liquidity positions', backend ? null : t?.liquidityValue, backend ? 'not valued by Pine' : undefined],
+            ['Redeemable now', t?.redeemable, undefined],
+          ] as const
+        ).map(([label, v, note]) => (
           <div key={label} className="glass cut-lg px-5 py-4">
             <dt className="text-[0.8125rem] text-lumen-3">{label}</dt>
-            <dd className="t-figure mt-1 text-[2rem] text-lumen">{v === undefined ? <Skeleton className="h-8 w-24" /> : <><AnimatedNumber value={Number(v)} format={(n) => formatAmount(n, { maxDecimals: 2 })} /> <span className="text-[1rem] text-lumen-3">{sym}</span></>}</dd>
+            <dd className="t-figure mt-1 text-[2rem] text-lumen">
+              {v === null ? (
+                <span className="text-lumen-3">—</span>
+              ) : v === undefined ? (
+                <Skeleton className="h-8 w-24" />
+              ) : (
+                <>
+                  <AnimatedNumber value={Number(v)} format={(n) => formatAmount(n, { maxDecimals: 2 })} /> <span className="text-[1rem] text-lumen-3">{sym}</span>
+                </>
+              )}
+            </dd>
+            {note && <p className="mt-1 text-[0.75rem] text-lumen-3">{note}</p>}
           </div>
         ))}
       </dl>
@@ -134,6 +150,7 @@ export function DashboardView() {
         <h2 id="positions-title" className="t-h3 mb-3">
           Outcome positions
         </h2>
+        {backend && <p className="-mt-2 mb-3 text-[0.84375rem] text-lumen-3">In markets this wallet published or filed evidence on. Each claim page shows what you hold in its market.</p>}
         {portfolio.isLoading ? (
           <LoadingBlock />
         ) : positions.length === 0 ? (
@@ -145,15 +162,22 @@ export function DashboardView() {
                 <span aria-hidden className="h-8 w-[3px] rounded-full" style={{ background: OUTCOME_HEX[p.outcome] }} />
                 <div className="min-w-0">
                   <Link href={`/claims/${p.claimId}`} className="link block truncate font-semibold text-lumen">
-                    {formatClaimNumber(p.claimNumber)} {p.claimTitle}
+                    {claimLabel({ number: p.claimNumber, id: p.claimId })} {p.claimTitle}
                   </Link>
                   <p className="mt-0.5 flex flex-wrap items-center gap-2 text-[0.8125rem] text-lumen-3">
                     <StatusBadge status={p.status} outcome={outcomeOf.get(p.claimId)} size="sm" />
-                    {formatAmount(p.balance, { maxDecimals: 2 })} {p.outcome === 'yes' ? 'Yes' : p.outcome === 'no' ? 'No' : 'Invalid result'} tokens at {formatPriceCents(p.markPrice)}
+                    {formatAmount(p.balance, { maxDecimals: 2 })} {p.outcome === 'yes' ? 'Yes' : p.outcome === 'no' ? 'No' : 'Invalid result'} tokens{' '}
+                    {backend && p.markPrice === 0 && !isResolved(p.status) ? 'not priced' : `at ${formatPriceCents(p.markPrice)}`}
                   </p>
                 </div>
                 <p className="tnum text-right text-lumen">
-                  {formatAmount(p.value, { maxDecimals: 2 })} <span className="text-lumen-3">{sym}</span>
+                  {backend && p.markPrice === 0 && !isResolved(p.status) ? (
+                    <span className="text-lumen-3">—</span>
+                  ) : (
+                    <>
+                      {formatAmount(p.value, { maxDecimals: 2 })} <span className="text-lumen-3">{sym}</span>
+                    </>
+                  )}
                   {p.redeemable && <span className="block text-[0.75rem] text-hb">redeemable</span>}
                 </p>
               </li>
@@ -175,14 +199,21 @@ export function DashboardView() {
               <li key={l.tokenId} className="grid gap-1 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                 <div className="min-w-0">
                   <Link href={`/claims/${l.claimId}`} className="link block truncate font-semibold text-lumen">
-                    {formatClaimNumber(l.claimNumber)} {l.claimTitle}
+                    {claimLabel({ number: l.claimNumber, id: l.claimId })} {l.claimTitle}
                   </Link>
                   <p className="text-[0.8125rem] text-lumen-3">
-                    {l.outcome === 'yes' ? 'Yes' : 'No'} pool, {l.inRange ? 'in range' : 'out of range'}, {l.withdrawable ? 'withdrawable on the DEX' : 'not withdrawable now'}
+                    {l.outcome === 'yes' ? 'Yes' : 'No'} pool{backend ? ` position #${l.tokenId}` : ''}, {l.inRange ? 'in range' : 'out of range'},{' '}
+                    {backend ? (l.withdrawable ? 'holds liquidity or fees' : 'empty') : l.withdrawable ? 'withdrawable on the DEX' : 'not withdrawable now'}
                   </p>
                 </div>
                 <p className="tnum text-[0.875rem] text-lumen-2 sm:text-right">
-                  {formatAmount(l.currentValue, { maxDecimals: 2 })} now of {formatAmount(l.deposited, { maxDecimals: 2 })} deposited, fees {formatAmount(l.feesEarned, { maxDecimals: 2 })} {sym}
+                  {backend ? (
+                    <span className="text-lumen-3">Value not indexed; withdraw from the claim page</span>
+                  ) : (
+                    <>
+                      {formatAmount(l.currentValue, { maxDecimals: 2 })} now of {formatAmount(l.deposited, { maxDecimals: 2 })} deposited, fees {formatAmount(l.feesEarned, { maxDecimals: 2 })} {sym}
+                    </>
+                  )}
                 </p>
               </li>
             ))}
@@ -199,6 +230,7 @@ export function DashboardView() {
             Compose a claim
           </Link>
         </div>
+        {backend && <p className="-mt-1 mb-3 text-[0.84375rem] text-lumen-3">Listed once Pine has verified them against their claim documents, about a minute after publication.</p>}
         {mine.isLoading ? (
           <LoadingBlock />
         ) : myClaims.length === 0 ? (
@@ -212,11 +244,11 @@ export function DashboardView() {
         )}
       </section>
       <p className="text-[0.84375rem] text-lumen-3">
-        Every deposit, withdrawal and fee is in the{' '}
+        {backend ? 'The claims you published and the evidence you recorded are in the ' : 'Every deposit, withdrawal and fee is in the '}
         <Link href="/activity" className="link">
           activity ledger
         </Link>
-        , reconciled against these totals.
+        {backend ? '.' : ', reconciled against these totals.'}
       </p>
     </div>
   )
