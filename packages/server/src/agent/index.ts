@@ -35,7 +35,7 @@ import {
 import { canonicalJson } from '@pine/core'
 import type { ClaimDetail, ClaimQuery, ClaimSort, ClaimStatus, Outcome, PolicyFamilyId, PolicyVersion } from '@pine/core'
 import { createDataProvider, type PineDataProvider } from '@pine/data'
-import { readServerEnv, resolveSiteUrl } from '../env'
+import { readServerEnv, resolveSiteUrl, siteUrlFromRequest } from '../env'
 import { corsPreflight, errorResponse, json, pathSegments, PUBLIC_CACHE, rawJson, text, type CatchAllContext } from '../http'
 
 export interface AgentHandlerOptions {
@@ -87,7 +87,25 @@ function siteUrlFor(req: Request, opts: { siteUrl?: string }): string {
   return (opts.siteUrl ?? resolveSiteUrl(req)).replace(/\/+$/, '')
 }
 
-const ok = { cors: true, cache: PUBLIC_CACHE }
+/**
+ * Publicly cached responses must name every request header that changes them, or a shared cache can
+ * serve one client's variant to everyone: `Accept` selects JSON vs Markdown, and absolute URLs in the
+ * body come from Host/X-Forwarded-* when NEXT_PUBLIC_SITE_URL (or `siteUrl`) is not configured.
+ */
+function varyFor(opts: { siteUrl?: string }): string {
+  return opts.siteUrl || !siteUrlFromRequest() ? 'Accept' : 'Accept, X-Forwarded-Host, X-Forwarded-Proto'
+}
+
+function publicGet(opts: { siteUrl?: string }, headers: Record<string, string> = {}) {
+  return { cors: true, cache: PUBLIC_CACHE, headers: { vary: varyFor(opts), ...headers } }
+}
+
+/** Upstream failure message safe to show publicly: PineDataError messages are written for users; others are not. */
+function upstreamMessage(e: unknown): string {
+  return e && typeof e === 'object' && (e as { name?: string }).name === 'PineDataError' && e instanceof Error
+    ? e.message
+    : 'Data source request failed.'
+}
 
 function notFound(message: string, hint?: string): Response {
   return errorResponse(404, 'not_found', message, {
@@ -204,6 +222,7 @@ export function createAgentHandler(opts: AgentHandlerOptions) {
     const url = new URL(req.url)
     const siteUrl = siteUrlFor(req, opts)
     const data = getData()
+    const ok = publicGet(opts)
     try {
       const [v, a, b, c] = segs
       if (segs.length === 0 || (v === 'v1' && segs.length === 1)) {
@@ -253,28 +272,25 @@ export function createAgentHandler(opts: AgentHandlerOptions) {
           const brief = toAgentBrief(claim, { siteUrl })
           if (wantsMarkdown(req)) {
             return text(briefToMarkdown(brief), {
-              ...ok,
+              ...publicGet(opts, { link: `<${siteUrl}/api/agent/v1/claims/${encodeURIComponent(claim.id)}>; rel="alternate"; type="application/json"` }),
               contentType: 'text/markdown; charset=utf-8',
-              headers: { link: `<${siteUrl}/api/agent/v1/claims/${claim.id}>; rel="alternate"; type="application/json"` },
             })
           }
           return json(brief, {
-            ...ok,
-            headers: {
+            ...publicGet(opts, {
               'x-pine-manifest-hash': claim.manifestHash,
-              link: `<${siteUrl}/api/agent/v1/claims/${claim.id}?format=md>; rel="alternate"; type="text/markdown"`,
-            },
+              link: `<${siteUrl}/api/agent/v1/claims/${encodeURIComponent(claim.id)}?format=md>; rel="alternate"; type="text/markdown"`,
+            }),
           })
         }
         if (c === 'manifest.json' && segs.length === 4) {
           // Canonical JSON: keccak256 of this exact body equals the manifest hash.
           return rawJson(canonicalJson(claim.manifest), {
-            ...ok,
-            headers: {
+            ...publicGet(opts, {
               'x-pine-manifest-hash': claim.manifestHash,
               'x-pine-manifest-uri': claim.manifestUri,
-              'content-disposition': `inline; filename="${claim.id}.manifest.json"`,
-            },
+              'content-disposition': `inline; filename="${claim.id.replace(/[^A-Za-z0-9._-]/g, '_')}.manifest.json"`,
+            }),
           })
         }
         if (c === 'evidence' && segs.length === 4) {
@@ -303,17 +319,16 @@ export function createAgentHandler(opts: AgentHandlerOptions) {
         if (!policy) return notFound(`Policy "${b}" was not found.`, 'List policies with GET /api/agent/v1/policies.')
         if (wantsMarkdown(req)) {
           return text(policy.text, {
-            ...ok,
+            ...publicGet(opts, { 'x-pine-policy-hash': policy.contentHash }),
             contentType: 'text/markdown; charset=utf-8',
-            headers: { 'x-pine-policy-hash': policy.contentHash },
           })
         }
-        return json(policy, { ...ok, headers: { 'x-pine-policy-hash': policy.contentHash } })
+        return json(policy, publicGet(opts, { 'x-pine-policy-hash': policy.contentHash }))
       }
 
       // ---- static documents
       if (a === 'schema' && b === 'claim-manifest.json' && segs.length === 3) {
-        return json(CLAIM_MANIFEST_JSON_SCHEMA, { ...ok, headers: { 'content-type': 'application/schema+json; charset=utf-8' } })
+        return json(CLAIM_MANIFEST_JSON_SCHEMA, publicGet(opts, { 'content-type': 'application/schema+json; charset=utf-8' }))
       }
       if (a === 'openapi.json' && segs.length === 2) {
         return json(buildAgentOpenApi({ siteUrl }), ok)
@@ -330,7 +345,7 @@ export function createAgentHandler(opts: AgentHandlerOptions) {
       }
       return notFound(`Unknown agent route "/${segs.join('/')}".`)
     } catch (e) {
-      return errorResponse(502, 'upstream_error', e instanceof Error ? e.message : 'Data source request failed.', {
+      return errorResponse(502, 'upstream_error', upstreamMessage(e), {
         cors: true,
         hint: 'The indexer may be unavailable. Retry shortly.',
       })
@@ -365,12 +380,11 @@ export function llmsTxtHandler(opts: RootFileOptions) {
     try {
       const [stats, page] = await Promise.all([data.getStats(), data.listClaims({ status: 'open', sort: 'deadline', limit: 20 })])
       return text(buildLlmsTxt({ siteUrl, appName: opts.appName, stats, claims: page.items }), {
-        cors: true,
-        cache: PUBLIC_CACHE,
+        ...publicGet(opts),
         contentType: 'text/plain; charset=utf-8',
       })
     } catch {
-      return text(buildLlmsTxt({ siteUrl, appName: opts.appName }), { cors: true, cache: PUBLIC_CACHE })
+      return text(buildLlmsTxt({ siteUrl, appName: opts.appName }), publicGet(opts))
     }
   }
   return { GET }
@@ -384,12 +398,9 @@ export function llmsFullTxtHandler(opts: RootFileOptions) {
     const data = getData()
     try {
       const [policies, page] = await Promise.all([data.listPolicies(), data.listClaims({ sort: 'newest', limit: 50 })])
-      return text(buildLlmsFullTxt({ siteUrl, appName: opts.appName, policies, claims: page.items }), {
-        cors: true,
-        cache: PUBLIC_CACHE,
-      })
+      return text(buildLlmsFullTxt({ siteUrl, appName: opts.appName, policies, claims: page.items }), publicGet(opts))
     } catch (e) {
-      return errorResponse(502, 'upstream_error', e instanceof Error ? e.message : 'Data source request failed.', { cors: true })
+      return errorResponse(502, 'upstream_error', upstreamMessage(e), { cors: true })
     }
   }
   return { GET }
@@ -399,7 +410,7 @@ export function llmsFullTxtHandler(opts: RootFileOptions) {
 export function wellKnownHandler(opts: RootFileOptions) {
   async function GET(req: Request): Promise<Response> {
     const siteUrl = siteUrlFor(req, opts)
-    return json(buildWellKnown({ siteUrl, appName: opts.appName }), { cors: true, cache: PUBLIC_CACHE })
+    return json(buildWellKnown({ siteUrl, appName: opts.appName }), publicGet(opts))
   }
   return { GET }
 }

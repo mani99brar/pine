@@ -1,3 +1,4 @@
+import { hasDotSegment } from '../internal/util'
 import { PineDataError } from '../types'
 
 export type TokenGetter = () => string | undefined | null | Promise<string | undefined | null>
@@ -39,6 +40,12 @@ export class RestClient {
     path: string,
     init: { query?: Record<string, string | number | boolean | string[] | undefined>; body?: unknown; auth?: boolean; nullOn404?: boolean } = {},
   ): Promise<T | null> {
+    // An id of "." or ".." would be resolved by the URL parser to the collection or parent path (with the
+    // caller's bearer token for writes). Treat it as a missing resource and send nothing.
+    if (hasDotSegment(path)) {
+      if (init.nullOn404) return null
+      throw new PineDataError(`Invalid resource path (${method} ${path})`, 'not_found')
+    }
     // Built without `new URL()` so relative bases (e.g. "/api/pine" proxied by the app) work too.
     const params = new URLSearchParams()
     for (const [k, v] of Object.entries(init.query ?? {})) {

@@ -1,4 +1,5 @@
 import type { CommitSummary, GitHubUser, Page, PullState, PullSummary, RepoSummary } from '@pine/core'
+import { hasDotSegment } from '../internal/util'
 import { PineDataError, type GitHubSource } from '../types'
 
 export const GITHUB_API_URL = 'https://api.github.com'
@@ -204,6 +205,9 @@ export class LiveGitHubSource implements GitHubSource {
   }
 
   private async request<T>(path: string): Promise<{ data: T; res: Response } | null> {
+    // GitHub owner/repo/SHA names are never "." or ".."; such a segment would make the URL parser walk up
+    // to another API endpoint (with the user's token). Treat it as not found.
+    if (hasDotSegment(path)) return null
     const headers: Record<string, string> = {
       Accept: 'application/vnd.github+json',
       'X-GitHub-Api-Version': '2022-11-28',

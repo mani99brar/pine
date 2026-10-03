@@ -2,6 +2,21 @@ import { formatUnits, getAddress, keccak256, parseUnits, stringToBytes } from 'v
 import type { Address, DecimalString, Hex, Page } from '@pine/core'
 
 // ---------------------------------------------------------------------------
+// URL paths built from user input
+// ---------------------------------------------------------------------------
+
+/**
+ * True when a URL path (the part before `?`) contains a dot segment: "." or "..", including the
+ * percent-encoded forms ("%2e", ".%2E", "%2e%2e"…). encodeURIComponent leaves dots alone and the WHATWG
+ * URL parser resolves encoded dots too, so `/drafts/${encodeURIComponent('..')}` would reach the parent
+ * path. Clients refuse such paths instead of sending them.
+ */
+export function hasDotSegment(path: string): boolean {
+  const pathname = path.split(/[?#]/, 1)[0] ?? ''
+  return pathname.split('/').some((seg) => /^(?:\.|%2e){1,2}$/i.test(seg))
+}
+
+// ---------------------------------------------------------------------------
 // Deterministic randomness
 // ---------------------------------------------------------------------------
 

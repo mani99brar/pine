@@ -16,6 +16,11 @@ function oneLine(s: string): string {
   return (s ?? '').replace(/\s+/g, ' ').trim()
 }
 
+/** Creator-authored text inside Markdown link text: one line, and brackets cannot end the link early. */
+function linkText(s: string): string {
+  return oneLine(s).replace(/[\\[\]]/g, (c) => `\\${c}`)
+}
+
 function summaryLine(appName: string): string {
   return `${appName} publishes bounded, policy-versioned claims about exact GitHub commits and funds Seer prediction markets on whether a reproducible counterexample is submitted before an absolute UTC deadline. Reality.eth answers each market; Kleros arbitrates disputes.`
 }
@@ -23,7 +28,7 @@ function summaryLine(appName: string): string {
 function claimLink(siteUrl: string, c: ClaimSummary): string {
   const urls = agentUrls(siteUrl)
   const price = typeof c.yesPrice === 'number' ? `, implied chance of accepted counterexample ${formatPrice(c.yesPrice)}` : ''
-  return `- [${formatClaimNumber(c.number)}: ${oneLine(c.title)}](${urls.claimMarkdown(c.id)}): ${c.policy.id}@${c.policy.version} on ${c.source.owner}/${c.source.repo}@${c.source.commitSha.slice(0, 12)}; evidence deadline ${formatUtcMinute(c.evidenceDeadline)}${price}; ${STATUS_META[c.status]?.label ?? c.status}`
+  return `- [${formatClaimNumber(c.number)}: ${linkText(c.title)}](${urls.claimMarkdown(c.id)}): ${oneLine(c.policy.id)}@${oneLine(c.policy.version)} on ${oneLine(c.source.owner)}/${oneLine(c.source.repo)}@${oneLine(c.source.commitSha).slice(0, 12)}; evidence deadline ${formatUtcMinute(c.evidenceDeadline)}${price}; ${STATUS_META[c.status]?.label ?? c.status}`
 }
 
 const HOW_TO_SUBMIT = (siteUrl: string): string[] => {
@@ -147,8 +152,8 @@ export function buildLlmsFullTxt(ctx: { siteUrl: string; appName: string; polici
       '',
       `- Status: ${STATUS_META[c.status]?.label ?? c.status}${c.outcome ? ` (${OUTCOME_META[c.outcome].label})` : ''}`,
       `- Violation sought: ${oneLine(c.violation)}`,
-      `- Target: https://github.com/${c.source.owner}/${c.source.repo}/commit/${c.source.commitSha}${c.source.prNumber ? ` (PR #${c.source.prNumber})` : ''}`,
-      `- Policy: ${c.policy.id}@${c.policy.version} ${c.policy.title}`,
+      `- Target: https://github.com/${encodeURIComponent(c.source.owner)}/${encodeURIComponent(c.source.repo)}/commit/${encodeURIComponent(c.source.commitSha)}${c.source.prNumber ? ` (PR #${Number(c.source.prNumber)})` : ''}`,
+      `- Policy: ${oneLine(c.policy.id)}@${oneLine(c.policy.version)} ${oneLine(c.policy.title)}`,
       `- Evidence deadline: ${formatUtcMinute(c.evidenceDeadline)}`,
       `- Chain: ${c.chainId}${c.marketAddress ? `; market ${c.marketAddress}` : ''}`,
       ...(typeof c.yesPrice === 'number' ? [`- ${COPY.priceLabel}: ${formatPrice(c.yesPrice)}`] : []),

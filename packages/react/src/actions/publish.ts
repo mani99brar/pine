@@ -126,6 +126,11 @@ export function usePublishClaim(draftId: string): PublishClaim {
       upload_manifest: async (): Promise<StepOutcome> => {
         const der = latest.current.derived
         if (!der?.manifest || !der.manifestHash) throw new Error('The claim manifest is incomplete. Finish the composer first.')
+        // The manifest names its creator and is immutable once referenced by the market: never pin it
+        // with the zero-address placeholder (wallet disconnected after start).
+        if (!der.manifest.creator || /^0x0{40}$/i.test(der.manifest.creator)) {
+          throw new Error('Connect the wallet that will create the market before pinning the manifest.')
+        }
         const r = await storage.putJson(der.manifest, `${der.claimId}.manifest.json`)
         if (r.hash.toLowerCase() !== der.manifestHash.toLowerCase()) {
           throw new Error(
@@ -150,22 +155,35 @@ export function usePublishClaim(draftId: string): PublishClaim {
     (step: TxStep, results: Partial<Record<TxStepId, unknown>>): TxStep => {
       const d = currentDraft()
       const der = latest.current.derived
-      if (!d || !der) return step
       const upload = results.upload_manifest as UploadResult | undefined
+      const manifestUri = upload?.uri ?? d?.publication?.manifestUri
+      // The market name is immutable: it must reference the pinned manifest, never the placeholder URI.
+      if (step.id === 'create_market' && (!manifestUri || manifestUri === PENDING_MANIFEST_URI)) {
+        throw new Error('The manifest has not been pinned yet, so the market cannot reference it. Retry from "Pin the claim manifest".')
+      }
+      if (!d || !der) {
+        if (step.kind === 'transaction' && step.request) throw new Error('The draft is not loaded; reload the page and retry.')
+        return step
+      }
       const market =
         (results.create_market as { market?: Address } | undefined)?.market ??
         marketFromReceipt(results.create_market) ??
         d.publication?.marketAddress
+      let rebuilt: TxStep[]
       try {
-        const rebuilt = buildSteps(d, der, {
-          manifestUri: upload?.uri ?? d.publication?.manifestUri,
+        rebuilt = buildSteps(d, der, {
+          manifestUri,
           manifestHash: upload?.hash ?? d.publication?.manifestHash,
           market,
         })
-        return rebuilt.find((s) => s.id === step.id) ?? step
-      } catch {
+      } catch (e) {
+        // Sending the stale step could use outdated amounts or references: stop instead.
+        if (step.kind === 'transaction' && !isManualStep(step)) throw e instanceof Error ? e : new Error(String(e))
         return step
       }
+      const next = rebuilt.find((s) => s.id === step.id)
+      if (!next && step.kind === 'transaction' && !isManualStep(step)) throw new Error(`Could not prepare "${step.label}".`)
+      return next ?? step
     },
     [buildSteps, currentDraft],
   )

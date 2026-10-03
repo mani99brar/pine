@@ -73,6 +73,65 @@ export function errorResponse(
   )
 }
 
+/**
+ * Reads a request body as text, refusing more than `maxBytes` without buffering it all first
+ * (the Content-Length header is checked when present, and the stream is cut off when it is not).
+ */
+export async function readBodyText(req: Request, maxBytes: number): Promise<string> {
+  const bytes = await readBodyBytes(req, maxBytes)
+  return new TextDecoder().decode(bytes)
+}
+
+export class BodyTooLargeError extends Error {
+  constructor(readonly maxBytes: number) {
+    super(`Request body exceeds ${maxBytes} bytes.`)
+    this.name = 'BodyTooLargeError'
+  }
+}
+
+export async function readBodyBytes(req: Request, maxBytes: number): Promise<Uint8Array> {
+  const declared = Number(req.headers.get('content-length') ?? '')
+  if (Number.isFinite(declared) && declared > maxBytes) throw new BodyTooLargeError(maxBytes)
+  if (!req.body) return new Uint8Array()
+  const reader = req.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    total += value.byteLength
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined)
+      throw new BodyTooLargeError(maxBytes)
+    }
+    chunks.push(value)
+  }
+  const out = new Uint8Array(total)
+  let offset = 0
+  for (const c of chunks) {
+    out.set(c, offset)
+    offset += c.byteLength
+  }
+  return out
+}
+
+/**
+ * CSRF check for state-changing routes. Browsers send `Sec-Fetch-Site` and `Origin` on cross-origin
+ * POST/PATCH/DELETE: a request marked cross-site/same-site, or whose Origin host is not ours, is rejected.
+ * Requests with neither header come from non-browser clients, which cannot ride a user's cookies.
+ */
+export function isSameOriginRequest(req: Request, allowedHosts: string[]): boolean {
+  const site = req.headers.get('sec-fetch-site')?.toLowerCase()
+  if (site === 'cross-site' || site === 'same-site') return false
+  const origin = req.headers.get('origin')
+  if (!origin) return true
+  try {
+    return allowedHosts.includes(new URL(origin).host)
+  } catch {
+    return false // "null" (sandboxed frames, opaque redirects) and malformed origins
+  }
+}
+
 export function corsPreflight(): Response {
   return new Response(null, { status: 204, headers: CORS_HEADERS })
 }

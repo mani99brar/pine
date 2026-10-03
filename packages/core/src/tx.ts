@@ -25,7 +25,7 @@ import { encodeFunctionData, zeroAddress } from 'viem'
 import { arbitratorProxyAbi } from './abis/arbitrator'
 import { erc20Abi } from './abis/erc20'
 import { marketFactoryAbi, routerAbi } from './abis/seer'
-import { getChainOrDefault, isPlaceholderAddress, seerMarketUrl, type ChainConfig } from './chains'
+import { getChain, getChainOrDefault, isPlaceholderAddress, seerMarketUrl, type ChainConfig } from './chains'
 import { REALITY_SEPARATOR } from './abis/reality'
 import { fromScaled, toScaled } from './decimal'
 import { formatAmount } from './format'
@@ -75,6 +75,24 @@ function usable(address: Address | undefined, allowPlaceholder: boolean | undefi
   return !!address && (allowPlaceholder === true || !isPlaceholderAddress(address))
 }
 
+const UNSUPPORTED = 'Transaction disabled: this chain is not supported by Pine, so its contract addresses are unknown.'
+
+/**
+ * Chain config for a tx builder. Unknown chain ids fall back to the default chain for display only:
+ * `supported` is false and no transaction request may be built (it would target another chain's contracts).
+ */
+function txChain(chainId: number | undefined): { chain: ChainConfig; supported: boolean } {
+  const known = chainId !== undefined ? getChain(chainId) : undefined
+  return { chain: known ?? getChainOrDefault(chainId), supported: Boolean(known) }
+}
+
+/** Minimum Reality.eth bond in wei; throws on anything that is not a positive decimal. */
+export function minBondToWei(minBond: string, decimals: number): bigint {
+  const r = toScaled(minBond, decimals)
+  if (!r || r.value <= 0n) throw new RangeError(`Minimum bond must be a positive decimal amount (got "${minBond}")`)
+  return r.value
+}
+
 function cost(chain: ChainConfig, units: bigint, gasPriceGwei?: number) {
   return { amount: gasCost(units, gasPriceGwei ?? chain.defaultGasPriceGwei, chain.nativeDecimals), currency: chain.nativeSymbol }
 }
@@ -121,8 +139,10 @@ export function encodeCreateMarket(input: {
         outcomeType: '',
         parentOutcome: 0n,
         parentMarket: zeroAddress,
-        category: input.oracle.category,
-        lang: input.oracle.language,
+        // Pasted verbatim into Reality template 2 like the market name: escape so a quote or U+241F
+        // cannot add JSON keys (e.g. a second "title") or shift the question fields.
+        category: escapeJsonString(input.oracle.category),
+        lang: escapeJsonString(input.oracle.language),
         lowerBound: 0n,
         upperBound: 0n,
         minBond: input.minBondWei,
@@ -134,7 +154,7 @@ export function encodeCreateMarket(input: {
 }
 
 export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
-  const chain = getChainOrDefault(input.chainId)
+  const { chain, supported } = txChain(input.chainId)
   const addr = resolveAddresses(chain, input.addresses)
   const allow = input.allowPlaceholderAddresses
   const decimals = chain.collateral.decimals
@@ -142,7 +162,7 @@ export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
   const amount = liquidityToUnits(input.funding.liquidity, decimals)
   const amountText = `${formatAmount(fromScaled(amount, decimals), { maxDecimals: 6 })} ${sym}`
   const marketName = buildMarketName(input.question.text, input.manifestUri, input.manifestHash)
-  const minBondWei = toScaled(input.oracle.minBond, chain.nativeDecimals)?.value ?? 0n
+  const minBondWei = minBondToWei(input.oracle.minBond, chain.nativeDecimals)
   const gp = input.gasPriceGwei
 
   const steps: TxStep[] = []
@@ -155,14 +175,14 @@ export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
     estimatedCost: { amount: '0', currency: sym },
   })
 
-  const createOk = usable(addr.marketFactory, allow)
+  const createOk = supported && usable(addr.marketFactory, allow)
   steps.push({
     id: 'create_market',
     label: 'Create the Seer market',
     description:
       `Creates a Yes/No market (Seer adds an Invalid-result outcome) through the official Seer factory on ${chain.name}. Its Reality.eth question is the claim question, opening for answers at ${input.oracle.openingTime}, with a fixed ${chain.seerQuestionTimeoutSeconds / 86400}-day answer timeout. ` +
       'After this transaction confirms, the claim terms are frozen.' +
-      (createOk ? '' : ` ${UNVERIFIED}`),
+      (createOk ? '' : ` ${supported ? UNVERIFIED : UNSUPPORTED}`),
     kind: 'transaction',
     request: createOk
       ? {
@@ -176,13 +196,13 @@ export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
     freezesTerms: true,
   })
 
-  const approveOk = usable(addr.collateral, allow) && usable(addr.router, allow)
+  const approveOk = supported && usable(addr.collateral, allow) && usable(addr.router, allow)
   steps.push({
     id: 'approve_collateral',
     label: `Approve exactly ${amountText}`,
     description:
       `Allows the Seer Router to move exactly ${amountText} for this market's liquidity. Never an unlimited allowance.` +
-      (approveOk ? '' : ` ${UNVERIFIED}`),
+      (approveOk ? '' : ` ${supported ? UNVERIFIED : UNSUPPORTED}`),
     kind: 'transaction',
     request: approveOk
       ? {
@@ -195,7 +215,7 @@ export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
     estimatedCost: cost(chain, GAS_UNITS.approve, gp),
   })
 
-  steps.push(buildSplitStep({ chain, router: addr.router, collateral: addr.collateral, market: input.market, amount, amountText, allow, gasPriceGwei: gp }))
+  steps.push(buildSplitStep({ chain, supported, router: addr.router, collateral: addr.collateral, market: input.market, amount, amountText, allow, gasPriceGwei: gp }))
 
   const [lo, hi] = input.funding.priceRange
   const range = `${Math.round(lo * 1000) / 10}%–${Math.round(hi * 1000) / 10}%`
@@ -228,6 +248,7 @@ export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
 
 function buildSplitStep(args: {
   chain: ChainConfig
+  supported: boolean
   router: Address
   collateral: Address
   market?: Address
@@ -236,15 +257,15 @@ function buildSplitStep(args: {
   allow?: boolean
   gasPriceGwei?: number
 }): TxStep {
-  const { chain, router, collateral, market, amount, amountText, allow } = args
-  const ok = !!market && !isPlaceholderAddress(market) && usable(router, allow) && usable(collateral, allow)
+  const { chain, supported, router, collateral, market, amount, amountText, allow } = args
+  const ok = supported && !!market && !isPlaceholderAddress(market) && usable(router, allow) && usable(collateral, allow)
   return {
     id: 'split_position',
     label: `Split ${amountText} into outcome tokens`,
     description:
       `Converts ${amountText} into ${amountText.split(' ')[0]} each of Yes, No and Invalid-result outcome tokens for this market. Invalid-result tokens stay in your wallet; they pay only if the market resolves invalid. ` +
       (market ? '' : 'Prepared once the market is created (needs the new market address). ') +
-      (usable(router, allow) && usable(collateral, allow) ? '' : UNVERIFIED),
+      (!supported ? UNSUPPORTED : usable(router, allow) && usable(collateral, allow) ? '' : UNVERIFIED),
     kind: 'transaction',
     request: ok
       ? {
@@ -282,17 +303,17 @@ export function buildEvidenceTx(input: {
   arbitrator?: Address
   allowPlaceholderAddresses?: boolean
 }): TxStep {
-  const chain = getChainOrDefault(input.chainId)
+  const { chain, supported } = txChain(input.chainId)
   const arbChain = getChainOrDefault(chain.arbitration.chainId)
   const contract = input.arbitrator ?? chain.arbitration.requestContract
-  const ok = usable(contract, input.allowPlaceholderAddresses)
+  const ok = supported && usable(contract, input.allowPlaceholderAddresses)
   return {
     id: 'submit_evidence',
     label: `Submit evidence on ${arbChain.name}`,
     description:
       `Calls submitEvidence on the Kleros arbitration contract on ${arbChain.name} with your evidence URI (evidence group = the Reality.eth question id). ` +
       `The block timestamp of this transaction is the timeliness proof; it costs ${arbChain.nativeSymbol} gas and the content becomes public. Switch your wallet to ${arbChain.name} first.` +
-      (ok ? '' : ` ${UNVERIFIED}`),
+      (ok ? '' : ` ${supported ? UNVERIFIED : UNSUPPORTED}`),
     kind: 'transaction',
     request: ok
       ? {
@@ -323,16 +344,20 @@ export function buildRedeemTx(input: {
   if (input.outcomeIndexes.length !== input.amounts.length) {
     throw new RangeError('outcomeIndexes and amounts must have the same length')
   }
-  const chain = getChainOrDefault(input.chainId)
+  const { chain, supported } = txChain(input.chainId)
   const router = input.router ?? chain.seer.router
   const collateral = input.collateral ?? chain.collateral.address
-  const ok = usable(router, input.allowPlaceholderAddresses) && usable(collateral, input.allowPlaceholderAddresses)
+  const ok =
+    supported &&
+    !isPlaceholderAddress(input.market) &&
+    usable(router, input.allowPlaceholderAddresses) &&
+    usable(collateral, input.allowPlaceholderAddresses)
   return {
     id: 'redeem_positions',
     label: 'Redeem positions',
     description:
       'Redeems your outcome tokens for collateral according to the final payout of this market. Payouts follow Seer\u2019s native rules: on invalid, only Invalid-result tokens pay. Losing tokens redeem for 0. Each redeemed token must first be approved to the Router (exact amount).' +
-      (ok ? '' : ` ${UNVERIFIED}`),
+      (ok ? '' : ` ${supported ? UNVERIFIED : UNSUPPORTED}`),
     kind: 'transaction',
     request: ok
       ? {
@@ -362,14 +387,16 @@ export function buildOutcomeApprovalTx(input: {
   router?: Address
   allowPlaceholderAddresses?: boolean
 }): TxStep {
-  const chain = getChainOrDefault(input.chainId)
+  const { chain, supported } = txChain(input.chainId)
   const router = input.router ?? chain.seer.router
-  const ok = usable(router, input.allowPlaceholderAddresses) && usable(input.token, input.allowPlaceholderAddresses)
+  const ok = supported && usable(router, input.allowPlaceholderAddresses) && usable(input.token, input.allowPlaceholderAddresses)
   if (input.amount <= 0n) throw new RangeError('Approval amount must be positive')
   return {
     id: 'approve_outcome_tokens',
     label: input.label ?? 'Approve outcome tokens',
-    description: 'Allows the Seer Router to move exactly this amount of the outcome token. Never an unlimited allowance.' + (ok ? '' : ` ${UNVERIFIED}`),
+    description:
+      'Allows the Seer Router to move exactly this amount of the outcome token. Never an unlimited allowance.' +
+      (ok ? '' : ` ${supported ? UNVERIFIED : UNSUPPORTED}`),
     kind: 'transaction',
     request: ok
       ? {

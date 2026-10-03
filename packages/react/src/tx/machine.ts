@@ -104,6 +104,11 @@ export interface TxMachineOptions {
   onConfirmed?: (step: TxRunnerStep, outcome: StepOutcome) => void | Promise<void>
   onDone?: (snapshot: TxRunnerSnapshot) => void | Promise<void>
   onFailed?: (step: TxRunnerStep) => void
+  /**
+   * Cross-tab lock (Web Locks API). Defaults to `navigator.locks` when the browser has it, so two tabs
+   * (or two machines for the same key) never run the same plan at once. `null` disables it.
+   */
+  locks?: TxLockManager | null
   /** Decides whether a step is manual. Default: `isManualStep`. */
   isManual?: (step: TxStep) => boolean
   /** External URL for a manual step (e.g. the Seer market page with "Add liquidity"). */
@@ -133,7 +138,28 @@ interface PersistedStep {
   startedAt?: IsoDate
   confirmedAt?: IsoDate
   result?: unknown
+  /** Millisecond timestamp of the last change: the newer copy wins when tabs share the same storage. */
+  updatedAt?: string
 }
+
+/** Minimal Web Locks API surface (navigator.locks). */
+export interface TxLockManager {
+  request<T>(name: string, options: { ifAvailable: boolean }, callback: (lock: unknown) => Promise<T>): Promise<T>
+}
+
+function browserLocks(): TxLockManager | undefined {
+  const nav = (globalThis as { navigator?: { locks?: TxLockManager } }).navigator
+  return nav?.locks && typeof nav.locks.request === 'function' ? nav.locks : undefined
+}
+
+/** True when `a` (from storage) is a newer copy of a step than `b` (in memory). */
+function isNewer(a: PersistedStep, b: PersistedStep | undefined): boolean {
+  if (!b) return true
+  return (a.updatedAt ?? '') > (b.updatedAt ?? '')
+}
+
+export const TX_IN_OTHER_TAB =
+  'This transaction run is in progress in another tab or window. Continue it there, or close that tab and try again.'
 
 interface PersistedRun {
   v: 1
@@ -173,6 +199,7 @@ export class TxMachine {
   private hydrated = false
   private hydrating: Promise<void> | null = null
   private running = false
+  private starting = false
   private completedAt: IsoDate | undefined
   private listeners = new Set<() => void>()
   private snapshot: TxRunnerSnapshot
@@ -264,6 +291,17 @@ export class TxMachine {
     return total
   }
 
+  /** A cost in the limit currency that is not a non-negative decimal: the limit cannot be enforced. */
+  private hasInvalidCost(step: TxStep): boolean {
+    const cur = this.opts.limitCurrency
+    for (const c of [step.estimatedCost, step.collateralCost]) {
+      if (!c || (cur && c.currency !== cur)) continue
+      const v = toUnits(c.amount)
+      if (v === null || v < 0n) return true
+    }
+    return false
+  }
+
   /** Collateral the plan requires (all non-skipped steps). */
   requiredTotal(): bigint {
     let total = 0n
@@ -288,11 +326,12 @@ export class TxMachine {
     if (limitRaw === undefined || limitRaw === '') return undefined
     const limit = toUnits(limitRaw)
     const required = this.requiredTotal()
+    const invalid = this.defs.some((s) => this.statusOf(s.id) !== 'skipped' && this.hasInvalidCost(s))
     return {
       limit: limitRaw,
       required: fromUnits(required),
       currency: this.opts.limitCurrency,
-      within: limit !== null && required <= limit,
+      within: limit !== null && limit >= 0n && !invalid && required <= limit,
     }
   }
 
@@ -342,7 +381,21 @@ export class TxMachine {
   // Persistence
   // ---------------------------------------------------------------------------
 
+  /**
+   * Adopts step copies from storage that are newer than memory (written by another tab sharing the
+   * same localStorage), so a stale tab never re-runs or overwrites progress made elsewhere.
+   */
+  private syncFromStorage(): void {
+    const saved = readJson<PersistedRun>(this.opts.storage, txStorageKey(this.key))
+    if (!saved || saved.v !== 1 || !saved.steps) return
+    for (const [id, p] of Object.entries(saved.steps) as [TxStepId, PersistedStep | undefined][]) {
+      if (p && isNewer(p, this.progress.get(id))) this.progress.set(id, p)
+    }
+    if (saved.completedAt && !this.completedAt) this.completedAt = saved.completedAt
+  }
+
   private persist(): void {
+    this.syncFromStorage()
     const steps: Partial<Record<TxStepId, PersistedStep>> = {}
     for (const [id, p] of this.progress) steps[id] = p
     const run: PersistedRun = { v: 1, steps, completedAt: this.completedAt, updatedAt: isoNow(this.now()) }
@@ -351,7 +404,7 @@ export class TxMachine {
 
   private patchStep(id: TxStepId, patch: Partial<PersistedStep>, replace = false): void {
     const prev = replace ? undefined : this.progress.get(id)
-    this.progress.set(id, { status: 'idle', ...prev, ...patch })
+    this.progress.set(id, { status: 'idle', ...prev, ...patch, updatedAt: stamp(this.now()) })
     this.persist()
     this.emit()
   }
@@ -441,8 +494,20 @@ export class TxMachine {
    * leaves the runner in its current state with `error` set; step failures set state `failed`.
    */
   async start(): Promise<void> {
-    if (this.running) return
+    // Re-entrancy: a second click while hydrating (which can take a while when receipts are re-checked)
+    // must not start a second run of the same steps.
+    if (this.running || this.starting) return
+    this.starting = true
+    try {
+      await this.doStart()
+    } finally {
+      this.starting = false
+    }
+  }
+
+  private async doStart(): Promise<void> {
     if (!this.hydrated) await this.hydrate()
+    if (this.running) return
     if (this.defs.length === 0) {
       this.error = 'Nothing to run yet.'
       this.emit()
@@ -456,16 +521,16 @@ export class TxMachine {
     const check = this.limitCheck()
     if (check && !check.within) {
       const cur = check.currency ? ` ${check.currency}` : ''
-      this.error = `Blocked by your spending limit: this plan needs ${trimDecimal(check.required)}${cur} but your limit is ${trimDecimal(check.limit)}${cur}. Raise the limit or reduce the amounts before continuing.`
+      const invalid = this.defs.find((s) => this.statusOf(s.id) !== 'skipped' && this.hasInvalidCost(s))
+      this.error = invalid
+        ? `Blocked by your spending limit: the cost of "${invalid.label}" is not a valid amount, so the limit cannot be checked.`
+        : `Blocked by your spending limit: this plan needs ${trimDecimal(check.required)}${cur} but your limit is ${trimDecimal(check.limit)}${cur}. Raise the limit or reduce the amounts before continuing.`
       this.emit()
       return
     }
-    // A failed step is retried by start() as well.
-    for (const s of this.defs) {
-      if (this.statusOf(s.id) === 'failed') this.patchStep(s.id, { status: 'idle', error: undefined })
-    }
     this.error = undefined
-    await this.run()
+    // A failed step is retried by start() as well (reset inside the run, once the run lock is held).
+    await this.run({ resetFailed: true })
   }
 
   /** Retries from the failed step. */
@@ -548,36 +613,63 @@ export class TxMachine {
   // Execution
   // ---------------------------------------------------------------------------
 
-  private async run(): Promise<void> {
+  private async run(opts: { resetFailed?: boolean } = {}): Promise<void> {
+    if (this.running) return
     this.running = true
-    this.state = 'running'
-    this.emit()
     try {
-      for (;;) {
-        const def = this.defs.find((s) => !DONE_STATUSES.includes(this.statusOf(s.id)))
-        if (!def) {
-          this.state = 'done'
-          this.persist()
-          this.emit()
-          await this.finish()
-          return
-        }
-        const ok = await this.runStep(def)
-        if (ok === 'manual') {
-          this.state = 'paused'
-          this.persist()
-          this.emit()
-          return
-        }
-        if (!ok) {
-          this.state = 'failed'
-          this.persist()
-          this.emit()
-          return
-        }
+      const locks = this.opts.locks === undefined ? browserLocks() : (this.opts.locks ?? undefined)
+      if (!locks) {
+        await this.runLocked(opts)
+        return
+      }
+      let acquired = false
+      await locks.request(`pine:tx-run:${this.key}`, { ifAvailable: true }, async (lock) => {
+        if (!lock) return
+        acquired = true
+        await this.runLocked(opts)
+      })
+      if (!acquired) {
+        this.error = TX_IN_OTHER_TAB
+        this.emit()
       }
     } finally {
       this.running = false
+    }
+  }
+
+  /** The step loop; runs only while this machine holds the run lock for its key. */
+  private async runLocked(opts: { resetFailed?: boolean }): Promise<void> {
+    // Another tab may have advanced this plan since we loaded it: never re-run its confirmed steps.
+    this.syncFromStorage()
+    if (opts.resetFailed) {
+      for (const s of this.defs) {
+        if (this.statusOf(s.id) === 'failed') this.patchStep(s.id, { status: 'idle', error: undefined })
+      }
+    }
+    this.state = 'running'
+    this.emit()
+    for (;;) {
+      const def = this.defs.find((s) => !DONE_STATUSES.includes(this.statusOf(s.id)))
+      if (!def) {
+        this.state = 'done'
+        this.persist()
+        this.emit()
+        await this.finish()
+        return
+      }
+      const ok = await this.runStep(def)
+      if (ok === 'manual') {
+        this.state = 'paused'
+        this.persist()
+        this.emit()
+        return
+      }
+      if (!ok) {
+        this.state = 'failed'
+        this.persist()
+        this.emit()
+        return
+      }
     }
   }
 
@@ -585,27 +677,33 @@ export class TxMachine {
     const existing = this.progress.get(def.id)
     const results = this.snapshot.results
 
-    // Resume a step that was submitted before a reload but not yet confirmed.
-    if (existing?.status === 'pending' && existing.txHash) {
-      const check = await this.opts.executor.checkPending(def, existing.txHash, existing.startedAt).catch(
-        (e): PendingCheck => ({ status: 'failed', error: errorMessage(e) }),
-      )
+    // An earlier attempt of this step was submitted (it has a tx hash) but is not confirmed: it was
+    // interrupted by a reload, timed out, or failed after submission. Never send a second transaction
+    // until the first is known to have failed, or a slow first one could also land (a second market,
+    // or twice the collateral split, past the spending limit).
+    if (existing?.txHash && !DONE_STATUSES.includes(existing.status) && !this.isManual(def)) {
+      let check: PendingCheck
+      try {
+        check = await this.opts.executor.checkPending(def, existing.txHash, existing.startedAt)
+      } catch (e) {
+        check = { status: 'pending' }
+        this.error = `Could not check the earlier transaction for ${def.label}: ${errorMessage(e)}`
+      }
       if (check.status === 'confirmed') {
-        this.patchStep(def.id, { status: 'confirmed', confirmedAt: isoNow(this.now()), result: check.result })
+        this.patchStep(def.id, { status: 'confirmed', confirmedAt: isoNow(this.now()), result: check.result, error: undefined })
         await this.notifyConfirmed(def.id, { txHash: existing.txHash, result: check.result })
         return true
       }
-      if (check.status === 'failed') {
-        this.patchStep(def.id, { status: 'failed', error: check.error })
+      if (check.status === 'pending') {
+        this.patchStep(def.id, {
+          status: 'failed',
+          error: `The earlier transaction ${existing.txHash} is still pending. Wait for it to confirm (check your wallet or a block explorer), then retry; a new transaction is not sent while it may still land.`,
+        })
         this.notifyFailed(def.id)
         return false
       }
-      this.patchStep(def.id, {
-        status: 'failed',
-        error: 'The transaction is still pending. Check your wallet or explorer, then retry.',
-      })
-      this.notifyFailed(def.id)
-      return false
+      // Known failed (reverted, dropped or replaced): safe to send a fresh transaction below.
+      this.patchStep(def.id, { status: 'idle', txHash: undefined, error: undefined })
     }
 
     let step = def
@@ -619,6 +717,14 @@ export class TxMachine {
 
     // Per-step limit guard: shown cost against the remaining limit before every wallet prompt.
     const limitRaw = this.opts.spendingLimit
+    if (limitRaw !== undefined && limitRaw !== '' && this.hasInvalidCost(step)) {
+      this.patchStep(def.id, {
+        status: 'failed',
+        error: `Blocked: the cost of this step is not a valid amount, so your spending limit of ${trimDecimal(limitRaw)} cannot be checked.`,
+      })
+      this.notifyFailed(def.id)
+      return false
+    }
     if (limitRaw !== undefined && limitRaw !== '' && this.countsTowardLimit(step)) {
       const limit = toUnits(limitRaw) ?? 0n
       const after = this.spentTotal() + this.limitAmount(step)
@@ -710,6 +816,11 @@ function signature(steps: TxStep[]): string {
   } catch {
     return steps.map((s) => s.id).join('|')
   }
+}
+
+/** Millisecond-precision ISO timestamp for step versions. */
+function stamp(d: Date): string {
+  return d.toISOString()
 }
 
 function trimDecimal(v: DecimalString): string {

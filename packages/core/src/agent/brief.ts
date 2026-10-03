@@ -56,7 +56,7 @@ export function toAgentBrief(claim: ClaimDetail, ctx: { siteUrl: string }): Agen
   const owner = source?.owner ?? claim.source.owner
   const repo = source?.repo ?? claim.source.repo
   const sha = source?.commit?.sha ?? claim.source.commitSha
-  const repoUrl = `https://github.com/${owner}/${repo}`
+  const repoUrl = `https://github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`
   const deadline = spec?.evidence?.deadline ?? claim.evidenceDeadline
   const mechanism = getEvidenceMechanism(spec?.evidence?.mechanism ?? 'erc1497-arbitrator-proxy', claim.chainId)
   const env = spec?.environment ?? EMPTY_ENV
@@ -82,7 +82,9 @@ export function toAgentBrief(claim: ClaimDetail, ctx: { siteUrl: string }): Agen
     target: {
       repository: repoUrl,
       commit: sha,
-      commitUrl: source?.commit?.htmlUrl ?? `${repoUrl}/commit/${sha}`,
+      // Always the canonical GitHub URL for the pinned commit: a manifest is creator-authored, and its
+      // htmlUrl must not be able to send investigators to another host.
+      commitUrl: `${repoUrl}/commit/${encodeURIComponent(sha)}`,
     },
     requirement: spec?.requirement ?? '',
     violation: spec?.violation ?? claim.violation,
@@ -109,7 +111,7 @@ export function toAgentBrief(claim: ClaimDetail, ctx: { siteUrl: string }): Agen
   if (claim.outcome) brief.outcome = claim.outcome
   if (spec?.faultModel) brief.faultModel = spec.faultModel
   if (source?.baseCommit?.sha) brief.target.baseCommit = source.baseCommit.sha
-  if (prNumber) brief.target.pullRequest = source?.pullRequest?.htmlUrl ?? `${repoUrl}/pull/${prNumber}`
+  if (prNumber) brief.target.pullRequest = `${repoUrl}/pull/${Number(prNumber)}`
 
   if (claim.market) {
     brief.market = {
@@ -132,13 +134,67 @@ export function toAgentBrief(claim: ClaimDetail, ctx: { siteUrl: string }): Agen
   return brief
 }
 
+// ---------------------------------------------------------------------------
+// Markdown rendering of creator-authored (untrusted) text.
+// Claim text comes from the manifest, which anyone can author. It must never be able to add
+// headings, list items or fake sections (for example a second "How to submit") to the prompt.
+// ---------------------------------------------------------------------------
+
+const LINE_BREAKS = /[\r\n\u0085\u2028\u2029]+/g
+
+/** One line: line breaks collapsed to spaces. */
+function inline(s: unknown): string {
+  return String(s ?? '').replace(LINE_BREAKS, ' ').trim()
+}
+
+/** Escapes characters that would start a block (heading, quote, list, table, fence) at line start. */
+function escapeLineStart(line: string): string {
+  return line.replace(/^(\s*)([#>*+\-|=`~_]|\d+[.)])/, '$1\\$2')
+}
+
+/** Inline text in a paragraph or list item. */
+function text(s: unknown): string {
+  return escapeLineStart(inline(s))
+}
+
+function longestRun(s: string, ch: string): number {
+  let best = 0
+  let cur = 0
+  for (const c of s) {
+    cur = c === ch ? cur + 1 : 0
+    if (cur > best) best = cur
+  }
+  return best
+}
+
+/** Inline code span that backticks inside the value cannot close. */
+function codeSpan(s: unknown): string {
+  const v = inline(s)
+  const fence = '`'.repeat(longestRun(v, '`') + 1)
+  const pad = v.startsWith('`') || v.endsWith('`') ? ' ' : ''
+  return `${fence}${pad}${v}${pad}${fence}`
+}
+
+/** Fenced block whose fence is longer than any backtick run inside, so the content cannot close it. */
+function fenced(s: string, info = ''): string {
+  const body = s.replace(/\r\n?/g, '\n')
+  const fence = '`'.repeat(Math.max(3, longestRun(body, '`') + 1))
+  return `${fence}${info}\n${body}\n${fence}`
+}
+
+/** Creator-authored prose: a single line stays a paragraph; multi-line text becomes a fenced text block. */
+function prose(s: string): string {
+  const t = String(s ?? '').replace(/\r\n?/g, '\n').trim()
+  if (!/[\n\u0085\u2028\u2029]/.test(t)) return text(t)
+  return fenced(t, 'text')
+}
+
 function bullets(items: string[], empty = '_None specified._'): string {
-  return items.length ? items.map((i) => `- ${i.replace(/\n+/g, ' ')}`).join('\n') : empty
+  return items.length ? items.map((i) => `- ${text(i)}`).join('\n') : empty
 }
 
 function code(s: string): string {
-  const fence = s.includes('```') ? '~~~' : '```'
-  return `${fence}sh\n${s}\n${fence}`
+  return fenced(s, 'sh')
 }
 
 /** Self-contained Markdown investigation prompt. */
@@ -148,35 +204,35 @@ export function briefToMarkdown(brief: AgentClaimBrief): string {
   const env = brief.environment
   const configLines = Object.keys(env.config ?? {})
     .sort()
-    .map((k) => `- \`${k}\` = \`${env.config[k]}\``)
+    .map((k) => `- ${codeSpan(k)} = ${codeSpan(env.config[k])}`)
   const deadlineUtc = formatUtcMinute(brief.evidence.deadline)
   const lines: string[] = [
     `# ${formatClaimNumber(brief.number)} — investigation brief`,
     '',
-    `Status: **${status}${outcome}**. Claim page: ${brief.url}`,
+    `Status: **${status}${outcome}**. Claim page: ${inline(brief.url)}`,
     '',
     '## Question (immutable)',
     '',
-    `> ${brief.question}`,
+    `> ${text(brief.question)}`,
     '',
-    `Question hash: \`${brief.questionHash}\``,
+    `Question hash: ${codeSpan(brief.questionHash)}`,
     '',
     '## Your task',
     '',
-    `Find a reproducible counterexample showing that **${brief.violation.replace(/[.\s]+$/, '')}**, against the exact pinned commit and environment below, and submit it before **${deadlineUtc}** (unix ${brief.evidence.deadlineTs}). Only a timely, admissible demonstration of this specific violation counts.`,
+    `Find a reproducible counterexample showing that **${inline(brief.violation).replace(/[*_]/g, (c) => `\\${c}`).replace(/[.\s]+$/, '')}**, against the exact pinned commit and environment below, and submit it before **${deadlineUtc}** (unix ${brief.evidence.deadlineTs}). Only a timely, admissible demonstration of this specific violation counts.`,
     '',
     '## Target',
     '',
-    `- Repository: ${brief.target.repository}`,
-    `- Commit: \`${brief.target.commit}\` (${brief.target.commitUrl})`,
+    `- Repository: ${inline(brief.target.repository)}`,
+    `- Commit: ${codeSpan(brief.target.commit)} (${inline(brief.target.commitUrl)})`,
   ]
-  if (brief.target.baseCommit) lines.push(`- Base commit (only regressions relative to it qualify): \`${brief.target.baseCommit}\``)
-  if (brief.target.pullRequest) lines.push(`- Pull request: ${brief.target.pullRequest}`)
+  if (brief.target.baseCommit) lines.push(`- Base commit (only regressions relative to it qualify): ${codeSpan(brief.target.baseCommit)}`)
+  if (brief.target.pullRequest) lines.push(`- Pull request: ${inline(brief.target.pullRequest)}`)
   lines.push(
     '',
     '## Requirement',
     '',
-    brief.requirement || '_See manifest._',
+    brief.requirement ? prose(brief.requirement) : '_See manifest._',
     '',
     '## Scope',
     '',
@@ -189,7 +245,7 @@ export function briefToMarkdown(brief: AgentClaimBrief): string {
     bullets(brief.scope.outOfScope),
     '',
   )
-  if (brief.faultModel) lines.push('## Fault model', '', brief.faultModel, '')
+  if (brief.faultModel) lines.push('## Fault model', '', prose(brief.faultModel), '')
   lines.push(
     '## Assumptions',
     '',
@@ -197,18 +253,18 @@ export function briefToMarkdown(brief: AgentClaimBrief): string {
     '',
     '## Environment (pinned)',
     '',
-    `- Runtime: ${env.runtime}`,
+    `- Runtime: ${text(env.runtime)}`,
   )
-  if (env.packageManager) lines.push(`- Package manager: ${env.packageManager}`)
-  if (env.dependencyLock) lines.push(`- Lockfile: \`${env.dependencyLock.path}\` (keccak256 \`${env.dependencyLock.hash}\`)`)
-  if (env.containerImage) lines.push(`- Container image: \`${env.containerImage}\``)
-  if (env.externalState) lines.push(`- External state: ${env.externalState}`)
-  lines.push(`- Config hash: \`${env.configHash}\``, `- Environment hash: \`${env.envHash}\``)
+  if (env.packageManager) lines.push(`- Package manager: ${text(env.packageManager)}`)
+  if (env.dependencyLock) lines.push(`- Lockfile: ${codeSpan(env.dependencyLock.path)} (keccak256 ${codeSpan(env.dependencyLock.hash)})`)
+  if (env.containerImage) lines.push(`- Container image: ${codeSpan(env.containerImage)}`)
+  if (env.externalState) lines.push(`- External state: ${text(env.externalState)}`)
+  lines.push(`- Config hash: ${codeSpan(env.configHash)}`, `- Environment hash: ${codeSpan(env.envHash)}`)
   if (configLines.length) lines.push('', 'Non-secret configuration:', '', ...configLines)
-  if (env.notes) lines.push('', env.notes)
+  if (env.notes) lines.push('', 'Notes:', '', prose(env.notes))
   lines.push('', '## Reproduce', '')
   if (brief.reproduction.setupSteps.length) {
-    lines.push('Setup:', '', ...brief.reproduction.setupSteps.map((s, i) => `${i + 1}. ${s}`), '')
+    lines.push('Setup:', '', ...brief.reproduction.setupSteps.map((s, i) => `${i + 1}. ${text(s)}`), '')
   }
   lines.push(brief.reproduction.command ? code(brief.reproduction.command) : '_No command pinned._', '')
   lines.push(
@@ -221,14 +277,14 @@ export function briefToMarkdown(brief: AgentClaimBrief): string {
     `- Channel: ${brief.evidence.mechanism.label} — ${brief.evidence.mechanism.description}`,
   )
   if (brief.evidence.mechanism.contract) {
-    lines.push(`- Contract: \`${brief.evidence.mechanism.contract}\` on chain ${brief.evidence.mechanism.chainId}`)
+    lines.push(`- Contract: ${codeSpan(brief.evidence.mechanism.contract)} on chain ${inline(brief.evidence.mechanism.chainId)}`)
   }
   if (brief.oracle?.realityQuestionId) {
-    lines.push(`- Evidence group / arbitration id: uint256(\`${brief.oracle.realityQuestionId}\`)`)
+    lines.push(`- Evidence group / arbitration id: uint256(${codeSpan(brief.oracle.realityQuestionId)})`)
   }
   lines.push(
     `- Deadline: ${deadlineUtc} (unix ${brief.evidence.deadlineTs}). The submission transaction's block timestamp is the timeliness proof.`,
-    `- Submission page: ${brief.evidence.submitUrl}`,
+    `- Submission page: ${inline(brief.evidence.submitUrl)}`,
   )
   if (brief.evidence.mechanism.launchGate) lines.push(`- Caveat: ${brief.evidence.mechanism.launchGate}`)
   lines.push(
@@ -247,21 +303,21 @@ export function briefToMarkdown(brief: AgentClaimBrief): string {
     '',
     '## Immutable references',
     '',
-    `- Policy: ${policyPath(brief.policy)} — ${brief.policy.title} (hash \`${brief.policy.hash}\`, ${brief.policy.uri}); text: ${brief.policy.url}`,
-    `- Manifest: ${brief.manifest.uri} (keccak256 of canonical JSON \`${brief.manifest.hash}\`); JSON: ${brief.manifest.jsonUrl}`,
+    `- Policy: ${inline(policyPath(brief.policy))} — ${inline(brief.policy.title)} (hash ${codeSpan(brief.policy.hash)}, ${inline(brief.policy.uri)}); text: ${inline(brief.policy.url)}`,
+    `- Manifest: ${inline(brief.manifest.uri)} (keccak256 of canonical JSON ${codeSpan(brief.manifest.hash)}); JSON: ${inline(brief.manifest.jsonUrl)}`,
   )
   if (brief.market) {
     const yes = brief.market.outcomes.find((o) => o.label.toLowerCase() === 'yes')
     lines.push(
-      `- Market: ${brief.market.seerUrl} (chain ${brief.market.chainId}, \`${brief.market.address}\`, collateral ${brief.market.collateral}, liquidity ${brief.market.liquidity})`,
+      `- Market: ${inline(brief.market.seerUrl)} (chain ${inline(brief.market.chainId)}, ${codeSpan(brief.market.address)}, collateral ${inline(brief.market.collateral)}, liquidity ${inline(brief.market.liquidity)})`,
     )
     if (yes) lines.push(`- ${COPY.priceLabel}: ${formatPrice(yes.price)}. ${COPY.priceCaveat}`)
   }
   if (brief.oracle) {
     lines.push(
-      `- Oracle: ${brief.oracle.realityUrl} (opens ${formatUtcMinute(brief.oracle.openingTime)}${brief.oracle.currentAnswer ? `, current answer: ${brief.oracle.currentAnswer}` : ''})`,
+      `- Oracle: ${inline(brief.oracle.realityUrl)} (opens ${formatUtcMinute(brief.oracle.openingTime)}${brief.oracle.currentAnswer ? `, current answer: ${inline(brief.oracle.currentAnswer)}` : ''})`,
     )
   }
-  lines.push('', '## Disclaimers', '', bullets(brief.disclaimers), '', `_Updated ${brief.updatedAt}. Schema: ${brief.schema}_`, '')
+  lines.push('', '## Disclaimers', '', bullets(brief.disclaimers), '', `_Updated ${inline(brief.updatedAt)}. Schema: ${inline(brief.schema)}_`, '')
   return lines.join('\n')
 }

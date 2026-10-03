@@ -170,11 +170,11 @@ export class RestAccountStore implements AccountStore {
   }
 
   unlinkWallet(githubLogin: string, address: Address): Promise<Account> {
-    return this.must(this.client.request<WireAccount>('DELETE', this.path(githubLogin, `/wallets/${address}`), { auth: true }))
+    return this.must(this.client.request<WireAccount>('DELETE', this.path(githubLogin, `/wallets/${encodeURIComponent(address)}`), { auth: true }))
   }
 
   setPrimaryWallet(githubLogin: string, address: Address): Promise<Account> {
-    return this.must(this.client.request<WireAccount>('POST', this.path(githubLogin, `/wallets/${address}/primary`), { auth: true }))
+    return this.must(this.client.request<WireAccount>('POST', this.path(githubLogin, `/wallets/${encodeURIComponent(address)}/primary`), { auth: true }))
   }
 
   updatePreferences(githubLogin: string, prefs: Partial<AccountPreferences>): Promise<Account> {

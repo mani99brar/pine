@@ -27,13 +27,16 @@ import { z } from 'zod'
 import type { Account, AccountPreferences, Address, LinkedWallet } from '@pine/core'
 import { SUPPORTED_CHAIN_IDS } from '@pine/core/chains'
 import { createAccountStore, DEMO_WALLET_ADDRESS } from '@pine/data'
-import { demoAllowed, readServerEnv, requestHost, type ServerEnv } from './env'
+import { canonicalHost, demoAllowed, readServerEnv, requestHost, type ServerEnv } from './env'
 import {
+  BodyTooLargeError,
   errorResponse,
   isHttps,
+  isSameOriginRequest,
   json,
   pathSegments,
   PRIVATE_NO_STORE,
+  readBodyText,
   readCookie,
   serializeCookie,
   withCookies,
@@ -169,19 +172,26 @@ function restBackend(user: PineSessionUser, env: ServerEnv): Backend {
   }
 }
 
-function sameOrigin(req: Request): boolean {
-  const origin = req.headers.get('origin')
-  if (!origin) return true // non-browser clients; cookies are SameSite=Lax
-  try {
-    return new URL(origin).host === requestHost(req)
-  } catch {
-    return false
-  }
+/**
+ * The host the SIWE `domain` must name: the canonical AUTH_URL/NEXTAUTH_URL host when configured,
+ * otherwise the request host. Request headers (Host, X-Forwarded-Host) can be forged by a direct client
+ * when no proxy overwrites them, which would let a signature made for another site be accepted here.
+ */
+export function expectedSiweDomain(req: Request): string {
+  return canonicalHost() ?? requestHost(req)
 }
 
+function sameOrigin(req: Request): boolean {
+  const hosts = [requestHost(req)]
+  const canonical = canonicalHost()
+  if (canonical) hosts.push(canonical)
+  return isSameOriginRequest(req, hosts)
+}
+
+const MAX_BODY_BYTES = 16_384
+
 async function readBody(req: Request): Promise<unknown> {
-  const text = await req.text()
-  if (text.length > 16_384) throw new Error('Request body too large.')
+  const text = await readBodyText(req, MAX_BODY_BYTES)
   if (!text) return {}
   return JSON.parse(text)
 }
@@ -221,13 +231,23 @@ export async function verifySiwe(input: VerifySiweInput): Promise<VerifySiweResu
   if (parsed.domain !== input.expectedDomain) {
     return { ok: false, status: 400, code: 'domain_mismatch', message: `The message was created for ${parsed.domain}, not ${input.expectedDomain}.` }
   }
-  if (!parsed.expirationTime) {
-    return { ok: false, status: 400, code: 'bad_message', message: 'The message must include an expiration time.' }
+  if (!parsed.expirationTime || !parsed.issuedAt) {
+    return { ok: false, status: 400, code: 'bad_message', message: 'The message must include its issued-at and expiration times.' }
+  }
+  // EIP-4361: the URI is the resource the user signs in to; it must be on the same host as the domain.
+  let uriHost: string | undefined
+  try {
+    uriHost = parsed.uri ? new URL(parsed.uri).host : undefined
+  } catch {
+    uriHost = undefined
+  }
+  if (uriHost !== input.expectedDomain) {
+    return { ok: false, status: 400, code: 'domain_mismatch', message: `The message URI must be on ${input.expectedDomain}.` }
   }
   if (!validateSiweMessage({ message: parsed, domain: input.expectedDomain, nonce: input.expectedNonce, time: now })) {
     return { ok: false, status: 400, code: 'expired', message: 'The sign-in message has expired or is not yet valid.' }
   }
-  if (parsed.issuedAt && now.getTime() - parsed.issuedAt.getTime() > MAX_MESSAGE_AGE_MS) {
+  if (now.getTime() - parsed.issuedAt.getTime() > MAX_MESSAGE_AGE_MS) {
     return { ok: false, status: 400, code: 'expired', message: 'The sign-in message is too old. Sign a new one.' }
   }
   const signature = input.signature as `0x${string}`
@@ -340,7 +360,8 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
         let body: { message?: unknown; signature?: unknown }
         try {
           body = (await readBody(req)) as typeof body
-        } catch {
+        } catch (e) {
+          if (e instanceof BodyTooLargeError) return errorResponse(413, 'too_large', e.message)
           return errorResponse(400, 'bad_request', 'Body must be JSON: { message, signature }.')
         }
         if (typeof body.message !== 'string' || typeof body.signature !== 'string' || body.message.length > 4000) {
@@ -356,7 +377,7 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
         const result = await verifySiwe({
           message: body.message,
           signature: body.signature,
-          expectedDomain: requestHost(req),
+          expectedDomain: expectedSiweDomain(req),
           expectedNonce,
           publicClientFor: opts.publicClientFor,
         })
@@ -379,7 +400,8 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
         let body: { address?: unknown; chainId?: unknown }
         try {
           body = (await readBody(req)) as typeof body
-        } catch {
+        } catch (e) {
+          if (e instanceof BodyTooLargeError) return errorResponse(413, 'too_large', e.message)
           body = {}
         }
         const address = typeof body.address === 'string' ? body.address : DEMO_WALLET_ADDRESS
@@ -421,7 +443,8 @@ export function createAccountHandler(auth: PineAuthLike, opts: AccountHandlerOpt
       let body: unknown
       try {
         body = await readBody(req)
-      } catch {
+      } catch (e) {
+        if (e instanceof BodyTooLargeError) return errorResponse(413, 'too_large', e.message)
         return errorResponse(400, 'bad_request', 'Body must be JSON.')
       }
       const parsed = preferencesPatchSchema.safeParse(body)
@@ -477,8 +500,11 @@ function notFound(route: string): Response {
 }
 
 function serverError(e: unknown): Response {
-  const err = e as { code?: string; message?: string } | undefined
+  const err = e as { code?: string; message?: string; name?: string } | undefined
   if (err?.code === 'unauthorized') return errorResponse(401, 'unauthorized', err.message ?? 'Unauthorized.')
   if (err?.code === 'not_found') return errorResponse(404, 'not_found', err.message ?? 'Not found.')
-  return errorResponse(500, 'server_error', err?.message ?? 'Account request failed.')
+  // Only messages written for users (PineDataError from the account store) are passed through;
+  // unexpected exceptions can carry internal details.
+  const known = err?.name === 'PineDataError' && typeof err.message === 'string'
+  return errorResponse(500, 'server_error', known ? (err.message as string) : 'Account request failed.')
 }

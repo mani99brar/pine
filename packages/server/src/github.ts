@@ -26,7 +26,8 @@ import { errorResponse, json, pathSegments, type CatchAllContext } from './http'
 import { getSessionUser, type PineAuthLike } from './session'
 
 const NAME_RE = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
-const REPO_RE = /^[A-Za-z0-9._-]{1,100}$/
+// Dot segments ('.', '..') would let the URL parser walk to another GitHub API path with the user's token.
+const REPO_RE = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/
 const SHA_RE = /^[0-9a-fA-F]{4,40}$/
 const REF_RE = /^[A-Za-z0-9._/-]{1,255}$/
 
@@ -78,7 +79,8 @@ export function mapGitHubError(e: unknown): Response {
     }
     return errorResponse(status, err.code, err.message)
   }
-  return errorResponse(502, 'network', e instanceof Error ? e.message : 'GitHub request failed.')
+  // Unexpected exceptions can carry internal details (hosts, stack-ish messages): keep them server-side.
+  return errorResponse(502, 'network', 'GitHub request failed.')
 }
 
 export function createGitHubHandler(auth: PineAuthLike, opts: GitHubHandlerOptions = {}) {

@@ -200,6 +200,9 @@ export function useSubmitEvidence(claimId: string): SubmitEvidence {
   const submit = useCallback(
     async (draft: EvidenceDraft) => {
       if (blockers.length > 0) throw new Error(blockers[0])
+      // A second submit while one is running would swap the package under the running upload/submit steps.
+      const state = machine.getSnapshot().state
+      if (state === 'running') throw new Error('An evidence submission is already in progress. Wait for it to finish.')
       const parsed = evidenceDraftSchema.safeParse(draft)
       if (!parsed.success) {
         const issue = parsed.error.issues[0]

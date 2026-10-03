@@ -19,7 +19,7 @@
 import { keccak256 } from 'viem'
 import { canonicalJson } from '@pine/core'
 import { readServerEnv } from './env'
-import { errorResponse, json, PRIVATE_NO_STORE } from './http'
+import { BodyTooLargeError, errorResponse, json, PRIVATE_NO_STORE, readBodyBytes } from './http'
 import { getSessionUser, type SessionGetter } from './session'
 
 export const IPFS_MAX_BYTES = 1_048_576
@@ -67,6 +67,17 @@ function sanitizeName(name: string | null): string | undefined {
   return cleaned && cleaned !== '.' && cleaned !== '..' ? cleaned : undefined
 }
 
+/**
+ * A CID (base58btc v0 or multibase v1, alphanumeric) with an optional path of safe file-name segments.
+ * The pinning service's answer ends up in the manifest URI and in the immutable on-chain market name,
+ * so anything else (spaces, quotes, separators, "..") is rejected.
+ */
+const CID_PATH_RE = /^[A-Za-z0-9]{1,128}(?:\/(?!\.{1,2}(?:\/|$))[A-Za-z0-9._-]{1,128})*$/
+
+export function isSafeCidPath(cidPath: string): boolean {
+  return CID_PATH_RE.test(cidPath)
+}
+
 /** Extracts `<cid>[/<path>]` from common pinning-service responses. */
 export function extractCidPath(body: unknown): string | undefined {
   const b = body as Record<string, unknown> | null
@@ -106,11 +117,14 @@ export function createIpfsHandler(opts: IpfsHandlerOptions = {}) {
     if (!ct.startsWith('application/json')) {
       return errorResponse(415, 'unsupported_media_type', 'Content-Type must be application/json.')
     }
-    const declared = Number(req.headers.get('content-length') ?? '0')
-    if (declared > maxBytes) return errorResponse(413, 'too_large', `Body exceeds ${maxBytes} bytes.`)
-
-    const raw = new Uint8Array(await req.arrayBuffer())
-    if (raw.byteLength > maxBytes) return errorResponse(413, 'too_large', `Body exceeds ${maxBytes} bytes.`)
+    // Streamed with a cap: a missing or understated Content-Length cannot make the server buffer more.
+    let raw: Uint8Array
+    try {
+      raw = await readBodyBytes(req, maxBytes)
+    } catch (e) {
+      if (e instanceof BodyTooLargeError) return errorResponse(413, 'too_large', `Body exceeds ${maxBytes} bytes.`)
+      return errorResponse(400, 'bad_request', 'Could not read the request body.')
+    }
     if (raw.byteLength === 0) return errorResponse(400, 'bad_request', 'Empty body.')
 
     let value: unknown
@@ -159,6 +173,7 @@ export function createIpfsHandler(opts: IpfsHandlerOptions = {}) {
       const body = (await upstream.json().catch(() => null)) as unknown
       const cidPath = extractCidPath(body)
       if (!cidPath) return errorResponse(502, 'upstream_error', 'Pinning service response did not include a CID.')
+      if (!isSafeCidPath(cidPath)) return errorResponse(502, 'upstream_error', 'Pinning service returned a malformed CID.')
       const cid = cidPath.split('/')[0] as string
       return json(
         {
@@ -172,8 +187,9 @@ export function createIpfsHandler(opts: IpfsHandlerOptions = {}) {
         },
         { cache: PRIVATE_NO_STORE },
       )
-    } catch (e) {
-      return errorResponse(502, 'upstream_error', e instanceof Error ? e.message : 'Upload failed.')
+    } catch {
+      // Network errors can include the (private) pinning endpoint; keep details server-side.
+      return errorResponse(502, 'upstream_error', 'Upload to the pinning service failed.')
     }
   }
 

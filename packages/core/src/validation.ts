@@ -39,6 +39,28 @@ export const BLANKET_CLAIM_PATTERN = /\b(safe|secure|bug[\s-]?free|no bugs?|cert
 
 const SECRET_KEY_PATTERN = /(secret|private[_-]?key|passw(or)?d|mnemonic|seed[_-]?phrase|api[_-]?key|access[_-]?token|auth[_-]?token|bearer)/i
 
+/**
+ * Characters that are invalid in single-line text that is shown as a label or written on-chain (title,
+ * violation phrase): C0/C1 controls, DEL, zero-width and bidirectional formatting characters, the
+ * line/paragraph separators, the BOM and the Reality.eth field separator U+241F.
+ */
+export const UNSAFE_SINGLE_LINE_PATTERN = /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2069\uFEFF\u241F]/
+
+/**
+ * Bidirectional embedding/override/isolate controls ("Trojan Source"): they make text, including
+ * reproduction commands, display differently from what it contains. Rejected in every claim text field.
+ */
+export const BIDI_CONTROL_PATTERN = /[\u202A-\u202E\u2066-\u2069]/
+
+/** GitHub owner (user/org) and repository name rules. */
+export const GITHUB_OWNER_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
+export const GITHUB_REPO_PATTERN = /^(?!\.{1,2}$)[A-Za-z0-9._-]{1,100}$/
+const GITHUB_URL_RE = /^https:\/\/github\.com\//
+
+/** Reality.eth category / language: inserted verbatim into the Reality question template, so no quotes or separators. */
+export const ORACLE_CATEGORY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$/
+export const ORACLE_LANGUAGE_PATTERN = /^[a-z]{2,3}(?:[_-][A-Za-z0-9]{2,8})?$/
+
 // ---------------------------------------------------------------------------
 // Primitive schemas
 // ---------------------------------------------------------------------------
@@ -75,16 +97,18 @@ export const positiveDecimalSchema = z
 // Domain schemas
 // ---------------------------------------------------------------------------
 
+const githubUrlSchema = z.string().regex(GITHUB_URL_RE, 'Expected a https://github.com/ URL.')
+
 export const sourceRefSchema = z.object({
   provider: z.literal('github'),
-  owner: z.string().min(1, 'Owner is required.'),
-  repo: z.string().min(1, 'Repository is required.'),
+  owner: z.string().min(1, 'Owner is required.').regex(GITHUB_OWNER_PATTERN, 'Not a valid GitHub owner name.'),
+  repo: z.string().min(1, 'Repository is required.').regex(GITHUB_REPO_PATTERN, 'Not a valid GitHub repository name.'),
   repoId: z.number().int().optional(),
   pullRequest: z
     .object({
       number: z.number().int().positive(),
       title: z.string(),
-      htmlUrl: z.string(),
+      htmlUrl: githubUrlSchema,
       author: z.string(),
       state: z.enum(['open', 'closed', 'merged']),
     })
@@ -94,9 +118,9 @@ export const sourceRefSchema = z.object({
     message: z.string(),
     author: z.string(),
     committedAt: z.string(),
-    htmlUrl: z.string(),
+    htmlUrl: githubUrlSchema,
   }),
-  baseCommit: z.object({ sha: commitShaSchema, htmlUrl: z.string() }).optional(),
+  baseCommit: z.object({ sha: commitShaSchema, htmlUrl: githubUrlSchema }).optional(),
   license: z.string().nullable().optional(),
 })
 
@@ -130,8 +154,11 @@ export const oracleParamsSchema = z.object({
   bondToken: z.string().min(1),
   arbitrator: addressSchema,
   arbitratorName: z.string().min(1),
-  language: z.string().min(2),
-  category: z.string().min(1),
+  language: z.string().min(2).regex(ORACLE_LANGUAGE_PATTERN, 'Use a language code such as "en_US".'),
+  category: z
+    .string()
+    .min(1)
+    .regex(ORACLE_CATEGORY_PATTERN, 'Use a plain category name (letters, digits, spaces, "-" or "_"), e.g. "misc".'),
 })
 
 const paramValueSchema = z.union([z.string(), z.array(z.string()), z.boolean()])
@@ -167,7 +194,9 @@ export const claimSpecSchema = z.object({
     deadline: utcIsoSchema,
   }),
   oracle: oracleParamsSchema,
-  specReference: z.object({ label: z.string(), url: z.string(), hash: hash32Schema.optional() }).optional(),
+  specReference: z
+    .object({ label: z.string(), url: z.string().regex(/^https?:\/\//i, 'Use an http(s) URL.'), hash: hash32Schema.optional() })
+    .optional(),
 })
 
 export const fundingInputSchema = z
@@ -262,6 +291,27 @@ function isEmptyParam(v: unknown): boolean {
 
 const HOUR = 3600_000
 const DAY = 24 * HOUR
+
+/** Every authored string in a (partial) spec, with its issue path. Never throws on malformed drafts. */
+function claimTextFields(spec: Partial<ClaimDraft['spec']>): [string, string][] {
+  const out: [string, string][] = []
+  const visit = (path: string, v: unknown, depth: number): void => {
+    if (depth > 6) return
+    if (typeof v === 'string') out.push([path, v])
+    else if (Array.isArray(v)) v.forEach((x, i) => visit(`${path}.${i}`, x, depth + 1))
+    else if (v && typeof v === 'object') {
+      for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+        // Keys of free-form records (config, parameters) are authored text too.
+        if (path.endsWith('.config') || path.endsWith('.parameters')) out.push([`${path}.${k}`, k])
+        visit(`${path}.${k}`, x, depth + 1)
+      }
+    }
+  }
+  if (spec && typeof spec === 'object') {
+    for (const [k, v] of Object.entries(spec)) visit(`spec.${k}`, v, 0)
+  }
+  return out
+}
 
 /**
  * Validate a composer draft. Never throws. Rules (beyond the schemas):
@@ -365,8 +415,24 @@ export function validateClaimDraft(
       }
     }
   }
-  if (typeof spec.violation === 'string' && /[␟\u0000-\u001f]/.test(spec.violation)) {
-    add('spec.violation', 'The violation phrase cannot contain line breaks or control characters; it is inserted into the market question.')
+  if (typeof spec.violation === 'string' && UNSAFE_SINGLE_LINE_PATTERN.test(spec.violation)) {
+    add(
+      'spec.violation',
+      'The violation phrase cannot contain line breaks, control characters or invisible formatting characters (zero-width or bidirectional); it is inserted into the market question.',
+    )
+  }
+  if (typeof spec.title === 'string' && UNSAFE_SINGLE_LINE_PATTERN.test(spec.title)) {
+    add('spec.title', 'The title cannot contain line breaks, control characters or invisible formatting characters.')
+  }
+  // Trojan Source: bidirectional controls make text (including commands investigators run) display
+  // differently from what it contains. Reject them anywhere in the authored claim.
+  for (const [path, text] of claimTextFields(spec)) {
+    if (BIDI_CONTROL_PATTERN.test(text)) {
+      add(
+        path,
+        'Remove invisible bidirectional control characters (U+202A–U+202E, U+2066–U+2069): they make the text display differently from what it contains.',
+      )
+    }
   }
 
   if (policy) {

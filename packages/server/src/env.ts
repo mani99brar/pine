@@ -68,9 +68,37 @@ export function readServerEnv(): ServerEnv {
   }
 }
 
-/** Demo features (demo sign-in, simulated wallet linking) are available in mock mode or without GitHub OAuth. */
-export function demoAllowed(env: Pick<ServerEnv, 'dataSource' | 'githubOAuthConfigured' | 'demoWallet'>): boolean {
-  return env.dataSource === 'mock' || !env.githubOAuthConfigured
+/**
+ * Demo features (demo sign-in, simulated wallet linking) are available in mock mode or without GitHub OAuth,
+ * except in production rest mode: there the demo identity would be one shared account in the REST backend
+ * (every visitor could read and change the same drafts, wallet links and preferences).
+ */
+export function demoAllowed(
+  env: Pick<ServerEnv, 'dataSource' | 'githubOAuthConfigured' | 'demoWallet'> & { production?: boolean },
+): boolean {
+  if (env.dataSource === 'mock') return true
+  if (env.githubOAuthConfigured) return false
+  return !(env.production && env.dataSource === 'rest')
+}
+
+/**
+ * Host of the canonical app URL configured for Auth.js (AUTH_URL / NEXTAUTH_URL), or undefined. When set,
+ * security checks that compare against "our host" (SIWE domain, Origin) use it instead of request headers,
+ * which a direct client can forge (Host, X-Forwarded-Host) when no proxy overwrites them.
+ */
+export function canonicalHost(): string | undefined {
+  const configured = str(process.env.AUTH_URL) ?? str(process.env.NEXTAUTH_URL)
+  if (!configured) return undefined
+  try {
+    return new URL(configured).host
+  } catch {
+    return undefined
+  }
+}
+
+/** True when public URLs in responses are derived from request headers (no NEXT_PUBLIC_SITE_URL). */
+export function siteUrlFromRequest(): boolean {
+  return !(str(process.env.NEXT_PUBLIC_SITE_URL) ?? str(process.env.NEXT_PUBLIC_PINE_SITE_URL))
 }
 
 /**
