@@ -4,7 +4,7 @@ import { useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import type { ClaimDraft } from '@pine/core'
-import type { DraftStore } from '@pine/data'
+import { anyBodySchema, seg, type DraftStore } from '@pine/data'
 import { usePine } from '../providers/context'
 import { pineKeys } from '../queries/keys'
 import { usePineSession } from '../api/session'
@@ -76,7 +76,7 @@ export function useDrafts(): {
   error: Error | null
   refetch(): void
 } {
-  const { drafts: store, env } = usePine()
+  const { drafts: store, env, api } = usePine()
   const owner = useDraftOwner()
   const qc = useQueryClient()
   const q = useQuery({
@@ -119,12 +119,21 @@ export function useDrafts(): {
 
   const remove = useCallback(
     async (id: string) => {
+      if (api) {
+        // api mode: Pine's copy of the draft goes too, unless a publication exists for it (Pine keeps those and
+        // answers 409). Best effort: a copy that stays behind is readable by this wallet only.
+        const backend = (await store.get(id))?.publication?.backend
+        if (backend?.draftId && !backend.publicationId) {
+          await api.request('DELETE', `/api/v1/drafts/${seg(backend.draftId)}`, anyBodySchema).catch(() => undefined)
+        }
+        removeKey(getBrowserStorage(), `pine:api-preview:${id}`)
+      }
       await store.remove(id)
       removeKey(getBrowserStorage(), txStorageKey(publishRunKey(id)))
       qc.removeQueries({ queryKey: pineKeys.draft(id) })
       qc.setQueryData<ClaimDraft[]>(pineKeys.drafts(owner), (prev) => prev?.filter((d) => d.id !== id))
     },
-    [qc, owner, store],
+    [qc, owner, store, api],
   )
 
   const refetch = useCallback(() => {

@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import { rawCidFromSha256, type Hex32 } from '@pine/core/pine-shared'
 import { createPineQueryClient, PineProviders } from '../src/providers'
 import { useClaimComposer } from '../src/composer/use-claim-composer'
+import { useDrafts } from '../src/composer/drafts'
 import { PINE } from './api-write-chain'
 import { FakePine, json, wrapper } from './api-write-support'
 
@@ -95,6 +96,30 @@ describe('useClaimComposer in api mode', () => {
     await new Promise((r) => setTimeout(r, 20))
     expect(fake.of(/^\/api\/v1\/policies/)).toEqual([])
     expect(result.current.api?.policyPublishable).toBe(false)
+  })
+
+  it('deleting a draft also deletes Pine’s copy, but never one with a publication', async () => {
+    const BACKEND = '0b6a8f1e-3a55-4c1e-9d55-6f4e1a2b3c4d'
+    fake.on('DELETE', /^\/api\/v1\/drafts\/([^/]+)$/, () => new Response(null, { status: 204 }))
+    const { result } = renderHook(() => ({ composer: useClaimComposer('dapihook04'), drafts: useDrafts() }), { wrapper })
+    await waitFor(() => expect(result.current.composer.draft.id).toBe('dapihook04'))
+    act(() => result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, title: 'x' }, publication: { steps: [], backend: { draftId: BACKEND, revision: 2 } } })))
+    await act(async () => result.current.composer.saveNow())
+    localStorage.setItem('pine:api-preview:dapihook04', '{}')
+    await act(async () => result.current.drafts.remove('dapihook04'))
+    expect(fake.of(/^\/api\/v1\/drafts\//, 'DELETE').map((r) => r.path)).toEqual([`/api/v1/drafts/${BACKEND}`])
+    expect(fake.of(/^\/api\/v1\/drafts\//, 'DELETE')[0]?.headers).toMatchObject({ 'x-pine-csrf': '1' })
+    expect(localStorage.getItem('pine:api-preview:dapihook04')).toBeNull()
+
+    const second = renderHook(() => ({ composer: useClaimComposer('dapihook05'), drafts: useDrafts() }), { wrapper })
+    await waitFor(() => expect(second.result.current.composer.draft.id).toBe('dapihook05'))
+    act(() =>
+      second.result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, title: 'y' }, publication: { steps: [], backend: { draftId: BACKEND, revision: 3, publicationId: '5f0c2a8e-1b2c-4d3e-8f90-a1b2c3d4e5f6' } } })),
+    )
+    await act(async () => second.result.current.composer.saveNow())
+    await act(async () => second.result.current.drafts.remove('dapihook05'))
+    // Pine keeps a draft that has a publication (it would answer 409): nothing is sent for it.
+    expect(fake.of(/^\/api\/v1\/drafts\//, 'DELETE')).toHaveLength(1)
   })
 
   it('keeps the demo composer unchanged (static catalog, local question, no api state)', async () => {
