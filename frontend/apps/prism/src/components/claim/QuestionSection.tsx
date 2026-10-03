@@ -234,7 +234,7 @@ function ApiQuestionSection({ claim, api }: { claim: ClaimDetail; api: ApiClaimD
         ) : (
           <p className="mt-3 text-[1rem] text-lumen-3">{api.hidden ? 'Withheld by moderation.' : 'The market question could not be read.'}</p>
         )}
-        <p className="mt-3 text-[0.8125rem] text-lumen-3">Outcomes: Yes, No, plus Seer&apos;s native Invalid result. The question is the creator&apos;s text: read it with the claim document below.</p>
+        <p className="mt-3 text-[0.8125rem] text-lumen-3">Outcomes: Yes, No, plus Seer&apos;s native Invalid result. Its terms are the claim document below, pinned by digest.</p>
       </div>
 
       <div className="grid gap-x-10 gap-y-8 lg:grid-cols-2">

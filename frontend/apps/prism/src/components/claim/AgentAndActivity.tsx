@@ -8,7 +8,9 @@ import { useActivity, usePine } from '@pine/react'
 import { CopyButton, HashChip } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/primitives'
 import { clientSiteUrl } from '@/lib/site-client'
+import { apiFactsOf } from '@/lib/claims'
 import { cn } from '@/lib/cn'
+import { ApiTimeline } from './ApiTimeline'
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
 const POLICY_ID = /^[A-Z]{2,8}-\d{3}$/
@@ -203,6 +205,12 @@ export function ActivityRows({ items, showClaim = false }: { items: ActivityItem
 }
 
 export function ClaimActivity({ claim }: { claim: ClaimDetail }) {
+  // Backend claims: the backend lists activity per account only, so the claim's own indexed history is shown.
+  if (apiFactsOf(claim)) return <ApiTimeline claim={claim} />
+  return <MarketActivity claim={claim} />
+}
+
+function MarketActivity({ claim }: { claim: ClaimDetail }) {
   const q = useActivity({ claimId: claim.id, limit: 40 })
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />
   if (q.isLoading) return <LoadingBlock lines={5} />

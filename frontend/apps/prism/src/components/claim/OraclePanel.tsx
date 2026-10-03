@@ -1,11 +1,13 @@
 'use client'
 
 import type { ClaimDetail } from '@pine/core'
-import { formatAmount, formatDate, nextBond, REALITY_ANSWER_LABEL, shortHash, explorerTxUrl } from '@pine/core'
+import { formatAmount, formatDate, formatDuration, nextBond, REALITY_ANSWER_LABEL, SEER_QUESTION_TIMEOUT_SECONDS, shortHash, explorerTxUrl } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { COPY } from '@pine/core/copy'
 import { Scale } from 'lucide-react'
-import { countdown } from '@/lib/claims'
+import { Notice } from '@/components/ui/primitives'
+import { apiDetailFactsOf, countdown, isoOfUnix } from '@/lib/claims'
+import { ApiOracleActions } from './ApiOracleActions'
 import { useNowMs } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 
@@ -25,9 +27,27 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
   const minBond = o?.minBond ?? spec.minBond
   const history = o?.history ?? []
   const maxBond = Math.max(Number(minBond) || 1, ...history.map((h) => Number(h.bond) || 0))
+  const api = apiDetailFactsOf(claim)
+  const timeout = o?.timeoutSeconds ?? spec.timeoutSeconds
+  // The backend does not report the Kleros fee (it is quoted on Ethereum at request time): show the estimate.
+  const fee = o?.arbitration.requested && o.arbitration.cost ? o.arbitration.cost : `about ${arb.feeEstimate}`
 
   return (
     <div className="grid gap-6 lg:grid-cols-3">
+      {api && (api.oracle.reopened || api.oracle.freshness?.stale) && (
+        <div className="grid gap-3 lg:col-span-3">
+          {api.oracle.reopened && (
+            <Notice tone="info" title="This question was reopened">
+              The original Reality.eth question settled as “answered too soon”, so it was reopened. Answers now go to the replacement question <span className="t-code break-all text-lumen">{api.currentQuestionId}</span>.
+            </Notice>
+          )}
+          {api.oracle.freshness?.stale && (
+            <Notice tone="caution" role="status" title="Oracle facts may be out of date">
+              Pine&apos;s indexer is about {formatDuration(api.oracle.freshness.lagSeconds * 1000)} behind the chain. Check Reality.eth before you act.
+            </Notice>
+          )}
+        </div>
+      )}
       {/* Lens 1: Reality.eth */}
       <section className="glass cut-lg p-5 lg:col-span-2" aria-labelledby="reality-title">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
@@ -47,7 +67,7 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
           </div>
           <div className="cut-sm border border-edge bg-void px-3 py-2.5">
             <dt className="text-[0.75rem] text-lumen-3">Timeout per answer</dt>
-            <dd className="mt-0.5 text-[0.875rem] text-lumen">3.5 days, fixed</dd>
+            <dd className="mt-0.5 text-[0.875rem] text-lumen">{timeout === SEER_QUESTION_TIMEOUT_SECONDS ? '3.5 days, fixed' : formatDuration(timeout * 1000)}</dd>
           </div>
           <div className="cut-sm border border-edge bg-void px-3 py-2.5">
             <dt className="text-[0.75rem] text-lumen-3">Minimum bond</dt>
@@ -80,7 +100,14 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
 
         <h4 className="mt-6 text-[0.875rem] font-semibold text-lumen">Bond ladder</h4>
         {history.length === 0 ? (
-          <p className="mt-2 text-[0.875rem] text-lumen-3">No answers posted. {claim.status === 'open' ? 'Answers are accepted once the oracle opens after the evidence deadline.' : COPY.unanswered}</p>
+          <p className="mt-2 text-[0.875rem] text-lumen-3">
+            No answers posted.{' '}
+            {api && (api.phase === 'evidence_open' || api.phase === 'reveal_open')
+              ? `Reality.eth accepts answers from the reveal deadline, ${formatDate(isoOfUnix(api.revealDeadline), 'utc')}.`
+              : claim.status === 'open'
+                ? 'Answers are accepted once the oracle opens after the evidence deadline.'
+                : COPY.unanswered}
+          </p>
         ) : (
           <ol className="mt-3 grid gap-2">
             {history.map((h, i) => (
@@ -127,7 +154,7 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
           <div className="flex justify-between gap-3">
             <dt className="text-lumen-3">Fee (paid by the requester)</dt>
             <dd className="tnum text-right text-lumen">
-              {o?.arbitration.requested ? o.arbitration.cost : `about ${arb.feeEstimate}`} {arb.feeCurrency} on Ethereum
+              {fee} {arb.feeCurrency} on Ethereum
             </dd>
           </div>
           <div className="flex justify-between gap-3">
@@ -167,6 +194,8 @@ export function OraclePanel({ claim }: { claim: ClaimDetail }) {
         )}
         <p className="mt-4 text-[0.78rem] text-lumen-3">{COPY.arbitrationOnEthereum} {arb.bridgeDelayNote ?? ''}</p>
       </section>
+
+      {api && <ApiOracleActions claim={claim} />}
     </div>
   )
 }
