@@ -4,14 +4,14 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useClaim, useClaims } from '@pine/react'
-import { formatClaimNumber, formatPrice } from '@pine/core'
+import { formatPrice } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { Plus } from 'lucide-react'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { AnimatedNumber } from '@/components/ui/interactive'
 import { pricesFrom, type BeamPrices } from '@/components/prism/PrismBeam'
 import { FAMILY_HEX, OUTCOME_HEX } from '@/lib/crystal'
-import { countdown } from '@/lib/claims'
+import { claimLabel, countdown } from '@/lib/claims'
 import { hasWebGL, useInViewport, useMounted, useNowMs, usePageVisible, usePrefersReducedMotion } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 
@@ -91,7 +91,7 @@ function Readout({ prices, live }: { prices: BeamPrices; live: { id: string; num
         <p className="text-[0.8125rem] text-lumen-3">
           Live now{' '}
           <Link href={`/claims/${live.id}`} className="link font-semibold text-lumen-2">
-            {formatClaimNumber(live.number)}
+            {claimLabel(live)}
           </Link>
         </p>
         <p className="tnum text-[0.8125rem] text-lumen-3">{now ? `Evidence window: ${countdown(live.deadline, now)}` : 'Evidence window open'}</p>

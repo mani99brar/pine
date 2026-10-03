@@ -119,6 +119,7 @@ export default defineConfig({
       { find: /^next\/font\/google$/, replacement: shim('next-font-google.ts') },
       { find: /^next\/og$/, replacement: shim('empty.ts') },
       { find: /^next\/headers$/, replacement: shim('empty.ts') },
+      { find: /^next\/server$/, replacement: shim('next-server.ts') },
       { find: /^server-only$/, replacement: shim('empty.ts') },
       { find: /^next-auth\/react$/, replacement: shim('next-auth-react.tsx') },
       // @pine/react with one override (account export without a download navigation).
