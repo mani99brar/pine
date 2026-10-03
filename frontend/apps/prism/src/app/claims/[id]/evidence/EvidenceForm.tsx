@@ -2,8 +2,8 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import type { EvidenceDraft, EvidenceKind } from '@pine/core'
-import { formatClaimNumber, formatDate } from '@pine/core'
+import type { ClaimDetail, EvidenceDraft, EvidenceKind } from '@pine/core'
+import { formatDate } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { COPY } from '@pine/core/copy'
 import { useClaim, usePolicy, useSubmitEvidence, useWallet } from '@pine/react'
@@ -15,9 +15,10 @@ import { SafeMarkdown } from '@/components/ui/SafeMarkdown'
 import { TxSteps } from '@/components/tx/TxSteps'
 import { DemoFailToggle } from '@/components/tx/DemoFailToggle'
 import { ListEditor } from '@/components/composer/shared'
-import { countdown } from '@/lib/claims'
+import { apiFactsOf, claimLabel, countdown } from '@/lib/claims'
 import { useMounted, useNowMs } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
+import { ApiEvidenceForm } from './ApiEvidenceForm'
 
 const KINDS: { value: EvidenceKind; label: string; help: string }[] = [
   { value: 'counterexample', label: 'Counterexample', help: 'A reproducible demonstration of the stated violation.' },
@@ -26,11 +27,27 @@ const KINDS: { value: EvidenceKind; label: string; help: string }[] = [
 ]
 
 export function EvidenceForm({ id }: { id: string }) {
-  const mounted = useMounted()
-  const now = useNowMs()
   const claimQ = useClaim(id)
   const claim = claimQ.data ?? undefined
-  const policyQ = usePolicy(claim?.policy.id, claim?.policy.version)
+  if (claimQ.isLoading) return <Skeleton className="mt-10 h-96 w-full" />
+  if (claimQ.isError) return <ErrorState className="mt-10" error={claimQ.error} onRetry={() => void claimQ.refetch()} />
+  if (!claim)
+    return (
+      <EmptyState className="mt-10" title="No claim at this address" action={<ButtonLink href="/claims">Open the light table</ButtonLink>}>
+        Evidence can only be filed against a published claim.
+      </EmptyState>
+    )
+  // Backend claims (api mode) record evidence in Pine's evidence registry: sealed commit and reveal, or direct publish.
+  const api = apiFactsOf(claim)
+  if (api) return <ApiEvidenceForm claim={claim} api={api} />
+  return <LocalEvidenceForm claim={claim} />
+}
+
+function LocalEvidenceForm({ claim }: { claim: ClaimDetail }) {
+  const id = claim.id
+  const mounted = useMounted()
+  const now = useNowMs()
+  const policyQ = usePolicy(claim.policy.id, claim.policy.version)
   const sub = useSubmitEvidence(id)
   const wallet = useWallet()
   const [kind, setKind] = useState<EvidenceKind>('counterexample')
@@ -46,15 +63,6 @@ export function EvidenceForm({ id }: { id: string }) {
   const [attachments, setAttachments] = useState<EvidenceDraft['attachments']>([])
   const [checks, setChecks] = useState<Record<number, boolean>>({})
   const [submitError, setSubmitError] = useState<string | null>(null)
-
-  if (claimQ.isLoading) return <Skeleton className="mt-10 h-96 w-full" />
-  if (claimQ.isError) return <ErrorState className="mt-10" error={claimQ.error} onRetry={() => void claimQ.refetch()} />
-  if (!claim)
-    return (
-      <EmptyState className="mt-10" title="No claim at this address" action={<ButtonLink href="/claims">Open the light table</ButtonLink>}>
-        Evidence can only be filed against a published claim.
-      </EmptyState>
-    )
 
   const pinnedEnv = `As pinned: ${claim.manifest.claim.environment.runtime || 'runtime not stated'}, environment ${claim.manifest.claim.environment.envHash.slice(0, 10)}…`
   const env = environment ?? pinnedEnv
@@ -98,7 +106,7 @@ export function EvidenceForm({ id }: { id: string }) {
   return (
     <div>
       <Link href={`/claims/${claim.id}`} className="mt-6 inline-flex items-center gap-1.5 text-[0.875rem] text-lumen-3 hover:text-lumen">
-        <ArrowLeft size={14} aria-hidden /> {formatClaimNumber(claim.number)}
+        <ArrowLeft size={14} aria-hidden /> {claimLabel(claim)}
       </Link>
       <header className="pb-8 pt-6">
         <h1 className="t-h1 chroma">Submit evidence</h1>
