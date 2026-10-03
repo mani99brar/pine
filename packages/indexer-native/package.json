@@ -10,7 +10,8 @@
   "scripts": {
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "start": "node --import tsx src/main.ts"
+    "start": "node --import tsx src/main.ts",
+    "migrate": "node --import tsx src/migrate-cli.ts"
   },
   "dependencies": {
     "@pine/shared": "workspace:*",

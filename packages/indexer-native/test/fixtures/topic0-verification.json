@@ -1,0 +1,106 @@
+{
+  "description": "Each topic0 the native indexer requests for an external contract, checked once against the deployed runtime bytecode on Gnosis (operator clarification 4): EIP-1967 implementation slot read with `cast storage <address> 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc`, then `cast code <address-or-implementation>` searched for the 32-byte topic0 (PUSH32 operand).",
+  "checkedAtBlock": 48556987,
+  "rpc": "https://rpc.gnosischain.com",
+  "contracts": {
+    "reality": {
+      "address": "0xe78996a233895be74a66f451f1019ca9734205cc",
+      "eip1967Implementation": null,
+      "codeSha256": "9643a715264fb6b0e4a50110f4db596341a00793aa320a092b9be68927f42092",
+      "codeBytes": 16917,
+      "events": [
+        {
+          "signature": "LogNewAnswer(bytes32,bytes32,bytes32,address,uint256,uint256,bool)",
+          "topic0": "0xe47ca4ebbbc2990134d1168821f38c5e177f3d5ee564bffeadeaa351905e6221",
+          "inBytecode": true
+        },
+        {
+          "signature": "LogAnswerReveal(bytes32,address,bytes32,bytes32,uint256,uint256)",
+          "topic0": "0xa7b2d313bc7a062e30b2c3b811aa4c9faf09755a6b4ea3bf42deff920944332f",
+          "inBytecode": true
+        },
+        {
+          "signature": "LogNotifyOfArbitrationRequest(bytes32,address)",
+          "topic0": "0x75d7939999bc902187c4aed400872883e445145f1983539166f783fa040b4762",
+          "inBytecode": true
+        },
+        {
+          "signature": "LogCancelArbitration(bytes32)",
+          "topic0": "0x71bf7c2b9df0b8818e7eb6746a5bf69699ebbab041f3795f9ed58e469afa9a3a",
+          "inBytecode": true
+        },
+        {
+          "signature": "LogFinalize(bytes32,bytes32)",
+          "topic0": "0x18d760beffe3717270cd90d9d920ec1a48c194e9ad7bba23eb1c92d3eb974f97",
+          "inBytecode": true
+        },
+        {
+          "signature": "LogReopenQuestion(bytes32,bytes32)",
+          "topic0": "0x32e7d5617fb1be6bd0e7c3974d438d4514c4cf349e9330691d8abf6f6fd43121",
+          "inBytecode": true
+        },
+        {
+          "signature": "LogFundAnswerBounty(bytes32,uint256,uint256,address)",
+          "topic0": "0x54d68405b79f2aa4fd4e8db7b67844ad254cf8f208aac476c2894134a9deab66",
+          "inBytecode": true
+        }
+      ]
+    },
+    "conditionalTokens": {
+      "address": "0xceafdd6bc0bef976fdcd1112955828e00543c0ce",
+      "eip1967Implementation": null,
+      "codeSha256": "cf1407f9e0513a2e93eb0ea9c30ccf89d76b5e3acf2dc4706af64f5a0cb0ecc4",
+      "codeBytes": 15007,
+      "events": [
+        {
+          "signature": "ConditionResolution(bytes32,address,bytes32,uint256,uint256[])",
+          "topic0": "0xb44d84d3289691f71497564b85d4233648d9dbae8cbdbb4329f301c3a0185894",
+          "inBytecode": true
+        }
+      ]
+    },
+    "klerosHomeProxy": {
+      "address": "0x68154ea682f95bf582b80dd6453fa401737491dc",
+      "eip1967Implementation": null,
+      "codeSha256": "5ab56fc01e8811f834abacf25c9289aa17b092e0be73df33a58ca15ebed2aa54",
+      "codeBytes": 6230,
+      "events": [
+        {
+          "signature": "RequestNotified(bytes32,address,uint256)",
+          "topic0": "0xf56e18fc84dbd66db78337b5bd0973943fa70c9b52243a540bdac79274f6682d",
+          "inBytecode": true
+        },
+        {
+          "signature": "RequestRejected(bytes32,address,uint256,string)",
+          "topic0": "0xf677e762f2ddc710deec335dd0cfa8a65cc9c9c351b268243be8629f2e8d1b5f",
+          "inBytecode": true
+        },
+        {
+          "signature": "RequestAcknowledged(bytes32,address)",
+          "topic0": "0xff09615c531ab8799ea1c67a0952ddbef1c864ef91d390995d0dc07656f4210f",
+          "inBytecode": true
+        },
+        {
+          "signature": "RequestCanceled(bytes32,address)",
+          "topic0": "0xf313a768599b60b7f8aedb7757d867d09463365b79b55b86ed3c961e6da5a249",
+          "inBytecode": true
+        },
+        {
+          "signature": "ArbitrationFailed(bytes32,address)",
+          "topic0": "0x9beda0c81abc1c65da7685f113195974dfddb781dfde6263e5a1b13a5356ffad",
+          "inBytecode": true
+        },
+        {
+          "signature": "ArbitratorAnswered(bytes32,bytes32)",
+          "topic0": "0x1813d15d8cef51cff8bbd419a8e13e0655c1babea320dea4174d5e7bc40c4294",
+          "inBytecode": true
+        },
+        {
+          "signature": "ArbitrationFinished(bytes32)",
+          "topic0": "0x2abf2fd86256e4607561adae782a4853682b6c0b976995a9a45c5fc3a1757386",
+          "inBytecode": true
+        }
+      ]
+    }
+  }
+}
