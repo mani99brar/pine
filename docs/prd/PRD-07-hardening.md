@@ -47,13 +47,16 @@ Contracts are immutable once deployed, so every contract change here lands befor
   - One outbox table per module in a new migration (`markets_audit_outbox`, `funding_audit_outbox`: id uuid PK, entry jsonb,
     created_at). Each audited write inserts its outbox row in the SAME SQL statement as the write (an extra CTE:
     `WITH moved AS (UPDATE … RETURNING …) INSERT INTO …_audit_outbox SELECT … FROM moved`), so no multi-statement transaction
-    is needed. A `flushAudit(ctx, signal)` helper claims rows with `DELETE … RETURNING`, calls `ctx.audit.record` with the outbox
-    id in `details`, and re-inserts a row whose record throws. It runs after each audited write, on a same-key replay, and at
-    the START of every reconcile run (before any early return for "no open plans"), checking `signal.aborted` between entries.
-  - The guarantee is at-least-once (a crash between record and claim can duplicate an entry; the outbox id in details lets an
-    operator de-duplicate); document it so in the coverage matrix.
-  - Tests: the audit gateway throws once → the entry is recorded by the next flush (after a later write, a replay, or a
-    reconcile run with no open plans), with its outbox id; several pending entries for one plan all survive an outage.
+    is needed. A `flushAudit(ctx, signal)` helper reads `SELECT id, entry FROM …_audit_outbox ORDER BY created_at, id LIMIT 50`
+    and for each row: checks `signal.aborted`, awaits `ctx.audit.record(entry)`, then `DELETE … WHERE id = $1`; when `record`
+    throws, the row stays and the flush stops (no claim step, no re-insert). It runs after each audited write, on a same-key
+    replay, and at the START of every reconcile run (before any early return for "no open plans").
+  - Audit `details` are unchanged (no outbox id; the existing exact-match audit tests stay as they are). The guarantee is
+    at-least-once: a crash or a concurrent flusher can only duplicate an entry, never lose one; duplicates are identified by the
+    event's natural key ((action, subjectId), plus stepId and txHash for tx_reported). Document this in the coverage matrix.
+  - Tests: the audit gateway throws once → the outbox row remains, and the entry is recorded exactly once by the next flush
+    (after a later write, a replay, or a reconcile run with no open plans) and the row is deleted; several pending entries for one
+    plan all survive an outage; an abort between entries leaves the unrecorded rows in the outbox.
 - Public RPC/gateway fan-out caps: `GET /api/v1/markets/:market/liquidity` (funding) and the markets evidence detail route's
   `contentStore.retrieve` cache misses each get their OWN per-route limiter (at most 4 in flight per route per process; do not
   share the oracle limiter), refusing a 5th concurrent miss immediately with ApiError RATE_LIMITED 429 and retryAfterSeconds.
