@@ -25,7 +25,7 @@ import { encodeFunctionData, zeroAddress } from 'viem'
 import { arbitratorProxyAbi } from './abis/arbitrator'
 import { erc20Abi } from './abis/erc20'
 import { marketFactoryAbi, routerAbi } from './abis/seer'
-import { getChain, getChainOrDefault, isPlaceholderAddress, seerMarketUrl, type ChainConfig } from './chains'
+import { getChain, getChainOrDefault, isPlaceholderAddress, type ChainConfig } from './chains'
 import { REALITY_SEPARATOR } from './abis/reality'
 import { fromScaled, toScaled } from './decimal'
 import { formatAmount } from './format'
@@ -219,14 +219,13 @@ export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
 
   const [lo, hi] = input.funding.priceRange
   const range = `${Math.round(lo * 1000) / 10}%–${Math.round(hi * 1000) / 10}%`
-  const liquidityLink = input.market ? ` ${seerMarketUrl(chain.id, input.market)}` : ''
   const venue = chain.liquidityVenue
   steps.push({
     id: 'add_liquidity_yes',
     label: 'Add Yes liquidity',
     description:
       `Deposit Yes tokens and ${sym} as concentrated liquidity in the Yes/${sym} pool on ${venue} between ${range}, starting near ${Math.round(input.funding.initialYesPrice * 1000) / 10}%. You set the price and range in the DEX and approve each token there. ` +
-      `Completed via Seer liquidity interface — deep link.${liquidityLink}`,
+      'Open the exchange from this step, add the position there, then mark the step done.',
     kind: 'transaction',
     request: undefined,
     estimatedCost: cost(chain, GAS_UNITS.liquidityPerPool, gp),
@@ -236,7 +235,7 @@ export function buildPublishSteps(input: PublishStepsInput): TxStep[] {
     label: 'Add No liquidity',
     description:
       `Deposit No tokens and ${sym} as concentrated liquidity in the No/${sym} pool on ${venue} over the mirrored price range. Liquidity only provides depth while the price stays inside its range, and it can be withdrawn at any time. ` +
-      `Completed via Seer liquidity interface — deep link.${liquidityLink}`,
+      'Open the exchange from this step, add the position there, then mark the step done.',
     kind: 'transaction',
     request: undefined,
     estimatedCost: cost(chain, GAS_UNITS.liquidityPerPool, gp),

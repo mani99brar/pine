@@ -82,6 +82,9 @@ export function useAccount(): UseAccountResult {
   const user = session.data?.user as PineSessionUser | undefined
   const authed = session.status === 'authenticated'
 
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+
   const q = useQuery<Account | null, PineApiError>({
     queryKey: pineKeys.account(),
     queryFn: async () => {
@@ -95,7 +98,10 @@ export function useAccount(): UseAccountResult {
     },
     enabled: authed,
     staleTime: 60_000,
+    // Only read the local mirror after mount: the server render cannot see it, and reading it during the
+    // first client render makes the client say "signed_in" while the server said "loading" (hydration mismatch).
     placeholderData: () => {
+      if (!mounted) return undefined
       const mirrored = readJson<Account>(getBrowserStorage(), MIRROR_KEY)
       return mirrored && user?.login && mirrored.github.login === user.login ? mirrored : undefined
     },

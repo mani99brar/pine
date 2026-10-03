@@ -94,7 +94,8 @@ describe('buildPublishSteps', () => {
     for (const id of ['add_liquidity_yes', 'add_liquidity_no'] as const) {
       const s = steps.find((x) => x.id === id)!
       expect(s.request).toBeUndefined()
-      expect(s.description).toContain('Completed via Seer liquidity interface')
+      expect(s.description).toContain('Open the exchange from this step')
+      expect(s.description).not.toMatch(/https?:\/\//)
     }
   })
 
