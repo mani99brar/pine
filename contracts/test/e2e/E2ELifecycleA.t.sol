@@ -74,7 +74,7 @@ contract E2ELifecycleATest is E2EScenarioBase {
         vm.expectRevert(bytes("opening date must have passed"));
         reality.submitAnswer{value: s.params.minBond}(s.questionId, ANSWER_YES, 0);
         vm.warp(s.params.revealDeadline);
-        vm.expectRevert();
+        vm.expectRevert(bytes(NOT_FINALIZED));
         E2EIRealityProxy(REALITY_PROXY).resolve(market);
 
         uint256 opened = vm.snapshotState();

@@ -13,6 +13,21 @@ library PlanInputs {
     string internal constant SUBMITTER_LABEL = "pine-e2e-submitter";
     string internal constant FUNDER_LABEL = "pine-e2e-funder";
 
+    // GNOSIS_EXTERNAL (packages/shared/src/deployment.ts): every value contracts/script/Deploy.s.sol pins.
+    uint256 internal constant GNOSIS_CHAIN_ID = 100;
+    address internal constant SEER_MARKET_FACTORY = 0x83183DA839Ce8228E31Ae41222EaD9EDBb5cDcf1;
+    address internal constant SEER_MARKET_IMPLEMENTATION = 0x8F76bC35F8C72E5e2Ec55ebED785da5efaa9636a;
+    address internal constant REALITIO = 0xE78996A233895bE74a66F451f1019cA9734205cc;
+    address internal constant ARBITRATOR = 0x68154EA682f95BF582b80Dd6453FA401737491Dc;
+    address internal constant REALITY_PROXY = 0xc260ADfAC11f97c001dC143d2a4F45b98e0f2D6C;
+    address internal constant CONDITIONAL_TOKENS = 0xCeAfDD6bc0bEF976fdCd1112955828E00543c0Ce;
+    address internal constant WRAPPED_1155_FACTORY = 0xD194319D1804C1051DD21Ba1Dc931cA72410B79f;
+    address internal constant COLLATERAL_TOKEN = 0xaf204776c7245bF4147c2612BF6e5972Ee483701;
+    address internal constant GNOSIS_ROUTER = 0xeC9048b59b3467415b1a38F63416407eA0c70fB8;
+    address internal constant ALGEBRA_FACTORY = 0xA0864cCA6E114013AB0e27cbd5B6f4c8947da766;
+    address internal constant POSITION_MANAGER = 0x91fD594c46D8B01E62dBDeBed2401dde01817834;
+    uint32 internal constant QUESTION_TIMEOUT = 302_400;
+
     // Claim A: deadlines are the fork timestamp + EVIDENCE_WINDOW and the evidence deadline + REVEAL_WINDOW.
     /// sha256("pine e2e claim document A")
     bytes32 internal constant A_CLAIM_DOCUMENT_SHA256 = 0x790c52bcf7a68dbb692b3c091c9e110766c50872140556817757c466f322b757;

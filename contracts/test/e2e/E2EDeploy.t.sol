@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.37;
 
+import {Vm, VmSafe} from "forge-std/Vm.sol";
 import {Deploy} from "../../script/Deploy.s.sol";
 import {ClaimRegistry} from "../../src/ClaimRegistry.sol";
 import {EvidenceRegistry} from "../../src/EvidenceRegistry.sol";
@@ -11,7 +12,8 @@ import {E2ELookAlikeSeerFactory} from "./mocks/E2ELookAlikeSeerFactory.sol";
 
 /// @notice The deploy script's logic (`_deploy`, inherited) on the Gnosis fork at block 48550000: the REAL pair is
 /// deployed at the predicted addresses and bound, the Seer factory is pinned by address and runtime code hash, and the
-/// JSON record lists what the operator must check. `run()` (the only broadcast) is never called from tests.
+/// JSON record lists what the operator must check. `run()` itself is exercised once as a dry run: `forge test` never
+/// sends what `vm.startBroadcast` records.
 contract E2EDeployTest is E2EFork {
     function setUp() public {
         _selectFork();
@@ -126,13 +128,14 @@ contract E2EDeployTest is E2EFork {
         bytes32 lookAlikeHash = SEER_MARKET_FACTORY.codehash;
         assertTrue(lookAlikeHash != SEER_MARKET_FACTORY_CODEHASH);
 
+        vm.startStateDiffRecording();
         vm.expectRevert(
             abi.encodeWithSelector(
                 Deploy.SeerFactoryCodeHashMismatch.selector, lookAlikeHash, SEER_MARKET_FACTORY_CODEHASH
             )
         );
         this.deployWith(deployer, SEER_MARKET_FACTORY);
-        assertEq(vm.getNonce(deployer), 0, "nothing was deployed");
+        _assertNoCreate(vm.stopAndReturnStateDiff());
 
         // Without the script's pin, the constructor accepts the look-alike.
         address predicted = vm.computeCreateAddress(address(this), vm.getNonce(address(this)) + 1);
@@ -147,17 +150,60 @@ contract E2EDeployTest is E2EFork {
         this.deployWith(deployer, address(lookAlike));
     }
 
-    function test_deploy_refusesAMismatchedSeerImmutable() public {
-        vm.mockCall(
-            SEER_MARKET_FACTORY, abi.encodeCall(ISeerMarketFactory.questionTimeout, ()), abi.encode(uint32(86_400))
-        );
-        vm.expectRevert(abi.encodeWithSelector(Deploy.SeerImmutableMismatch.selector, "questionTimeout"));
-        this.deployWith(deployer, SEER_MARKET_FACTORY);
-        vm.clearMockedCalls();
+    // One refusal per Seer immutable the script checks (eight getters), each before any CREATE.
 
-        vm.mockCall(SEER_MARKET_FACTORY, abi.encodeCall(ISeerMarketFactory.market, ()), abi.encode(address(0xbad)));
-        vm.expectRevert(abi.encodeWithSelector(Deploy.SeerImmutableMismatch.selector, "market"));
+    function test_deploy_refusesAMismatchedSeerImmutable_realitio() public {
+        _expectImmutableRefusal(abi.encodeCall(ISeerMarketFactory.realitio, ()), abi.encode(address(0xbad)), "realitio");
+    }
+
+    function test_deploy_refusesAMismatchedSeerImmutable_arbitrator() public {
+        _expectImmutableRefusal(
+            abi.encodeCall(ISeerMarketFactory.arbitrator, ()), abi.encode(address(0xbad)), "arbitrator"
+        );
+    }
+
+    function test_deploy_refusesAMismatchedSeerImmutable_realityProxy() public {
+        _expectImmutableRefusal(
+            abi.encodeCall(ISeerMarketFactory.realityProxy, ()), abi.encode(address(0xbad)), "realityProxy"
+        );
+    }
+
+    function test_deploy_refusesAMismatchedSeerImmutable_conditionalTokens() public {
+        _expectImmutableRefusal(
+            abi.encodeCall(ISeerMarketFactory.conditionalTokens, ()), abi.encode(address(0xbad)), "conditionalTokens"
+        );
+    }
+
+    function test_deploy_refusesAMismatchedSeerImmutable_wrapped1155Factory() public {
+        _expectImmutableRefusal(
+            abi.encodeCall(ISeerMarketFactory.wrapped1155Factory, ()), abi.encode(address(0xbad)), "wrapped1155Factory"
+        );
+    }
+
+    function test_deploy_refusesAMismatchedSeerImmutable_collateralToken() public {
+        // WXDAI instead of sDAI: a real token, the wrong collateral.
+        _expectImmutableRefusal(
+            abi.encodeCall(ISeerMarketFactory.collateralToken, ()), abi.encode(WXDAI), "collateralToken"
+        );
+    }
+
+    function test_deploy_refusesAMismatchedSeerImmutable_questionTimeout() public {
+        _expectImmutableRefusal(
+            abi.encodeCall(ISeerMarketFactory.questionTimeout, ()), abi.encode(uint32(86_400)), "questionTimeout"
+        );
+    }
+
+    function test_deploy_refusesAMismatchedSeerImmutable_market() public {
+        _expectImmutableRefusal(abi.encodeCall(ISeerMarketFactory.market, ()), abi.encode(address(0xbad)), "market");
+    }
+
+    /// @dev The real factory with one getter mocked: refused with that getter's name, and nothing is created.
+    function _expectImmutableRefusal(bytes memory getterCall, bytes memory wrongValue, string memory getter) internal {
+        vm.mockCall(SEER_MARKET_FACTORY, getterCall, wrongValue);
+        vm.startStateDiffRecording();
+        vm.expectRevert(abi.encodeWithSelector(Deploy.SeerImmutableMismatch.selector, getter));
         this.deployWith(deployer, SEER_MARKET_FACTORY);
+        _assertNoCreate(vm.stopAndReturnStateDiff());
     }
 
     function test_deploy_refusesMissingExternalCode() public {
@@ -170,5 +216,64 @@ contract E2EDeployTest is E2EFork {
         vm.chainId(1);
         vm.expectRevert(abi.encodeWithSelector(Deploy.WrongChain.selector, 1));
         this.deployWith(deployer, SEER_MARKET_FACTORY);
+    }
+
+    /// The operator's entry point itself, as a dry run: `run()` reads PINE_DEPLOYER and deploys under
+    /// `vm.startBroadcast`, whose recorded transactions `forge test` never sends (no key, no RPC write). Exactly two
+    /// CREATEs come from the deployer, at nonces n and n + 1, no CALL is sent from it (under broadcast a CALL would
+    /// consume a nonce and break the prediction only in production), and the deployed pair is bound.
+    function test_deploy_runDryRun_twoCreatesAtNoncesNAndNPlusOneBound() public {
+        uint64 n = 5;
+        vm.setNonce(deployer, n);
+        vm.setEnv("PINE_DEPLOYER", vm.toString(deployer));
+
+        vm.startStateDiffRecording();
+        this.run();
+        Vm.AccountAccess[] memory accesses = vm.stopAndReturnStateDiff();
+
+        Vm.AccountAccess[] memory creates = _creates(accesses);
+        assertEq(creates.length, 2, "exactly two CREATEs");
+        assertEq(creates[0].accessor, deployer, "first CREATE from the deployer");
+        assertEq(creates[0].account, vm.computeCreateAddress(deployer, n), "EvidenceRegistry at nonce n");
+        assertEq(creates[1].accessor, deployer, "second CREATE from the deployer");
+        assertEq(creates[1].account, vm.computeCreateAddress(deployer, uint256(n) + 1), "ClaimRegistry at nonce n + 1");
+        assertEq(vm.getNonce(deployer), uint256(n) + 2, "deployer nonce advanced by exactly 2");
+        for (uint256 i = 0; i < accesses.length; ++i) {
+            bool sent = accesses[i].kind == VmSafe.AccountAccessKind.Call && accesses[i].accessor == deployer;
+            assertFalse(sent, "no CALL from the deployer");
+        }
+
+        EvidenceRegistry ev = EvidenceRegistry(creates[0].account);
+        ClaimRegistry cr = ClaimRegistry(creates[1].account);
+        assertEq(ev.claimRegistry(), address(cr), "evidence registry bound to the claim registry");
+        assertEq(cr.evidenceRegistry(), address(ev), "claim registry bound to the evidence registry");
+        assertEq(cr.seerMarketFactory(), SEER_MARKET_FACTORY);
+        assertEq(cr.minimumMinBond(), MINIMUM_MIN_BOND);
+        assertEq(cr.deploymentChainId(), 100);
+        assertEq(cr.claimCount(), 0);
+        assertEq(ev.submissionCount(), 0);
+    }
+
+    /// @dev The CREATEs that took effect, in execution order.
+    function _creates(Vm.AccountAccess[] memory accesses) internal pure returns (Vm.AccountAccess[] memory out) {
+        uint256 count;
+        for (uint256 i = 0; i < accesses.length; ++i) {
+            if (accesses[i].kind == VmSafe.AccountAccessKind.Create && !accesses[i].reverted) ++count;
+        }
+        out = new Vm.AccountAccess[](count);
+        count = 0;
+        for (uint256 i = 0; i < accesses.length; ++i) {
+            if (accesses[i].kind == VmSafe.AccountAccessKind.Create && !accesses[i].reverted) {
+                out[count++] = accesses[i];
+            }
+        }
+    }
+
+    /// @dev No CREATE was attempted, not even one a revert rolled back: a refusal happened before deployment. (After a
+    /// reverted call the deployer nonce is unchanged whether or not a CREATE ran, so a nonce check proves nothing.)
+    function _assertNoCreate(Vm.AccountAccess[] memory accesses) internal pure {
+        for (uint256 i = 0; i < accesses.length; ++i) {
+            assertTrue(accesses[i].kind != VmSafe.AccountAccessKind.Create, "nothing was created");
+        }
     }
 }
