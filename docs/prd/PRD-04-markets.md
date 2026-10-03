@@ -215,8 +215,11 @@ file part.
 funding:
 - Test the refusal of an existing pool priced OUTSIDE the range on the wrong side (YES dearer than upperPrice) for both token
   orders (coverage P1), and assert every disclosure field of 3.2 step 6 (gasEstimate, lossIfNoOrInvalid, pool fee range).
-- SEC-LEGAL-03: the ladder request carries `riskAcknowledgement: { maxLossIfYesWei, feesBps, budgetWei }` that must equal the
-  figures the plan computes (else 409 with the fresh figures); the acknowledgement is stored with the plan. Test both paths.
+- SEC-LEGAL-03: the ladder request carries `riskAcknowledgement: { budgetWei, maxLossIfYesShares }` (sDAI shares, decimal string).
+  `budgetWei` must equal the request budget, and the plan is refused (409 with the freshly computed figures) when the computed
+  maximum loss in shares EXCEEDS the acknowledged value (the user accepted at least that loss; small favourable drift is fine).
+  Fees are dynamic in Algebra and are disclosed as a range only, never acknowledged as an exact number. The acknowledgement is
+  stored with the plan. Test acceptance, refusal and storage.
 - `withdraw` requires `{market, tokenId}` (operator decision: the read model has no token → market lookup).
 - Reconcile bumps `reconciled_at` on every attempt, including errors, so failing plans cannot starve the batch.
 - `requireClaim` checks `claim.registry === manifest.pine.claimRegistry` like markets does.
@@ -224,8 +227,9 @@ markets:
 - Record a revert only from a FINALIZED receipt (as funding does).
 - Tests: oracle helper routes refuse with NOT_READY when the read model LAGS (not only halted); the Kleros RequestCanceled stage in
   dueActions; a first answer below minBond is refused; an HTTP/global fetch spy proves manifest locators are never fetched.
-- Evidence upload quota: consume only after the put succeeded and the row was newly inserted (concurrent identical uploads consume
-  once).
+- Evidence upload quota stays consumed atomically BEFORE storage (SEC-EVID-01; the frozen gateways cannot refund or delete); a
+  re-upload of content this user already stored is answered from the existing row without consuming quota. A rare race of two
+  identical concurrent first uploads may consume twice (accepted).
 Both: public routes that fan out to RPC (`/funding/positions/:wallet`, `/markets/:market/oracle`) use a 10 s per-key server cache.
 
 ## 5. Checks (per lane)
