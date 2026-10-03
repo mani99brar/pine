@@ -102,28 +102,40 @@ Contracts are immutable once deployed, so every contract change here lands befor
 - Cooperative abort: claims reconcile and integrity jobs (including discovery and backfillParameters) check `signal.aborted`
   between items and stop promptly; tests abort before a run and from inside a fake during the first item (second untouched);
   mutation evidence that each check is needed.
-- Policy-text pinning: at module registration, put every digest-verified catalog policy text into `ctx.contentStore` (which
-  pins it), so the `ipfs://<policy cid>` referenced by every immutable question stays retrievable; `POST /publications` refuses
-  a plan (503 NOT_READY, no quota) until both the claim document and its policy text are stored. Tests.
+- Policy-text pinning: `POST /publications` puts the digest-verified catalog policy text idempotently into `ctx.contentStore`
+  (which pins it) next to the claim document before returning a plan, so the `ipfs://<policy cid>` referenced by every
+  immutable question stays retrievable; registration may also put them. A plan is returned only after both puts succeeded
+  (a failing put → 503 NOT_READY, no plan). Tests: after a plan is returned the store holds the policy bytes under its digest;
+  a failing put returns no plan.
 - SEC-GH-12 at publish: `assertRepositoryStillPublic` also compares the returned owner login and name (case-insensitive) with
   the frozen `document.target.repository`; a mismatch (renamed or transferred since preview) refuses with 409 CONFLICT
   ("repository changed since preview; create a new preview") and no plan. The publish recheck keeps consuming one
   `github_calls_per_hour` unit (it is a real upstream call; operator decision), and that refusal returns no plan. Tests.
-- New-row path: a first `POST /publications` for a preview whose plan offer already expired (now >= planExpiresAt) answers
-  the existing plan-expired response without calling GitHub, consuming `publications_per_day` or inserting a row. Test.
+- New-row path: a first `POST /publications` for a preview whose plan offer already expired (now >= planExpiresAt) is refused
+  with 409 CONFLICT ("plan offer expired; create a new preview") without calling GitHub, consuming `publications_per_day` or
+  inserting a row (no publication exists to return). Test.
 - Integrity: `evaluateClaim` requires `claimCreatedMarkets(receipt, claim.registry, claim.creator, claim.documentSha256)` to
   include `claim.market` (the creation receipt proves registry, creator and digest; the read model is not trusted alone);
-  otherwise `mismatch` on `creation`. Test with a read model whose creator differs from the receipt's ClaimCreated event.
+  otherwise `mismatch` on `creation`. A missing receipt or an RPC failure is a TransientError (retried with backoff, never a
+  final verdict). Tests: a read model whose creator differs from the receipt's ClaimCreated event → mismatch; a null receipt →
+  still pending with backoff.
 - Verification starvation: each integrity run takes up to 50 never-attempted rows (attempts = 0, oldest first) AND up to 50
   retry rows (attempts > 0, ordered by next_attempt_at), so retries of unavailable documents can never crowd out new claims.
   Test: 60 always-due unavailable rows plus one new claim → the new claim is verified in the first run.
-- Reorg reopen (reconcile step 2a): a `mined` publication returns to the plan-able state only on positive evidence: the read
-  model is fresh, its covered (finalized) block is at least 64 blocks after the block of the recorded success, the read model
-  has no claim for this creator and document digest, and the hint's receipt is absent in two runs at least 10 minutes apart
-  (record the first absence). One absent receipt never reopens. Tests for each condition.
+- Reorg reopen (operator decision after the design challenge): the publish request moves a publication to `mined` only when
+  the market comes from the finalized read model (`indexedMarket`); a `marketOf` hit at `latest` alone only suppresses the plan
+  (no plan, state unchanged; SEC-TX-08 holds). Reconcile step 2a then applies only to hint-backed `mined` rows: a new migration
+  adds `success_block` and `first_absent_at` to `claim_publication_txs` (do not reuse `missing_at`, which expiry depends on);
+  a `mined` publication returns to the plan-able state only when the read model is fresh, its covered (finalized) block is at
+  least 64 blocks after `success_block`, the read model has no claim for this creator and document digest, and the receipt is
+  absent in two runs at least 10 minutes apart (`first_absent_at` recorded on the first absence and cleared when a receipt is
+  seen again). One absent receipt never reopens. The existing tests reconcile.test.ts "…mined publication whose on-chain market
+  disappears returns to planned" and the single-missing-receipt reopen test are REWRITTEN to this rule (operator decision; the
+  "keep every existing test passing" constraint does not apply to these two). Tests for each condition.
 - Audit atomicity (SEC-OPS-07): claims audit writes (publication created, hint reported, transitions, integrity verdicts) use a
   `claims_audit_outbox` with the same design as section 3 (same-statement CTE insert, single-flight record-then-delete flush
   at the start of every claims job run and after each audited write, at-least-once, details unchanged). Tests as in section 3.
+  The claims test harness's per-test table truncation list includes `claims_audit_outbox` (and every new table of this lane).
 - Tests: the two 8d recovery assertions (`publication.test.ts` recovery after the UPSTREAM outage, `reconcile.test.ts` retry
   after reopen) assert the status code 200 and a non-null plan; the existing-row order test (publish, make the repository
   private or GitHub rate-limited, advance past planExpiresAt, retry → 200, plan null, planExpired true, no GitHub call).
