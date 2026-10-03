@@ -1,0 +1,53 @@
+# The Pine API: HTTP API on 127.0.0.1:3000, the user-content server on 127.0.0.1:3001, the private metrics listener on
+# 127.0.0.1:9464 and the background jobs (leases in Postgres, so several instances may run). Refuses to start on any
+# invalid variable, pending migration or chain-id mismatch (one redacted JSON line on stderr, exit 1).
+# SIGTERM: stop accepting, abort jobs, close servers and pools, exit 0.
+# Runs as its own system user pine-api (SEC-OPS-10): it alone can read /etc/pine/api.secrets.env (0640 root:pine-api).
+
+[Unit]
+Description=Pine API
+After=network-online.target pine-migrate.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pine-api
+Group=pine-api
+WorkingDirectory=/opt/pine/current/packages/api
+EnvironmentFile=/etc/pine/api.env
+EnvironmentFile=/etc/pine/api.secrets.env
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --import tsx src/main.ts
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=45
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/pine
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+# V8 needs writable+executable memory for its JIT: MemoryDenyWriteExecute stays off.
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,51 @@
+# The native indexer (@pine/indexer-native): finalized-only, dual-RPC log poller writing pine_index as pine_indexer.
+# Exactly one instance per chain (an advisory lock refuses a second one). It halts on any integrity conflict and stays
+# halted until an operator removes the halt row (docs/operations/indexer-halt.md); a halt is not a crash, so systemd
+# does not restart it. Health: http://127.0.0.1:9465/readyz (503 while halted or stalled).
+# Runs as its own system user pine-indexer (SEC-OPS-10): it alone can read /etc/pine/indexer.secrets.env
+# (0640 root:pine-indexer); a compromise of the indexer (which parses RPC data) cannot read the API's secrets.
+
+[Unit]
+Description=Pine native indexer
+After=network-online.target pine-migrate.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pine-indexer
+Group=pine-indexer
+WorkingDirectory=/opt/pine/current/packages/indexer-native
+EnvironmentFile=/etc/pine/indexer.env
+EnvironmentFile=/etc/pine/indexer.secrets.env
+ExecStart=/usr/bin/node --import tsx src/main.ts
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGTERM
+TimeoutStopSec=60
+StandardOutput=journal
+StandardError=journal
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/pine
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
