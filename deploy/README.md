@@ -10,9 +10,11 @@ deploy/
   env/api.env                      non-secret API configuration (production rules) -> /etc/pine/api.env
   env/api.secrets.env.example      API secrets, empty               -> /etc/pine/api.secrets.env (0640 root:pine-api)
   env/indexer.env, indexer.secrets.env.example, migrate.secrets.env.example
+  env/web.env                      web app build + runtime configuration (public values only) -> /etc/pine/web.env
   systemd/pine-migrate.service     oneshot as user pine-migrate: API migrations, then pine_index's, as pine_migrator
   systemd/pine-api.service         as user pine-api: API + user-content server + private metrics + jobs
   systemd/pine-indexer-native.service  as user pine-indexer
+  systemd/pine-web.service         as user pine-web: the web app (Next.js server of frontend/apps/prism) on loopback
   proxy/nginx-http.conf            http-context part of the nginx example (log format, GeoIP2, per-IP limit zones)
   proxy/nginx.conf, proxy/Caddyfile  edge proxy examples (TLS, same-origin API, user-content domain, per-IP limits)
   ipfs/README.md                   Kubo node and Pinning Service API setup
@@ -35,7 +37,7 @@ properties and the CI workflow. The proxy examples are checked statically only (
 - One system user per unit, without a login shell (SEC-OPS-10: a compromised indexer cannot read the API's secrets, and
   neither runtime can read the migrator's DDL credentials):
   ```sh
-  for user in pine-api pine-indexer pine-migrate; do useradd --system --home /nonexistent --no-create-home --shell /usr/sbin/nologin "$user"; done
+  for user in pine-api pine-indexer pine-migrate pine-web; do useradd --system --home /nonexistent --no-create-home --shell /usr/sbin/nologin "$user"; done
   ```
 - The release in `/opt/pine/releases/<git sha>`, symlinked as `/opt/pine/current`, owned by root and world-readable (it
   holds no secrets; the service users only read it):
@@ -72,6 +74,7 @@ install -m 0640 -o root -g pine-api /path/to/sanctions-denylist.json /etc/pine/s
 install -m 0640 -o root -g pine-indexer deploy/env/indexer.env /etc/pine/indexer.env
 install -m 0640 -o root -g pine-indexer deploy/env/indexer.secrets.env.example /etc/pine/indexer.secrets.env
 install -m 0640 -o root -g pine-migrate deploy/env/migrate.secrets.env.example /etc/pine/migrate.secrets.env
+install -m 0640 -o root -g pine-web deploy/env/web.env /etc/pine/web.env
 ```
 
 Fill every empty value; replace the placeholders (`app.pine.example`, `pine-usercontent.example`, contract addresses and
@@ -84,11 +87,30 @@ stops the process with one JSON line naming the variable (never its value).
 ```sh
 install -m 0644 deploy/systemd/*.service /etc/systemd/system/ && systemctl daemon-reload
 systemctl start pine-migrate.service            # prints the applied migration ids; fails on any error
-systemctl enable --now pine-indexer-native.service pine-api.service
+systemctl enable --now pine-indexer-native.service pine-api.service pine-web.service
 ```
 
-Every deploy: switch `/opt/pine/current`, then `systemctl start pine-migrate.service && systemctl restart
-pine-indexer-native.service pine-api.service`. Both processes refuse to start while a migration is pending, modified or
+### 4a. Web app build
+
+The web app is its own pnpm workspace (`frontend/`, Node 22+, pnpm 11 through corepack). `NEXT_PUBLIC_*` values are
+compiled into the browser bundle, so build with the production `/etc/pine/web.env` exported, on the release checkout
+(before switching `/opt/pine/current`), and rebuild whenever one of them changes:
+
+```sh
+cd /opt/pine/releases/<sha>/frontend && corepack enable && pnpm install --frozen-lockfile
+node scripts/sync-shared.mjs --check             # the bundled plan verifier equals packages/shared
+set -a && . /etc/pine/web.env && set +a && pnpm -C apps/prism build
+```
+
+The bundle pins Pine's deployment (`NEXT_PUBLIC_PINE_CLAIM_REGISTRY`, `NEXT_PUBLIC_PINE_EVIDENCE_REGISTRY`,
+`NEXT_PUBLIC_PINE_DEPLOYMENT_BLOCK`; the same values as the API's): the browser verifies every transaction plan against
+it and the verified Gnosis constants before any wallet prompt, so a wrong value makes every plan fail verification
+(safe, but nothing can be published). `pine-web` listens on 127.0.0.1:3004 only; the edge proxy routes `/api/*`, the
+health routes and `/.well-known/pine.json` to `pine-api` before the web app, so the web app's own demo route handlers
+are unreachable in production (and answer 404 in api mode anyway).
+
+Every deploy: build the web app (4a), switch `/opt/pine/current`, then `systemctl start pine-migrate.service &&
+systemctl restart pine-indexer-native.service pine-api.service pine-web.service`. Both processes refuse to start while a migration is pending, modified or
 unknown. The same commands without systemd (from the repository root):
 
 ```sh
@@ -110,7 +132,7 @@ pnpm --filter @pine/api start                     # with /etc/pine/api*.env expo
   }
   ```
   Then `nginx -t && systemctl reload nginx`.
-- `deploy/proxy/nginx.conf` (reference): TLS, the web app and `/api` on one origin, the user-content server on its own
+- `deploy/proxy/nginx.conf` (reference): TLS, the web app (`pine-web`) and `/api` on one origin, the user-content server on its own
   registrable domain with per-IP limits and no cookies, `X-Forwarded-For` replaced (one hop: `PINE_TRUST_PROXY_HOPS=1`),
   the country header set from the proxy's GeoIP lookup (`PINE_COMPLIANCE_COUNTRY_HEADER=X-Pine-Country`), access logs
   without query strings. Metrics listeners stay private.
@@ -121,5 +143,7 @@ pnpm --filter @pine/api start                     # with /etc/pine/api*.env expo
 - `curl -fsS https://app.pine.example/readyz` -> `{"status":"ready",...}`; `curl -fsS http://127.0.0.1:9465/readyz` on the
   indexer host.
 - `journalctl -u pine-api --since -5min` shows `api listening`, no `startup refused`.
+- `curl -fsS https://app.pine.example/ -o /dev/null` (web app via the proxy) and `journalctl -u pine-web --since -5min`
+  shows `Ready`.
 - Alerts: see the release checklist; runbooks: `docs/operations/`.
 - Backups and key rotation: `deploy/procedures/`.

@@ -107,11 +107,16 @@ describe("environment templates", () => {
 describe("systemd units", () => {
   const units = readdirSync(path.join(REPO_ROOT, "deploy", "systemd")).filter((name) => name.endsWith(".service"));
   /** Unit -> its OS user (SEC-OPS-10: one user per unit, so no unit can read another's secrets). */
-  const USERS: Record<string, string> = { "pine-api.service": "pine-api", "pine-indexer-native.service": "pine-indexer", "pine-migrate.service": "pine-migrate" };
+  const USERS: Record<string, string> = {
+    "pine-api.service": "pine-api",
+    "pine-indexer-native.service": "pine-indexer",
+    "pine-migrate.service": "pine-migrate",
+    "pine-web.service": "pine-web",
+  };
   const environmentFiles = (unit: string): string[] => [...read(`deploy/systemd/${unit}`).matchAll(/^EnvironmentFile=\/etc\/pine\/(.+)$/gm)].map((match) => match[1] ?? "");
 
-  it("cover migrations (oneshot), the API and the native indexer, hardened", () => {
-    expect(units.sort()).toEqual(["pine-api.service", "pine-indexer-native.service", "pine-migrate.service"]);
+  it("cover migrations (oneshot), the API, the native indexer and the web app, hardened", () => {
+    expect(units.sort()).toEqual(["pine-api.service", "pine-indexer-native.service", "pine-migrate.service", "pine-web.service"]);
     for (const unit of units) {
       const text = read(`deploy/systemd/${unit}`);
       for (const line of ["NoNewPrivileges=yes", "ProtectSystem=strict", "PrivateTmp=yes", "CapabilityBoundingSet=", "UMask=0077"]) expect(text, `${unit}: ${line}`).toContain(line);
@@ -132,7 +137,7 @@ describe("systemd units", () => {
     }
     expect(seen.size).toBe(units.length);
     // deploy/README.md creates exactly these users.
-    expect(read("deploy/README.md")).toContain("for user in pine-api pine-indexer pine-migrate; do useradd --system");
+    expect(read("deploy/README.md")).toContain("for user in pine-api pine-indexer pine-migrate pine-web; do useradd --system");
   });
 
   it("SEC-OPS-10 makes each secrets file readable only by its unit's user (0640 root:<user>), in the env headers and deploy/README.md alike", () => {
@@ -165,6 +170,15 @@ describe("systemd units", () => {
       const text = read(`deploy/systemd/${unit}`);
       const workdir = /^WorkingDirectory=\/opt\/pine\/current\/(.+)$/m.exec(text)?.[1];
       expect(workdir, unit).toBeDefined();
+      if (unit === "pine-web.service") {
+        // The web app is the Next.js server of the frontend workspace, bound to loopback only (the edge proxy is its
+        // only client); its working directory is the Prism app, whose package runs `next`.
+        expect(workdir).toBe("frontend/apps/prism");
+        expect(text).toMatch(/^ExecStart=\/usr\/bin\/node node_modules\/next\/dist\/bin\/next start --hostname 127\.0\.0\.1 --port 3004$/m);
+        expect(read(path.join(workdir ?? "", "package.json"))).toContain('"next"');
+        for (const file of environmentFiles(unit)) expect(templates, `${unit}: ${file}`).toContain(file);
+        continue;
+      }
       const starts = [...text.matchAll(/^ExecStart=\/usr\/bin\/node --import tsx (\S+)$/gm)].map((match) => match[1] ?? "");
       expect(starts.length, unit).toBeGreaterThan(0);
       for (const script of starts) expect(existsSync(path.join(REPO_ROOT, workdir ?? "", script)), `${unit}: ${script}`).toBe(true);
@@ -222,6 +236,8 @@ describe("edge proxy examples (static: no nginx or caddy binary on the verificat
   const contentHost = hostOf(apiEnv.PINE_USER_CONTENT_ORIGIN);
   const apiUpstream = `127.0.0.1:${apiEnv.PINE_PORT ?? ""}`;
   const contentUpstream = `127.0.0.1:${apiEnv.PINE_USER_CONTENT_PORT ?? ""}`;
+  /** pine-web.service: the Next.js server of the web app, loopback only. */
+  const webUpstream = "127.0.0.1:3004";
 
   it("the API configuration they serve is same-origin with a user-content host on another registrable domain", () => {
     expect(apiEnv.PINE_API_ORIGIN).toBe(apiEnv.PINE_PUBLIC_ORIGIN);
@@ -257,8 +273,10 @@ describe("edge proxy examples (static: no nginx or caddy binary on the verificat
       const app = serverFor(appHost, true);
       const content = serverFor(contentHost, true);
       expect(app).toMatch(/location ~ \^\/\(api\//);
-      expect(app).toMatch(/location \/ \{ try_files \$uri \/index\.html; \}/);
-      expect(proxiedTo(app)).toEqual([apiUpstream]);
+      // The regex location (API, health, well-known) wins over the prefix `location /` of the web app.
+      expect(/location ~ \^\/\(api\/[^{]*\{[^}]*proxy_pass http:\/\/(\w+);/.exec(app)?.[1]).toBe("pine_api");
+      expect(/location \/ \{[^}]*proxy_pass http:\/\/(\w+);/.exec(app)?.[1]).toBe("pine_web");
+      expect([...proxiedTo(app)].sort()).toEqual([apiUpstream, webUpstream].sort());
       expect(proxiedTo(content)).toEqual([contentUpstream]);
       // Untrusted content: GET only, no cookies or credentials either way.
       for (const line of ["limit_except GET { deny all; }", 'proxy_set_header Cookie "";', 'proxy_set_header Authorization "";', "proxy_hide_header Set-Cookie;"]) expect(content, line).toContain(line);
@@ -306,10 +324,13 @@ describe("edge proxy examples (static: no nginx or caddy binary on the verificat
     it("serves the web app and the API on one origin and user content only from its own host", () => {
       expect(app).toMatch(/@api path \/api\/\* /);
       expect(app).toContain(`reverse_proxy ${apiUpstream} {`);
-      expect(app).toContain("file_server");
+      // Everything else goes to the web app (Next.js on loopback).
+      expect(app).toContain(`reverse_proxy ${webUpstream} {`);
+      expect(app).not.toContain("file_server");
       expect(app).not.toContain(contentUpstream);
       expect(content).toContain(`reverse_proxy ${contentUpstream} {`);
       expect(content).not.toContain(apiUpstream);
+      expect(content).not.toContain(webUpstream);
       for (const line of ["method GET HEAD", "header_up -Cookie", "header_up -Authorization", "header_down -Set-Cookie"]) expect(content, line).toContain(line);
       // A bare `respond` is ordered after `handle` and the catch-all would shadow it.
       expect(app).toMatch(/handle \/metrics \{\s*respond 404\s*\}/);
