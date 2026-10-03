@@ -179,21 +179,29 @@ export function ClaimView({ id }: { id: string }) {
             <span className={cn('tnum text-[0.9375rem] font-semibold text-lumen-3', api && 't-code font-normal')} title={api ? `Market ${claim.marketAddress ?? claim.id}` : undefined}>
               {claimLabel(claim)}
             </span>
-            <Link href={`/policies/${claim.policy.id}`} className="tag hover:text-lumen">
-              <span style={{ color: FAMILY_VAR[fam] }}>
-                <FamilyIcon family={fam} size={13} />
+            {claim.policy.unknown ? (
+              // The pinned policy matches no catalog entry and the claim is not verified: name it by its digest only.
+              <span className="tag text-ha" title={claim.policy.hash ? `Policy sha256 ${claim.policy.hash}` : undefined}>
+                Unknown policy{claim.policy.hash ? ` ${shortHash(claim.policy.hash)}` : ''}
               </span>
-              {claim.policy.id}
-              {claim.policy.version ? `@${claim.policy.version}` : ''}
-            </Link>
+            ) : (
+              <Link href={`/policies/${claim.policy.id}`} className="tag hover:text-lumen">
+                <span style={{ color: FAMILY_VAR[fam] }}>
+                  <FamilyIcon family={fam} size={13} />
+                </span>
+                {claim.policy.id}
+                {claim.policy.version ? `@${claim.policy.version}` : ''}
+              </Link>
+            )}
             <StatusBadge status={claim.status} outcome={claim.outcome} label={apiStatusLabel(claim)} />
             {claim.sponsored && <span className="tag">Sponsored</span>}
           </div>
           <h1 className="t-h1 chroma mt-3 max-w-[26ch] [overflow-wrap:anywhere]">{claim.title}</h1>
           <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.9rem] text-lumen-2">
             {repoUrl ? (
-              <a className="link" href={repoUrl} target="_blank" rel="noopener noreferrer nofollow">
+              <a className="link" href={repoUrl} target="_blank" rel="noopener noreferrer nofollow" title={claim.source.unverifiedName ? 'As stated in the claim document; Pine verifies the repository id, not this name.' : undefined}>
                 {repo}
+                {claim.source.unverifiedName && <span className="ml-1 text-[0.78rem] text-lumen-3">(as stated in the claim document)</span>}
               </a>
             ) : (
               <span className="text-lumen-3">{repoLabel(claim)}</span>

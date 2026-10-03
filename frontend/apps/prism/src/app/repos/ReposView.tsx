@@ -55,15 +55,17 @@ export function ReposView() {
   const viewer = useGitHubViewerRepos({ limit: 50 })
   const search = useGitHubRepoSearch(dq)
   const claims = useClaims({ limit: 200 })
+  // Claims are counted by the repository identity they pin (the numeric GitHub id) when the data source knows it; the
+  // owner/name a claim document states is only a fallback for sources without ids (demo data).
   const counts = useMemo(() => {
     const m = new Map<string, number>()
     for (const c of claims.data?.items ?? []) {
-      const k = `${c.source.owner}/${c.source.repo}`.toLowerCase()
+      const k = c.source.repoId !== undefined ? `id:${c.source.repoId}` : `${c.source.owner}/${c.source.repo}`.toLowerCase()
       m.set(k, (m.get(k) ?? 0) + 1)
     }
     return m
   }, [claims.data])
-  const count = (r: RepoSummary) => counts.get(r.fullName.toLowerCase()) ?? 0
+  const count = (r: RepoSummary) => counts.get(`id:${r.id}`) ?? counts.get(r.fullName.toLowerCase()) ?? 0
   const signedIn = account.status === 'signed_in'
 
   return (

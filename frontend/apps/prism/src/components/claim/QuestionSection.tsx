@@ -408,9 +408,13 @@ function ApiQuestionSection({ claim, api }: { claim: ClaimDetail; api: ApiClaimD
             </p>
           )}
           <p className="mt-3 text-[0.9375rem]">
-            <Link href={`/policies/${claim.policy.id}`} className="link text-lumen-2">
-              Read the {claim.policy.id} policy
-            </Link>
+            {claim.policy.unknown ? (
+              <span className="text-ha">This claim pins a policy that is not in Pine&apos;s catalog; it is identified only by the digest above.</span>
+            ) : (
+              <Link href={`/policies/${claim.policy.id}`} className="link text-lumen-2">
+                Read the {claim.policy.id} policy
+              </Link>
+            )}
           </p>
         </div>
       </div>
