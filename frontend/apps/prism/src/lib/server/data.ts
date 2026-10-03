@@ -28,3 +28,6 @@ export const listPoliciesServer = cache(async (): Promise<PolicyVersion[]> => {
     return []
   }
 })
+
+/** Like getPolicyServer, but a transport failure throws (only a definite "not found" is null). */
+export const getPolicyServerStrict = cache(async (id: string, version?: string): Promise<PolicyVersion | null> => provider().getPolicy(id, version))

@@ -272,10 +272,14 @@ describe("edge proxy examples (static: no nginx or caddy binary on the verificat
     it("serves the web app and the API on one origin and user content only from its own host", () => {
       const app = serverFor(appHost, true);
       const content = serverFor(contentHost, true);
-      expect(app).toMatch(/location ~ \^\/\(api\//);
-      // The regex location (API, health, well-known) wins over the prefix `location /` of the web app.
-      expect(/location ~ \^\/\(api\/[^{]*\{[^}]*proxy_pass http:\/\/(\w+);/.exec(app)?.[1]).toBe("pine_api");
-      expect(/location \/ \{[^}]*proxy_pass http:\/\/(\w+);/.exec(app)?.[1]).toBe("pine_web");
+      // Case-insensitive regex location (API, health, well-known): it wins over the prefix `location /` of the web app,
+      // so no casing of /api/ reaches the web app.
+      expect(app).toMatch(/location ~\* \^\/\(api\//);
+      expect(/location ~\* \^\/\(api\/[^{]*\{[^}]*proxy_pass http:\/\/(\w+);/.exec(app)?.[1]).toBe("pine_api");
+      const web = /location \/ \{[^}]*\}/.exec(app)?.[0] ?? "";
+      expect(/proxy_pass http:\/\/(\w+);/.exec(web)?.[1]).toBe("pine_web");
+      // A client-supplied country header never travels on through the web app (SEC-LEGAL-01).
+      expect(web).toContain('proxy_set_header X-Pine-Country "";');
       expect([...proxiedTo(app)].sort()).toEqual([apiUpstream, webUpstream].sort());
       expect(proxiedTo(content)).toEqual([contentUpstream]);
       // Untrusted content: GET only, no cookies or credentials either way.

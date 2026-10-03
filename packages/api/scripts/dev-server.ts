@@ -43,6 +43,15 @@ function hostOf(value: string): string | null {
   }
 }
 
+function hasHostOverride(value: string): boolean {
+  try {
+    const params = new URL(value).searchParams;
+    return params.has("host") || params.has("hostaddr");
+  } catch {
+    return true;
+  }
+}
+
 /** Fail closed before anything starts: this entry is for a developer machine and a local anvil fork only. */
 function assertDevelopmentEnv(env: Record<string, string | undefined>): void {
   const problems: string[] = [];
@@ -66,6 +75,8 @@ function assertDevelopmentEnv(env: Record<string, string | undefined>): void {
     }
     const host = hostOf(value);
     if (host === null || !LOOPBACK_HOSTS.has(host)) problems.push(`${name} must point at a loopback host`);
+    // node-postgres lets `host`/`hostaddr` query parameters replace the URL's authority: refuse them outright.
+    if (/^postgres(?:ql)?:/i.test(value) && hasHostOverride(value)) problems.push(`${name} must not override its host with a query parameter`);
   }
   for (const name of ["PINE_HOST", "PINE_USER_CONTENT_HOST", "PINE_METRICS_HOST"]) {
     const value = env[name] ?? "127.0.0.1";

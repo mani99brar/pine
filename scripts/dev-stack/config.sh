@@ -35,12 +35,19 @@ die() {
   exit 1
 }
 
-# pid of a service started by up.sh when it is still running, else nothing.
+# pid of a service started by up.sh when it is still running AND still runs the recorded command (a pid reused by an
+# unrelated process after a reboot is never signalled), else nothing.
 service_pid() {
-  local file=$PID_DIR/$1.pid pid
+  local file=$PID_DIR/$1.pid pid expected actual
   [ -f "$file" ] || return 1
-  pid=$(tr -cd '0-9' <"$file")
-  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null && echo "$pid"
+  pid=$(head -n 1 "$file" | tr -cd '0-9')
+  expected=$(sed -n 2p "$file")
+  [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null || return 1
+  if [ -n "$expected" ]; then
+    actual=$(ps -ww -o command= -p "$pid" 2>/dev/null || true)
+    case "$actual" in "$expected"*) ;; *) return 1 ;; esac
+  fi
+  echo "$pid"
 }
 
 # Stops a service started by up.sh (its whole process group: it runs in its own session), SIGTERM then SIGKILL.
