@@ -146,15 +146,16 @@ describe("claims audit outbox (SEC-OPS-07)", () => {
     h.chain.receipts.set(event.transactionHash, { status: "success", logs: [claimCreatedLog(event), newMarketLog(event)] });
     expect((await submit(h, id, event.transactionHash)).statusCode).toBe(200);
     h.ctx.clock.advance(1000);
+    // The succeeded hint only sets its own status (PRD-07 §3f): no transition, no entry.
     await reconcile(h);
-    expect(await state(h, id)).toBe("mined");
+    expect(await state(h, id)).toBe("submitted");
     h.ctx.clock.advance(1000);
     h.ctx.readModel.apply([event]);
     markFresh(h.ctx, event.blockNumber);
     await reconcile(h);
     expect(await state(h, id)).toBe("confirmed");
     expect(audit.entries).toEqual([]);
-    expect(await outbox(h)).toBe(5);
+    expect(await outbox(h)).toBe(4);
 
     audit.down = false;
     await reconcile(h);
@@ -162,7 +163,7 @@ describe("claims audit outbox (SEC-OPS-07)", () => {
     // tx_reported and submitted share one timestamp (one request): their relative order is not defined.
     expect(actions[0]).toBe("claim.publication.created");
     expect(new Set(actions.slice(1, 3))).toEqual(new Set(["claim.publication.tx_reported", "claim.publication.submitted"]));
-    expect(actions.slice(3)).toEqual(["claim.publication.mined", "claim.publication.confirmed"]);
+    expect(actions.slice(3)).toEqual(["claim.publication.confirmed"]);
     expect(await outbox(h)).toBe(0);
   });
 
@@ -342,7 +343,7 @@ describe("claims audit outbox atomicity (SEC-OPS-07, PRD-07 §3e)", () => {
     expect(actionsOf(h.ctx.audit as MemoryAuditLog, id)).toEqual(["claim.publication.created", "claim.publication.mined"]);
   });
 
-  it("the reconcile hint→mined transaction (finalized succeeded receipt): refused outbox row → state submitted, hint unknown, outbox unchanged", async () => {
+  it("a final succeeded hint is not an audited write (the hint→mined transaction is gone, PRD-07 §3f): with the outbox refused it still becomes succeeded, state submitted, outbox unchanged", async () => {
     const h = harnessOf();
     const { preview, id } = await planned(h);
     const event = claimEventFor(preview.document, preview.documentSha256);
@@ -352,16 +353,10 @@ describe("claims audit outbox atomicity (SEC-OPS-07, PRD-07 §3e)", () => {
     expect(before.hints).toEqual([{ tx_hash: event.transactionHash, status: "unknown" }]);
     await refusingOutbox(h, async () => {
       await reconcile(h);
-      expect(await snapshot(h)).toEqual(before);
+      expect(await snapshot(h)).toEqual({ ...before, hints: [{ tx_hash: event.transactionHash, status: "succeeded" }] });
     });
-    expect(actionsOf(h.ctx.audit as MemoryAuditLog, id)).not.toContain("claim.publication.mined");
-    await reconcile(h);
-    expect(await snapshot(h)).toEqual({
-      publications: [{ id, state: "mined", market: event.market }],
-      hints: [{ tx_hash: event.transactionHash, status: "succeeded" }],
-      outbox: [],
-    });
-    expect(actionsOf(h.ctx.audit as MemoryAuditLog, id).at(-1)).toBe("claim.publication.mined");
+    expect(before.publications).toEqual([{ id, state: "submitted", market: null }]);
+    expect(actionsOf(h.ctx.audit as MemoryAuditLog, id)).toEqual(["claim.publication.created", "claim.publication.tx_reported", "claim.publication.submitted"]);
   });
 
   it("the reconcile confirmed transition (CTE): refused outbox row → state planned, no market, outbox unchanged", async () => {

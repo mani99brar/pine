@@ -93,14 +93,18 @@ describe("claims.reconcile-publications", () => {
     expect((await stateOf(h, wrongCreator.id)).state).toBe("planned");
   });
 
-  it("a successful reported hash with the expected log moves to mined (still not final), then confirmed once indexed", async () => {
+  it("a successful reported hash with the expected log only marks its hint succeeded (no mined, no plan), then confirmed once indexed", async () => {
     const h = harnessOf();
     const { preview, id } = await planned(h);
     const event = claimEventFor(preview.document, preview.documentSha256);
     h.chain.receipts.set(event.transactionHash, { status: "success", logs: [claimCreatedLog(event), newMarketLog(event)] });
     await submit(h, id, event.transactionHash);
     await reconcile(h);
-    expect(await stateOf(h, id)).toMatchObject({ state: "mined", market: event.market });
+    // PRD-07 §3f: a hint only sets its own status and withholds the plan; the read model decides the state.
+    expect(await stateOf(h, id)).toMatchObject({ state: "submitted", market: null, transactions: [expect.objectContaining({ status: "succeeded" })] });
+    const withheld = await publish(h, preview);
+    expect(withheld.statusCode).toBe(503);
+    expect(withheld.json().error).toMatchObject({ code: "NOT_READY", message: "the claim is being created on chain; retry when it is final" });
     h.ctx.readModel.apply([event]);
     markFresh(h.ctx, event.blockNumber);
     await reconcile(h);
@@ -170,9 +174,9 @@ describe("claims.reconcile-publications", () => {
 describe("claims.reconcile-publications audit (claims-006)", () => {
   const auditsOf = (h: Harness, id: string) => h.ctx.audit.entries.filter((entry) => entry.subjectType === "claim_publication" && entry.subjectId === id);
 
-  it("every reconcile transition writes its audit entry once: mined, confirmed, failed, expired", async () => {
+  it("every reconcile transition writes its audit entry once: confirmed, failed, expired (a succeeded hint audits nothing)", async () => {
     const h = harnessOf();
-    // mined (reported hash with the expected log), then confirmed once indexed.
+    // A reported hash with the expected log (hint succeeded, no transition), then confirmed once indexed.
     const minedThenConfirmed = await planned(h);
     const event = claimEventFor(minedThenConfirmed.preview.document, minedThenConfirmed.preview.documentSha256);
     h.chain.receipts.set(event.transactionHash, { status: "success", logs: [claimCreatedLog(event), newMarketLog(event)] });
@@ -185,17 +189,11 @@ describe("claims.reconcile-publications audit (claims-006)", () => {
     const expired = await planned(h);
 
     await reconcile(h);
-    expect(auditsOf(h, minedThenConfirmed.id).map((entry) => entry.action)).toContain("claim.publication.mined");
-    expect(auditsOf(h, minedThenConfirmed.id).find((entry) => entry.action === "claim.publication.mined")?.details).toMatchObject({
-      via: "reconcile",
-      from: "submitted",
-      market: event.market,
-      txHash: event.transactionHash,
-    });
+    expect(auditsOf(h, minedThenConfirmed.id).map((entry) => entry.action)).toEqual(["claim.publication.created", "claim.publication.tx_reported", "claim.publication.submitted"]);
     h.ctx.readModel.apply([event]);
     markFresh(h.ctx, event.blockNumber);
     await reconcile(h);
-    expect(auditsOf(h, minedThenConfirmed.id).find((entry) => entry.action === "claim.publication.confirmed")?.details).toMatchObject({ via: "reconcile", from: "mined", market: event.market });
+    expect(auditsOf(h, minedThenConfirmed.id).find((entry) => entry.action === "claim.publication.confirmed")?.details).toMatchObject({ via: "reconcile", from: "submitted", market: event.market });
 
     coverUntil(h, failed.preview.document.evidence.evidenceDeadline - 86_400 + 1);
     await reconcile(h);
@@ -295,13 +293,14 @@ describe("claims.reconcile-publications coverage and hint bounds (claims-009, PR
     await submit(h, id, event.transactionHash);
     coverUntil(h, preview.document.evidence.evidenceDeadline - 86_400 + 1);
     await reconcile(h);
-    expect(await stateOf(h, id)).toMatchObject({ state: "mined", market: event.market });
-    // Later runs, with coverage far past the cutoff and a reverted hash on record: still mined, never failed/expired.
+    // PRD-07 §3f: the succeeded hint holds back expiry but never moves the publication.
+    expect(await stateOf(h, id)).toMatchObject({ state: "submitted", market: null });
+    // Later runs, with coverage far past the cutoff and a reverted hash on record: still submitted, never failed/expired.
     for (const at of [preview.document.evidence.evidenceDeadline, preview.document.evidence.revealDeadline + 86_400]) {
       coverUntil(h, at);
       await reconcile(h);
       await reconcile(h);
-      expect((await stateOf(h, id)).state).toBe("mined");
+      expect((await stateOf(h, id)).state).toBe("submitted");
     }
     const transactions = (await stateOf(h, id)).transactions;
     expect(transactions).toHaveLength(2);
@@ -374,10 +373,11 @@ describe("claims.reconcile-publications hint finality and lost successes (claims
     await reconcile(h);
     expect(h.chain.receiptLookups).toEqual(expect.arrayContaining([event.transactionHash, revertedAbove]));
     expect((await stateOf(h, id)).state).toBe("submitted");
-    // Coverage reaches the receipts' block: the success counts.
+    // F reaches the receipts' block: both hints are final (only their own status; the state is the read model's).
     markFresh(h.ctx, above);
     await reconcile(h);
-    expect(await stateOf(h, id)).toMatchObject({ state: "mined", market: event.market });
+    expect(await stateOf(h, id)).toMatchObject({ state: "submitted", market: null });
+    expect((await stateOf(h, id)).transactions.map((tx) => tx.status)).toEqual(["succeeded", "reverted"]);
   });
 
   it("an unknown hint above the covered block holds back expiry after the cutoff", async () => {
@@ -392,31 +392,32 @@ describe("claims.reconcile-publications hint finality and lost successes (claims
     expect((await stateOf(h, id)).state).toBe("submitted");
   });
 
-  it("a finalized mined publication is never reopened: its recorded success later missing from the node changes nothing and offers no plan", async () => {
+  it("a final succeeded hint is never reopened: its success later missing from the node changes nothing and offers no plan", async () => {
     const h = harnessOf();
     const { preview, id } = await planned(h);
     const event = claimEventFor(preview.document, preview.documentSha256);
     h.chain.receipts.set(event.transactionHash, { status: "success", logs: [claimCreatedLog(event), newMarketLog(event)] });
     await submit(h, id, event.transactionHash);
     await reconcile(h);
-    expect(await stateOf(h, id)).toMatchObject({ state: "mined", market: event.market });
-    // A mined publication offers no plan.
-    expect((await publish(h, preview)).json().plan).toBeNull();
-    // The node no longer returns the receipt: the success was finalized, so nothing is reopened and it is not refetched.
+    // PRD-07 §3f: the hint is final (succeeded) but the publication is not mined until the read model serves the claim.
+    expect(await stateOf(h, id)).toMatchObject({ state: "submitted", market: null, transactions: [expect.objectContaining({ status: "succeeded" })] });
+    // The succeeded hint withholds the plan.
+    expect((await publish(h, preview)).statusCode).toBe(503);
+    // The node no longer returns the receipt: the success was final, so nothing is reopened and it is not refetched.
     h.chain.receipts.delete(event.transactionHash);
     h.chain.receiptLookups.length = 0;
     await reconcile(h);
     await reconcile(h);
     expect(h.chain.receiptLookups).not.toContain(event.transactionHash);
-    expect(await stateOf(h, id)).toMatchObject({ state: "mined", market: event.market, transactions: [expect.objectContaining({ txHash: event.transactionHash, status: "succeeded" })] });
+    expect(await stateOf(h, id)).toMatchObject({ state: "submitted", market: null, transactions: [expect.objectContaining({ txHash: event.transactionHash, status: "succeeded" })] });
     expect(h.ctx.audit.entries.filter((entry) => entry.subjectId === id).map((entry) => entry.action)).not.toContain("claim.publication.reopened");
     const retry = await publish(h, preview);
-    expect(retry.statusCode).toBe(200);
-    expect(retry.json()).toMatchObject({ plan: null, publication: { state: "mined", market: event.market } });
-    // Coverage far past the cutoff: still mined, never expired or failed.
+    expect(retry.statusCode).toBe(503);
+    expect(retry.json().plan).toBeUndefined();
+    // Coverage far past the cutoff: still open, never expired or failed.
     coverUntil(h, preview.document.evidence.revealDeadline + 86_400);
     await reconcile(h);
-    expect((await stateOf(h, id)).state).toBe("mined");
+    expect((await stateOf(h, id)).state).toBe("submitted");
   });
 
   it("a latest-block marketOf hit never moves the state; a publication mined from the finalized read model is never reopened", async () => {
