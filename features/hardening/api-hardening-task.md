@@ -2,11 +2,12 @@
 
 ## Goal
 
-Land the API hardening of `docs/prd/PRD-07-hardening.md` section 3 in the merged claims, markets and funding modules: cooperative job abort, policy-text pinning, and the findings the operator appends before launch.
+Land the API hardening of `docs/prd/PRD-07-hardening.md` section 3 in the merged markets and funding modules (claims is not part of this lane).
 
 ## Context
 
-- Merged modules under `packages/api/src/modules/`, their PRDs (PRD-03, PRD-04) and decisions; PRD-02 section 2.5 (jobs and `signal`).
+- Merged modules under `packages/api/src/modules/{markets,funding}`, PRD-04 (including sections 4a and 4b) and features/markets/decisions.md; PRD-02 section 2.5 (jobs and `signal`); each module's COVERAGE.md.
+- The host is memory-constrained: run tests with VITEST_MAX_WORKERS=1, one test command at a time, single files while iterating and the full lane suite at most twice.
 - Tests use the frozen harness on PGlite; PGlite-heavy test files are serialized with each module's cross-process lock.
 
 ## Constraints

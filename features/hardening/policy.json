@@ -131,10 +131,8 @@
         "unit"
       ],
       "owned_paths": [
-        "packages/api/src/modules/claims",
         "packages/api/src/modules/markets",
         "packages/api/src/modules/funding",
-        "packages/api/migrations/claims",
         "packages/api/migrations/markets",
         "packages/api/migrations/funding"
       ],
@@ -183,7 +181,8 @@
             "exec",
             "vitest",
             "run",
-            "src/modules"
+            "src/modules/markets",
+            "src/modules/funding"
           ],
           "timeout_seconds": 2400,
           "scenarios": []

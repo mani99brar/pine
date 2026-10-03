@@ -31,15 +31,32 @@ Contracts are immutable once deployed, so every contract change here lands befor
   script emits the Deploy.s.sol constants it relies on from `GNOSIS_EXTERNAL` into `PlanInputs.sol` and a test asserts the script's
   constants equal them; the vector script rewrites `fork-observations.json` canonically (sorted keys) and `--check` covers it.
 
-## 3. api-hardening
-- Every module job (claims reconcile and integrity, markets reconcile and watch, funding reconcile) checks `signal.aborted`
-  between batches and stops promptly; tests abort before and during a batch.
-- Claims: at module registration put every digest-verified catalog policy text into `ctx.contentStore` (which pins it), so the
-  `ipfs://<policy cid>` referenced by every immutable question stays retrievable; publication plans are refused until both the
-  claim document and the policy text are stored; test it.
-- Further findings of the operator's final API security review are appended here before the lane launches.
+## 3. api-hardening (markets and funding modules; run after markets-004 merged at a586a8f)
+- Cooperative abort: every markets job (reconcile, watch) and the funding reconcile job checks `signal.aborted` between batches
+  and stops promptly without starting another batch or leaving a half-applied state change; tests abort before and during a batch.
+- markets/reconcile.ts decides `expired`/`failed` only when the read model is fresh AND `ctx.chain.finalizedBlock()` succeeded in
+  this attempt (as funding does). Test: finalizedBlock() throws for a plan past expires_at + 1 h → plan state unchanged.
+- funding/reconcile.ts: when a step compare-and-set returns no row because another run already confirmed the step, re-read the
+  step and count it as confirmed, so expiry never records a partial execution as `expired` with confirmedSteps 0. Test with a
+  step confirmed between read and CAS (injected pre-existing confirmation).
+- Audit atomicity (SEC-OPS-07, both lanes): the audit entry for a plan insert, a new tx-hash hint and every state transition is
+  never lost. If `ctx.audit.record` can join the same database transaction (check the frozen gateway), write it in that
+  transaction; otherwise store an `audit_pending` marker column/row in the same transaction as the write and clear it after
+  `ctx.audit.record` succeeds, and have the module's reconcile job re-record pending entries (idempotent per entry id). A
+  same-key replay of a plan whose creation audit is still pending re-records it. Tests: audit gateway throws once → entry
+  recorded by the next reconcile or replay, exactly once.
+- Public RPC/gateway fan-out caps: `GET /api/v1/markets/:market/liquidity` (funding) and the markets evidence detail route's
+  `contentStore.retrieve` cache misses use the same non-blocking concurrency cap as positions/oracle (at most 4 in flight per
+  process, a 5th miss refused immediately with ApiError RATE_LIMITED 429 and retryAfterSeconds). Deterministic tests.
+- SEC-EVID-11: the evidence listing never serves manifest text of blocked evidence or content. Re-check moderation state for the
+  cached entries at serve time (or drop cache entries on block) and send `Cache-Control: no-store` for listing responses that
+  embed manifest text. Test: block after a cached listing → next listing omits the manifest.
+- Tests: funding history items show reconciled plan state, step states and confirmedTxHash; loadOracle accepts a replacement
+  linked only through the original's `reopenedBy` and refuses otherwise.
+- Claims items (job abort for claims reconcile/integrity, catalog policy-text pinning) are carried by a later claims-hardening
+  lane after the claims feature merges.
 
 ## 4. Checks
 contracts-hardening: `forge build`, `export-abis --check`, the plan-vector `--check`, forge unit tests (claim-registry and
 evidence-registry), the fork tests, the e2e tests, `check-forbidden`. api-hardening: `pnpm --filter @pine/api typecheck`,
-`eslint packages/api/src`, `check-forbidden`, `vitest run src/modules` (single vitest worker in verification).
+`eslint packages/api/src`, `check-forbidden`, `vitest run src/modules/markets src/modules/funding` (single vitest worker in verification).
