@@ -26,19 +26,26 @@ function agentJsonPath(id: string, market?: string): string | null {
   return ADDRESS.test(m) ? `/api/v1/agents/claims/${m.toLowerCase()}` : null
 }
 
-/** `api` mode JSON-LD: the data downloads and the policy link point at the backend's public routes. */
+/**
+ * `api` mode JSON-LD: backend claims are named by their market (they have no PINE number), their terms are the claim
+ * document identified by its sha256, and the data downloads and the policy link point at the backend's public routes.
+ */
 function backendJsonLd(ld: Record<string, unknown>, claim: ClaimDetail, site: string): Record<string, unknown> {
   const agentJson = agentJsonPath(claim.id, claim.marketAddress)
+  const market = claim.marketAddress ?? claim.id
   const { id, version } = claim.policy
   const policyUrl =
     POLICY_ID.test(id) && VERSION.test(version) ? `${site}/api/v1/policies/${id}/${version}` : `${site}/policies/${encodeURIComponent(id)}`
   const out: Record<string, unknown> = { ...ld }
+  if (ADDRESS.test(market)) out.identifier = market.toLowerCase()
   const basedOn = ld.isBasedOn
   if (basedOn && typeof basedOn === 'object') out.isBasedOn = { ...basedOn, url: policyUrl }
   const subject = ld.subjectOf
   if (subject && typeof subject === 'object') {
     out.subjectOf = {
       ...subject,
+      name: ADDRESS.test(market) ? `Claim document of ${market.toLowerCase()}` : 'Claim document',
+      description: 'Immutable claim document (canonical JSON); identifier is its sha256 digest.',
       distribution: agentJson
         ? [{ '@type': 'DataDownload', encodingFormat: 'application/json', contentUrl: `${site}${agentJson}`, name: 'Agent view of the claim' }]
         : [],
