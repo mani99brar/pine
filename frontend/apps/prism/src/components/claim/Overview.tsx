@@ -6,7 +6,7 @@ import { formatDate, nextStep } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { COPY } from '@pine/core/copy'
 import { Clock, Users } from 'lucide-react'
-import { countdown } from '@/lib/claims'
+import { apiDetailFactsOf, apiFactsOf, apiLifecycleStages, apiNextStep, countdown } from '@/lib/claims'
 import { useNowMs } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 
@@ -19,10 +19,11 @@ const ACTOR: Record<string, string> = {
   holders: 'Outcome-token holders',
 }
 
-/** What happens next, who acts, and by when, straight from the lifecycle rules. */
+/** What happens next, who acts, and by when, straight from the lifecycle rules (the backend's phase in api mode). */
 export function NextStepCard({ claim }: { claim: ClaimDetail }) {
   const now = useNowMs()
-  const step = nextStep(claim, now ? new Date(now) : undefined)
+  const api = apiDetailFactsOf(claim)
+  const step = api ? apiNextStep(claim, api) : nextStep(claim, now ? new Date(now) : undefined)
   const urgent = step.at && now ? Date.parse(step.at) - now < 24 * 3_600_000 && Date.parse(step.at) > now : false
   return (
     <section className="glass cut-xl relative overflow-hidden p-5 sm:p-6" aria-labelledby="next-title">
@@ -87,7 +88,8 @@ function stagesFor(claim: ClaimDetail): Stage[] {
 
 /** The claim's path from publication to a final answer, lit up to where it is now. */
 export function LifecyclePath({ claim }: { claim: ClaimDetail }) {
-  const stages = stagesFor(claim)
+  const api = apiDetailFactsOf(claim)
+  const stages: Stage[] = api ? apiLifecycleStages(claim, api) : stagesFor(claim)
   const failed = claim.status === 'failed'
   return (
     <ol className="grid grid-cols-5 gap-x-1.5 gap-y-1 sm:gap-1" aria-label="Lifecycle">
@@ -163,6 +165,9 @@ export function MarketFacts({ claim }: { claim: ClaimDetail }) {
 }
 
 export function StartFromTerms({ claim }: { claim: ClaimDetail }) {
+  const api = apiFactsOf(claim)
+  // Withheld or unverified terms are never offered as a template.
+  if (api && !api.documentVerified) return null
   return (
     <Link href={`/compose?from=${claim.id}`} className="link text-[0.875rem] text-lumen-2">
       Start a new claim from these terms
