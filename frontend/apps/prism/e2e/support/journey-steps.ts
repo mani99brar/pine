@@ -13,7 +13,10 @@ export async function connectAndSignIn(page: Page): Promise<void> {
   const signIn = page.getByRole('button', { name: /sign in with ethereum/i })
   // A wallet that already authorized this site reconnects by itself (EIP-6963 discovery); otherwise connect it.
   await expect(signIn.or(page.getByRole('button', { name: /^connect wallet$/i })).first()).toBeVisible()
-  if (!(await page.getByRole('heading', { name: /connect a wallet \(done\)/i }).isVisible())) {
+  // The injected wallet reconnects asynchronously after load: give it a moment before deciding to connect by hand.
+  const connected = page.getByRole('heading', { name: /connect a wallet \(done\)/i })
+  await connected.waitFor({ timeout: 5_000 }).catch(() => undefined)
+  if (!(await connected.isVisible())) {
     await page.getByRole('main').getByRole('button', { name: /connect wallet/i }).first().click()
     await page.getByRole('button', { name: /pine test wallet|browser wallet|injected/i }).first().click()
   }
