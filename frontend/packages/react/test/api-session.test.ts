@@ -48,8 +48,23 @@ describe('checkSiweChallenge', () => {
 
   it('refuses expired or long-lived messages and extra resources', () => {
     expect(() => checkSiweChallenge(message({ expirationTime: new Date(NOW.getTime() - 1) }), expected)).toThrow(/expiry/)
+    expect(() => checkSiweChallenge(message({ expirationTime: NOW }), expected)).toThrow(/expiry/)
+    expect(() => checkSiweChallenge(message({ expirationTime: new Date(NOW.getTime() + 15 * 60_000 + 1_000) }), expected)).toThrow(/expiry/)
     expect(() => checkSiweChallenge(message({ expirationTime: new Date(NOW.getTime() + 24 * 3600_000) }), expected)).toThrow(/expiry/)
     expect(() => checkSiweChallenge(message({ resources: ['https://evil.example/grant'] }), expected)).toThrow(/resources/)
+  })
+
+  it('accepts a device clock minutes off: the validity window comes from the message itself', () => {
+    for (const offsetMin of [-30, -6, 6, 11, 30]) {
+      expect(checkSiweChallenge(message(), { ...expected, now: new Date(NOW.getTime() + offsetMin * 60_000) })).toEqual({ termsDigest: TERMS })
+    }
+  })
+
+  it('SEC-AUTH-04 refuses a message stale or from the future by more than an hour on this device’s clock', () => {
+    // Expired more than an hour ago here (issued 10 min before its expiry).
+    expect(() => checkSiweChallenge(message(), { ...expected, now: new Date(NOW.getTime() + 71 * 60_000) })).toThrow(/expired more than an hour ago/)
+    // Issued more than an hour ahead of this clock.
+    expect(() => checkSiweChallenge(message(), { ...expected, now: new Date(NOW.getTime() - 61 * 60_000) })).toThrow(/more than an hour ahead/)
   })
 
   it('refuses malformed text', () => {

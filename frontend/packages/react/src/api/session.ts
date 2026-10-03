@@ -41,13 +41,20 @@ export class SiweChallengeError extends Error {
 /** A parsed date-time that is a real instant (viem parses a malformed one to an Invalid Date, which fails no comparison). */
 const validTime = (value: Date | undefined): value is Date => value instanceof Date && Number.isFinite(value.getTime())
 
+/** Longest sign-in message validity accepted, from its issue time to its expiry (the backend issues 10 minutes). */
+const SIWE_MAX_VALIDITY_MS = 15 * 60_000
+/** Device clock error tolerated before a message counts as stale or from the future. */
+const SIWE_CLOCK_SKEW_MS = 60 * 60_000
+
 /**
  * Checks the server-issued EIP-4361 message before the wallet signs it: it must sign this site in (domain and URI are
- * the page's own origin), for the connected address, on the expected chain, with Pine's terms statement, and expire
- * soon. It must also be exactly the canonical message of those fields (SEC-AUTH-01): viem's parser ignores text it does
- * not expect (extra lines before `URI:` or after the last field), so the text is rebuilt from the parsed fields and
- * compared byte for byte. A compromised or misrouted API therefore cannot obtain a signature usable on another site,
- * nor over text the user was not shown as Pine's sign-in. Returns the terms digest the user accepts by signing.
+ * the page's own origin), for the connected address, on the expected chain, with Pine's terms statement, and expire at
+ * most 15 minutes after its own issue time (and be neither stale nor from the future by more than an hour on this
+ * device's clock, which may be off by minutes). It must also be exactly the canonical message of those fields
+ * (SEC-AUTH-01): viem's parser ignores text it does not expect (extra lines before `URI:` or after the last field), so
+ * the text is rebuilt from the parsed fields and compared byte for byte. A compromised or misrouted API therefore
+ * cannot obtain a signature usable on another site, nor over text the user was not shown as Pine's sign-in. Returns
+ * the terms digest the user accepts by signing.
  */
 export function checkSiweChallenge(
   message: string,
@@ -74,8 +81,17 @@ export function checkSiweChallenge(
   const issuedAt = parsed.issuedAt
   const expiry = parsed.expirationTime
   if (!validTime(issuedAt)) throw new SiweChallengeError('The sign-in message has an invalid issue time.')
-  if (!validTime(expiry) || expiry.getTime() <= now.getTime() || expiry.getTime() - now.getTime() > 15 * 60_000 || expiry.getTime() <= issuedAt.getTime()) {
+  // The validity window comes from the message itself: devices whose clock is minutes off must still sign in (the
+  // backend checks freshness against its own clock). The local clock only refuses what no plausible skew explains.
+  const validity = validTime(expiry) ? expiry.getTime() - issuedAt.getTime() : Number.NaN
+  if (!validTime(expiry) || !(validity > 0) || validity > SIWE_MAX_VALIDITY_MS) {
     throw new SiweChallengeError('The sign-in message has an invalid expiry.')
+  }
+  if (expiry.getTime() < now.getTime() - SIWE_CLOCK_SKEW_MS) {
+    throw new SiweChallengeError('The sign-in message expired more than an hour ago by this device’s clock. Check the clock, then sign in again.')
+  }
+  if (issuedAt.getTime() > now.getTime() + SIWE_CLOCK_SKEW_MS) {
+    throw new SiweChallengeError('The sign-in message is dated more than an hour ahead of this device’s clock. Check the clock, then sign in again.')
   }
   if (parsed.resources && parsed.resources.length > 0) throw new SiweChallengeError('The sign-in message requests extra resources.')
   let canonical: string
