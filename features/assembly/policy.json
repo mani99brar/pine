@@ -104,8 +104,7 @@
       ],
       "owned_paths": [
         "packages/api/src/readmodel.ts",
-        "packages/indexer-envio/envio-env.d.ts",
-        "packages/indexer-envio/scripts/start.mjs",
+        "eslint.config.js",
         "packages/api/test/e2e",
         "deploy",
         "README.md",
