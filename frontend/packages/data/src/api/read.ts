@@ -1,5 +1,5 @@
 // Lane: api read side (ApiDataProvider, ApiGitHubSource, wire schemas and mappers). Re-exported by src/index.ts.
-export { ApiDataProvider, planClaimQuery, type ApiDataProviderOptions } from './provider'
+export { ApiDataProvider, ipAddressLiteral, planClaimQuery, type ApiDataProviderOptions } from './provider'
 export type { CreateDataProviderOptions } from '../provider'
 export {
   ApiGitHubSource,
@@ -12,6 +12,8 @@ export {
   API_CHAIN_ID,
   API_READ_GAPS,
   HIDDEN_CLAIM_TITLE,
+  UNKNOWN_POLICY_ID,
+  UNKNOWN_POLICY_TITLE,
   UNTITLED_CLAIM_TITLE,
   activityFromApi,
   answerFromBytes32,

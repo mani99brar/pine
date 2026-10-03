@@ -77,7 +77,12 @@ export const API_READ_GAPS = {
   volumes: 'liquidity, volume, volume24h, volumeTotal, openInterest are "0" and traders 0 (not indexed)',
   pools: 'MarketState.pools is empty (no TVL); pool addresses, prices and depth quotes are in `api.liquidity`',
   evidenceCount: 'list items report 0 (exact on claim details)',
-  source: 'owner/repo/prNumber come from the verified claim document; "" when it is unavailable or the claim is moderated',
+  source:
+    'repoId is the on-chain repository id; owner/repo/prNumber come from the verified claim document ("" when it is unavailable or the claim is moderated). No backend route resolves repository ids (SEC-GH-12), so owner/repo are only as stated by the document (unverifiedName: true) and the GitHub links built from them are best effort',
+  repositoryFilter:
+    'ClaimQuery.repositoryId, or the id GitHub gives for ClaimQuery.repo through the backend GitHub route (browser only: signed in with a linked GitHub account); never names stated in claim documents',
+  policy:
+    'labelled only from the catalog entry of the on-chain policy digest, or the indexed id of an integrity-verified claim; otherwise { id: "UNKNOWN", title: "Unknown policy", unknown: true, family "FUNC" as a placeholder }: show policy.hash / policy.uri, never /policies/<id>',
   arbitrationCost: 'ArbitrationState.cost is "" (the backend does not report the Kleros fee)',
   activity: 'only per account; claim titles are placeholders (that route does not apply "block" moderation); no oracle answers',
   portfolio: 'markets the wallet created claims on or submitted evidence to (use getMarketPortfolio for any other market); LP value, deposits and fees are "0"',
@@ -159,7 +164,8 @@ function finalOutcome(oracle: WireOracleStatus | null | undefined): Outcome | un
  *
  * | phase | oracle | status |
  * |---|---|---|
- * | evidence_open, reveal_open | any | open |
+ * | evidence_open | any | open |
+ * | reveal_open | any | awaiting_answer (evidence closed on chain; reveals run until Reality opens at the reveal deadline) |
  * | oracle_open | null, not_open, open_unanswered | awaiting_answer |
  * | oracle_open | answered | answer_proposed |
  * | oracle_open, pending_arbitration | pending_arbitration | arbitration |
@@ -175,8 +181,9 @@ export function claimStatusOf(input: {
   const { phase, oracle, resolution } = input
   switch (phase) {
     case 'evidence_open':
-    case 'reveal_open':
       return { status: 'open' }
+    case 'reveal_open':
+      return { status: 'awaiting_answer' }
     case 'pending_arbitration':
       return { status: 'arbitration' }
     case 'resolved': {
@@ -239,23 +246,48 @@ export function verifiedEvidenceManifest(raw: unknown, expectedSha256: string): 
 // Claims
 // ---------------------------------------------------------------------------
 
+/** Label of a policy that cannot be named (see policyRefOf); never a catalog id, so /policies/UNKNOWN finds nothing. */
+export const UNKNOWN_POLICY_ID = 'UNKNOWN'
+export const UNKNOWN_POLICY_TITLE = 'Unknown policy'
+
 export interface ApiPolicyRef {
   id: string
   version: string
   family: PolicyFamilyId
   title: string
+  /** The policy cannot be named: id UNKNOWN_POLICY_ID, `family` a placeholder ('FUNC'). Show `hash`/`uri` instead. */
+  unknown?: boolean
+  /** SHA-256 of the policy document the claim pins on chain. */
+  hash: Hex
+  /** Content address of that document (ipfs://<raw CID>). */
+  uri: string
 }
 
 /**
- * The claim's policy, found in the catalog by the policy document digest the claim records on chain (an id alone is
- * not trusted). Unknown digests fall back to the indexed policy id and the document's version.
+ * The claim's policy label. A claim pins its policy on chain by digest only, so it is labelled only with an id known to
+ * belong to that digest (SEC-AGENT-03: an integrity-failed claim never borrows a catalog label):
+ * - a catalog entry with that digest (the catalog is authoritative for id, version and title);
+ * - else, for an integrity-verified claim (the backend checked that the digest is a catalog file whose entry carries the
+ *   document's id and version) whose catalog entry could not be read: the indexed id and the verified document's version;
+ * - else the explicit unknown policy, never the id an unverified document states (or the backend copied from it).
  */
-export function policyRefOf(sha256: string, policyId: string | null, catalog: readonly WirePolicySummary[], document: ClaimDocument | null): ApiPolicyRef {
-  const matches = catalog.filter((p) => p.sha256 === sha256.toLowerCase())
-  const entry = matches.find((p) => p.id === policyId) ?? matches[0]
-  if (entry) return { id: entry.id, version: entry.version, family: policyFamilyOf(entry.id) ?? 'FUNC', title: entry.title }
-  const id = policyId ?? document?.policy.id ?? 'UNKNOWN'
-  return { id, version: document?.policy.version ?? '', family: policyFamilyOf(id) ?? 'FUNC', title: '' }
+export function policyRefOf(
+  policyDocument: { sha256: string; cid: string },
+  policyId: string | null,
+  catalog: readonly WirePolicySummary[],
+  claim: { verified: boolean; document: ClaimDocument | null },
+): ApiPolicyRef {
+  const pinned = { hash: policyDocument.sha256.toLowerCase() as Hex, uri: `ipfs://${policyDocument.cid}` }
+  const named = catalog.filter((p) => p.sha256 === pinned.hash && policyFamilyOf(p.id) !== null)
+  const entry = named.find((p) => p.id === policyId) ?? named[0]
+  const entryFamily = entry ? policyFamilyOf(entry.id) : null
+  if (entry && entryFamily) return { id: entry.id, version: entry.version, family: entryFamily, title: entry.title, ...pinned }
+  const indexedFamily = claim.verified && policyId !== null ? policyFamilyOf(policyId) : null
+  if (policyId !== null && indexedFamily) {
+    const version = claim.document?.policy.id === policyId ? claim.document.policy.version : ''
+    return { id: policyId, version, family: indexedFamily, title: '', ...pinned }
+  }
+  return { id: UNKNOWN_POLICY_ID, version: '', family: 'FUNC', title: UNKNOWN_POLICY_TITLE, unknown: true, ...pinned }
 }
 
 export interface ApiIndexerFacts {
@@ -285,6 +317,11 @@ export interface ApiClaimFacts {
   evidenceDeadline: number
   revealDeadline: number
   minBondWei: string
+  /**
+   * The backend's integrity verdict (document vs chain). Only `verified` claims are listed and show their terms; any
+   * other claim is reachable by direct link only, without terms, and labelled with a policy only when its on-chain
+   * digest is a catalog policy (else `policy.unknown`): warn prominently (SEC-AGENT-03).
+   */
   integrity: { status: 'pending' | 'verified' | 'mismatch' | 'document_unavailable'; mismatchFields: string[]; final: boolean }
   /** Moderated (hidden or blocked): every user-supplied text is withheld. */
   hidden: boolean
@@ -359,6 +396,7 @@ export function claimSummaryFromApi(input: ApiClaimInput): ApiClaimSummary {
   const { status, outcome } = claimStatusOf(v)
   const ref = doc?.target.membership.ref
   const title = input.hidden ? HIDDEN_CLAIM_TITLE : (safeTitle(v.title) ?? safeTitle(doc?.claim.title) ?? UNTITLED_CLAIM_TITLE)
+  const stated = doc?.target.repository
   return {
     id: v.market,
     number: 0,
@@ -366,9 +404,12 @@ export function claimSummaryFromApi(input: ApiClaimInput): ApiClaimSummary {
     violation: doc?.claim.violation ?? '',
     policy: { ...input.policy },
     source: {
-      owner: doc?.target.repository.ownerLogin ?? '',
-      repo: doc?.target.repository.name ?? '',
+      owner: stated?.ownerLogin ?? '',
+      repo: stated?.name ?? '',
       commitSha: v.commit,
+      repoId: v.repositoryId,
+      // Display snapshots of the document: the backend ties only the numeric id to the chain (SEC-GH-12, SEC-EVID-15).
+      ...(stated ? { unverifiedName: true } : {}),
       ...(ref?.kind === 'pull' ? { prNumber: ref.number } : {}),
     },
     status,
@@ -384,7 +425,7 @@ export function claimSummaryFromApi(input: ApiClaimInput): ApiClaimSummary {
     evidenceCount: 0,
     traders: 0,
     sponsored: false,
-    tags: [input.policy.family.toLowerCase()],
+    tags: input.policy.unknown ? [] : [input.policy.family.toLowerCase()],
     api: claimFacts(input, doc !== null),
   }
 }
@@ -720,7 +761,7 @@ function manifestOf(input: ApiClaimDetailInput, title: string, policy: ApiPolicy
       provider: 'github',
       owner,
       repo,
-      ...(doc ? { repoId: doc.target.repository.id } : {}),
+      repoId: v.repositoryId,
       commit: { sha: v.commit, message: '', author: '', committedAt: '', htmlUrl: commitUrl },
       ...(doc?.target.baseCommit ? { baseCommit: { sha: doc.target.baseCommit, htmlUrl: repoUrl ? `${repoUrl}/commit/${doc.target.baseCommit}` : '' } } : {}),
     },

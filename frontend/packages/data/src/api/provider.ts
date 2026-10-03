@@ -14,8 +14,8 @@ import type {
   PricePoint,
 } from '@pine/core'
 import type { ClaimDocument } from '@pine/core/pine-shared'
-import type { DataSourceKind, PineDataProvider } from '../types'
-import { PineApiClient, seg } from './http'
+import { PineDataError, type DataSourceKind, type PineDataProvider } from '../types'
+import { PineApiClient, PineBackendError, seg } from './http'
 import {
   activityFromApi,
   API_CHAIN_ID,
@@ -40,6 +40,7 @@ import {
   claimDetailSchema,
   claimListSchema,
   evidenceListSchema,
+  githubRepoSchema,
   liquidityViewSchema,
   oracleViewSchema,
   policyDetailSchema,
@@ -63,8 +64,45 @@ export interface ApiDataProviderOptions {
   fetch?: typeof fetch
   /** No backend reachable (SSR without PINE_API_INTERNAL_URL): every read resolves empty or null without a request. */
   offline?: boolean
+  /**
+   * Resolve `ClaimQuery.repo` (owner/name) to GitHub's repository id through the backend GitHub route, which needs the
+   * browser's session cookie and a linked GitHub account. Default true; server providers set false (no cookie there).
+   */
+  resolveRepositories?: boolean
+  /**
+   * Server providers only: the visitor's IP address as the trusted edge proxy set it (nginx `X-Forwarded-For
+   * $remote_addr`), sent to pine-api as `X-Forwarded-For` so its per-IP limits count server-rendered reads per visitor
+   * instead of in one bucket shared by every visitor. Forwarded only when it is exactly one IPv4/IPv6 literal
+   * (ipAddressLiteral); no other client header is ever forwarded. Ignored when `client` is given.
+   */
+  forwardedFor?: string | null
   /** Clock in milliseconds (tests inject one). */
   now?: () => number
+}
+
+const IPV4 = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+
+/**
+ * `value` when it is exactly one IPv4 address in dotted decimal (no leading zeros) or one IPv6 address (RFC 4291 text,
+ * IPv4 suffix allowed), else null: no list, port, brackets, zone, hostname, whitespace or other characters.
+ */
+export function ipAddressLiteral(value: string | null | undefined): string | null {
+  if (typeof value !== 'string' || value.length < 2 || value.length > 45) return null
+  if (IPV4.test(value)) return value
+  if (!value.includes(':') || !/^[0-9A-Fa-f:.]+$/.test(value)) return null
+  try {
+    // The WHATWG URL parser implements the IPv6 address grammar exactly (one "::", 8 pieces, a strict IPv4 tail).
+    void new URL(`http://[${value}]/`)
+    return value
+  } catch {
+    return null
+  }
+}
+
+/** `fetch` that adds `X-Forwarded-For: <ip>` (a validated literal) to every request. */
+function forwardingFetch(fetcher: typeof fetch | undefined, ip: string): typeof fetch {
+  const base: typeof fetch = fetcher ?? ((...args) => fetch(...args))
+  return (input, init) => base(input, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers).entries()), 'x-forwarded-for': ip } })
 }
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
@@ -76,6 +114,11 @@ const SEMVER = /^\d+\.\d+\.\d+$/
 const LIST_LIMIT_MAX = 25
 const LIST_LIMIT_DEFAULT = 20
 const LIST_CURSOR_MAX = 200
+/**
+ * Backend pages read per listClaims call (at most 100 claims scanned): moderation and the filters applied here can
+ * leave a backend page short or empty while its cursor continues, so pages are read until the limit is filled.
+ */
+const LIST_PAGES_MAX = 4
 const ACTIVITY_CURSOR_MAX = 2_048
 /** Parallel claim-document reads when a listing page is enriched (each is one agent-feed request). */
 const DOCUMENT_CONCURRENCY = 4
@@ -87,21 +130,32 @@ const PORTFOLIO_MARKETS_MAX = 20
 /** The positions and liquidity routes allow 4 concurrent cache misses per process: stay well below. */
 const PORTFOLIO_CONCURRENCY = 2
 const CATALOG_TTL_MS = 60_000
+/** GitHub's answer for owner/name: an id is kept 10 minutes (renames and transfers), "no public repository" 1 minute. */
+const REPOSITORY_ID_TTL_MS = 600_000
+const REPOSITORY_MISS_TTL_MS = 60_000
+const REPOSITORY_LOOKUPS_MAX = 256
+
+const REPOSITORY_FILTER_NEEDS_GITHUB =
+  'Filtering claims by repository needs a signed-in account with a linked GitHub account: GitHub resolves owner/name to the repository id that claims pin on chain.'
 
 type ListingPhase = 'evidence_open' | 'reveal_open' | 'closed'
 
-/** Backend listing phase that can contain claims of each frontend status (null: never on the backend). */
-const STATUS_PHASE: Record<ClaimStatus, ListingPhase | null> = {
-  draft: null,
-  publishing: null,
-  failed: null,
-  open: 'evidence_open',
-  awaiting_answer: 'closed',
-  answer_proposed: 'closed',
-  disputed: 'closed',
-  arbitration: 'closed',
-  resolved: 'closed',
-  settled: 'closed',
+/**
+ * Backend listing phases that can hold claims of each frontend status (none: never on the backend). `closed` means the
+ * reveal deadline has passed (oracle open, arbitration, finalized, resolved); a claim in its reveal window is
+ * `awaiting_answer` (claimStatusOf), never `open`.
+ */
+const STATUS_PHASES: Record<ClaimStatus, readonly ListingPhase[]> = {
+  draft: [],
+  publishing: [],
+  failed: [],
+  open: ['evidence_open'],
+  awaiting_answer: ['reveal_open', 'closed'],
+  answer_proposed: ['closed'],
+  disputed: ['closed'],
+  arbitration: ['closed'],
+  resolved: ['closed'],
+  settled: ['closed'],
 }
 
 function addressOf(value: string | undefined): Address | null {
@@ -144,33 +198,41 @@ function hiddenAgent(a: WireAgentClaim): boolean {
 }
 
 interface ClaimQueryPlan {
-  /** Exactly the backend's listing parameters, in URL order. */
-  query: { phase?: ListingPhase; repositoryId?: number; creator?: Address; cursor?: string; limit: number }
+  /** The backend's listing filters, in URL order (each page request adds its cursor and limit). */
+  filters: { phase?: ListingPhase; repositoryId?: number; creator?: Address }
+  cursor?: string
+  /** Claims wanted in this page: 1..25. Backend pages are read until they are found (bounded). */
+  limit: number
   statuses: ReadonlySet<ClaimStatus> | null
   outcome?: Outcome
-  /** Lowercase owner/name filtered on the page when no repository id is known for it. */
-  repo?: string
+  /** Lowercase owner/name whose GitHub repository id is still needed (no trusted id was given). */
+  repo?: { owner: string; name: string }
+}
+
+function isRepositoryId(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0
 }
 
 /**
  * ClaimQuery → the backend's strict listing query (phase, repositoryId, creator, cursor, limit ≤ 25; nothing else is
  * ever sent), plus the filters applied to the returned page. Null when nothing can match (draft/publishing/failed
- * statuses, another chain, malformed creator/repo/cursor), so no request is made.
+ * statuses, another chain, malformed creator/repo/repository id/cursor), so no request is made.
+ *
+ * A repository filter uses only a trusted numeric id: `q.repositoryId`, or `resolvedRepositoryId` (GitHub's answer for
+ * `q.repo`). Without one the plan carries `repo` for the caller to resolve; owner/name stated in claim documents are
+ * never used to filter or to learn ids (SEC-GH-12).
  */
-export function planClaimQuery(q: ClaimQuery, knownRepositoryIds: ReadonlyMap<string, number> = new Map()): ClaimQueryPlan | null {
+export function planClaimQuery(q: ClaimQuery, resolvedRepositoryId?: number): ClaimQueryPlan | null {
   if (q.chainId !== undefined && q.chainId !== API_CHAIN_ID) return null
   const statuses = q.status === undefined ? [] : Array.isArray(q.status) ? q.status : [q.status]
-  let phase: ListingPhase | undefined
-  if (statuses.length > 0) {
-    const phases = new Set(statuses.map((s) => STATUS_PHASE[s]).filter((p): p is ListingPhase => p !== null))
-    if (phases.size === 0) return null
-    if (phases.size === 1) phase = [...phases][0]
-  }
+  // null: every phase. One request carries at most one phase; several are filtered on the page.
+  let phases: Set<ListingPhase> | null = statuses.length > 0 ? new Set(statuses.flatMap((s) => STATUS_PHASES[s] ?? [])) : null
   if (q.outcome) {
-    // An outcome exists only once the claim is closed.
-    if (phase === 'evidence_open') return null
-    if (statuses.length === 0) phase = 'closed'
+    // An outcome exists only once the reveal deadline has passed.
+    phases = new Set<ListingPhase>(!phases || phases.has('closed') ? ['closed'] : [])
   }
+  if (phases?.size === 0) return null
+  const phase = phases?.size === 1 ? [...phases][0] : undefined
   let creator: Address | undefined
   if (q.creator !== undefined) {
     const c = addressOf(q.creator)
@@ -178,42 +240,52 @@ export function planClaimQuery(q: ClaimQuery, knownRepositoryIds: ReadonlyMap<st
     creator = c
   }
   let repositoryId: number | undefined
-  let repo: string | undefined
-  if (q.repo !== undefined) {
-    if (!REPO.test(q.repo) || q.repo.endsWith('/.') || q.repo.endsWith('/..')) return null
-    const key = q.repo.toLowerCase()
-    repositoryId = knownRepositoryIds.get(key)
-    if (repositoryId === undefined) repo = key
+  let repo: { owner: string; name: string } | undefined
+  if (q.repositoryId !== undefined) {
+    if (!isRepositoryId(q.repositoryId)) return null
+    repositoryId = q.repositoryId
+  } else if (q.repo !== undefined) {
+    const [, owner, name] = REPO.exec(q.repo) ?? []
+    if (!owner || !name || name === '.' || name === '..') return null
+    if (resolvedRepositoryId === undefined) repo = { owner: owner.toLowerCase(), name: name.toLowerCase() }
+    else if (isRepositoryId(resolvedRepositoryId)) repositoryId = resolvedRepositoryId
+    else return null
   }
   if (q.cursor !== undefined && q.cursor.length > LIST_CURSOR_MAX) return null
   const limit = Math.min(Math.max(1, Math.floor(q.limit ?? LIST_LIMIT_DEFAULT) || 1), LIST_LIMIT_MAX)
   return {
-    query: {
+    filters: {
       ...(phase ? { phase } : {}),
       ...(repositoryId !== undefined ? { repositoryId } : {}),
       ...(creator ? { creator } : {}),
-      ...(q.cursor ? { cursor: q.cursor } : {}),
-      limit,
     },
+    ...(q.cursor ? { cursor: q.cursor } : {}),
+    limit,
     statuses: statuses.length > 0 ? new Set(statuses) : null,
     ...(q.outcome ? { outcome: q.outcome } : {}),
     ...(repo ? { repo } : {}),
   }
 }
 
-function matchesQuery(c: ApiClaimSummary, q: ClaimQuery, plan: ClaimQueryPlan): boolean {
+/** Filters on platform facts (status, outcome, policy, repository id): applied before any claim document is read. */
+function matchesPlatform(c: ApiClaimSummary, q: ClaimQuery, plan: ClaimQueryPlan): boolean {
   if (plan.statuses && !plan.statuses.has(c.status)) return false
   if (plan.outcome && c.outcome !== plan.outcome) return false
+  // An unknown policy matches no policy or family filter (its family is a placeholder).
+  if ((q.policyId || q.family) && c.policy.unknown) return false
   if (q.policyId && c.policy.id !== q.policyId.trim().toUpperCase()) return false
   if (q.family && c.policy.family !== q.family) return false
-  // A claim whose document is unknown never matches a repository filter.
-  if (plan.repo && (!c.source.owner || `${c.source.owner}/${c.source.repo}`.toLowerCase() !== plan.repo)) return false
-  const terms = (q.search ?? '').toLowerCase().split(/\s+/).filter(Boolean)
-  if (terms.length > 0) {
-    const haystack = [c.title, c.violation, c.policy.id, `${c.source.owner}/${c.source.repo}`, c.source.commitSha, c.marketAddress ?? '', c.creator].join(' ').toLowerCase()
-    if (!terms.every((t) => haystack.includes(t))) return false
-  }
+  // The backend filters by repository id; the on-chain id of every returned claim must agree.
+  if (plan.filters.repositoryId !== undefined && c.api.repositoryId !== plan.filters.repositoryId) return false
   return true
+}
+
+/** Search terms over the title, the document's violation and stated repository, policy, commit, market and creator. */
+function matchesSearch(c: ApiClaimSummary, q: ClaimQuery): boolean {
+  const terms = (q.search ?? '').toLowerCase().split(/\s+/).filter(Boolean)
+  if (terms.length === 0) return true
+  const haystack = [c.title, c.violation, c.policy.id, `${c.source.owner}/${c.source.repo}`, c.source.commitSha, c.marketAddress ?? '', c.creator].join(' ').toLowerCase()
+  return terms.every((t) => haystack.includes(t))
 }
 
 /**
@@ -228,8 +300,8 @@ function sortClaims(items: ApiClaimSummary[], sort: ClaimSort | undefined): ApiC
 /**
  * Pine backend (`packages/api`, same-origin `/api/v1`) as a PineDataProvider. Claims are identified by their Seer
  * market address; every response is validated with zod (malformed → PineBackendError BAD_RESPONSE); user-supplied text
- * is shown only from documents that match their on-chain digests and never for moderated claims or evidence.
- * Server-side instances call public GET routes only and never carry cookies.
+ * is shown only from documents that match their on-chain digests, never for moderated claims or evidence nor for claims
+ * that are not integrity-verified. Server-side instances call public GET routes only and never carry cookies.
  */
 export class ApiDataProvider implements PineDataProvider {
   readonly kind: DataSourceKind = 'api'
@@ -241,12 +313,16 @@ export class ApiDataProvider implements PineDataProvider {
   private readonly policyParameters = new Map<string, Promise<WirePolicyParameters | null>>()
   /** Verified claim documents by digest (immutable content). Only listing enrichment reads from it. */
   private readonly documents = new Map<string, ClaimDocument>()
-  /** owner/name (lowercase) → numeric repository id, learnt from verified documents. */
-  private readonly repositoryIds = new Map<string, number>()
+  /** Lowercase owner/name → GitHub's repository id for it (null: no public repository), as GitHub answered. */
+  private readonly repositoryLookups = new Map<string, { at: number; id: number | null }>()
+  private readonly resolveRepositories: boolean
 
   constructor(opts: ApiDataProviderOptions = {}) {
-    this.client = opts.offline ? null : (opts.client ?? new PineApiClient({ baseUrl: opts.baseUrl ?? '', fetch: opts.fetch }))
+    const ip = ipAddressLiteral(opts.forwardedFor)
+    const fetcher = ip ? forwardingFetch(opts.fetch, ip) : opts.fetch
+    this.client = opts.offline ? null : (opts.client ?? new PineApiClient({ baseUrl: opts.baseUrl ?? '', fetch: fetcher }))
     this.now = opts.now ?? (() => Date.now())
+    this.resolveRepositories = opts.resolveRepositories ?? true
   }
 
   private nowSec(): number {
@@ -267,7 +343,7 @@ export class ApiDataProvider implements PineDataProvider {
     return value
   }
 
-  /** Policy lookups for claims degrade to the indexed policy id when the catalog cannot be read. */
+  /** Without the catalog, verified claims keep their indexed policy id and others show the unknown policy (policyRefOf). */
   private catalogOrEmpty(client: PineApiClient): Promise<WirePolicySummary[]> {
     return this.catalog(client).catch(() => [])
   }
@@ -313,14 +389,42 @@ export class ApiDataProvider implements PineDataProvider {
 
   // ---------------------------------------------------------------- claims
 
+  /** Documents only: their owner/name are display snapshots, never a source of repository ids. */
   private rememberDocument(sha256: string, doc: ClaimDocument): void {
     if (!this.documents.has(sha256) && this.documents.size >= DOCUMENT_CACHE_MAX) {
       const oldest = this.documents.keys().next().value
       if (oldest !== undefined) this.documents.delete(oldest)
     }
     this.documents.set(sha256, doc)
-    const r = doc.target.repository
-    this.repositoryIds.set(`${r.ownerLogin}/${r.name}`.toLowerCase(), r.id)
+  }
+
+  /**
+   * GitHub's repository id for owner/name, read through the backend GitHub route (session cookie and linked GitHub
+   * account; one GitHub call, cached). Null when GitHub has no public repository by that name. Signed out or not linked
+   * (401/403) is an error that says so, not an empty result; so is a server provider, which cannot resolve names.
+   */
+  private async repositoryIdOf(client: PineApiClient, repo: { owner: string; name: string }): Promise<number | null> {
+    if (!this.resolveRepositories) throw new PineDataError('Filtering claims by repository name needs ClaimQuery.repositoryId on the server.', 'unsupported')
+    const key = `${repo.owner}/${repo.name}`
+    const now = this.now()
+    const hit = this.repositoryLookups.get(key)
+    if (hit && now - hit.at < (hit.id === null ? REPOSITORY_MISS_TTL_MS : REPOSITORY_ID_TTL_MS)) return hit.id
+    let id: number | null
+    try {
+      id = (await client.getOrNull(`/api/v1/github/repos/${seg(repo.owner)}/${seg(repo.name)}`, githubRepoSchema))?.id ?? null
+    } catch (err) {
+      if (!(err instanceof PineBackendError)) throw err
+      if (err.status === 401 || err.status === 403) throw new PineBackendError(REPOSITORY_FILTER_NEEDS_GITHUB, err.status, err.apiCode, err.requestId)
+      // 422: not a public repository. Pine claims target public repositories only.
+      if (err.status !== 422) throw err
+      id = null
+    }
+    if (!this.repositoryLookups.has(key) && this.repositoryLookups.size >= REPOSITORY_LOOKUPS_MAX) {
+      const oldest = this.repositoryLookups.keys().next().value
+      if (oldest !== undefined) this.repositoryLookups.delete(oldest)
+    }
+    this.repositoryLookups.set(key, { at: now, id })
+    return id
   }
 
   /**
@@ -328,6 +432,7 @@ export class ApiDataProvider implements PineDataProvider {
    * request and violation. Documents are immutable: a digest read once is not read again. Failures leave it unknown.
    */
   private async listingDocument(client: PineApiClient, item: WireListedClaim): Promise<ClaimDocument | null> {
+    if (item.integrity.status !== 'verified') return null
     const sha = item.claimDocument.sha256
     const known = this.documents.get(sha)
     if (known) return known
@@ -342,29 +447,56 @@ export class ApiDataProvider implements PineDataProvider {
     }
   }
 
+  /**
+   * One page of listed claims. Backend pages (moderation applied after its SQL limit) and the filters applied here can
+   * come back short or empty while the backend cursor continues, so backend pages are read until `limit` claims match,
+   * the cursor ends or LIST_PAGES_MAX pages were read; each page asks for the claims still missing only, so nothing
+   * past the returned cursor is skipped. `nextCursor` is the last backend cursor: after an unlucky bounded scan a page
+   * can still be empty with a nextCursor (callers offer "load more" whenever it is set).
+   */
   async listClaims(q: ClaimQuery = {}): Promise<Page<ApiClaimSummary>> {
     const client = this.client
     if (!client) return { items: [] }
-    const plan = planClaimQuery(q, this.repositoryIds)
+    let planned = planClaimQuery(q)
+    if (planned?.repo) {
+      const id = await this.repositoryIdOf(client, planned.repo)
+      // No public repository by that name on GitHub: no claim can be on it.
+      planned = id === null ? null : planClaimQuery(q, id)
+    }
+    const plan = planned
     if (!plan) return { items: [] }
-    const [page, catalog] = await Promise.all([client.get('/api/v1/claims', claimListSchema, plan.query), this.catalogOrEmpty(client)])
-    const documents = await mapLimit(page.items, DOCUMENT_CONCURRENCY, (item) => this.listingDocument(client, item))
-    const mapped = page.items.map((item, i) => {
-      const document = documents[i] ?? null
-      return claimSummaryFromApi({
-        view: item,
-        document,
-        hidden: false,
-        listed: item.listable,
-        policy: policyRefOf(item.policyDocument.sha256, item.policyId, catalog, document),
-        indexer: page.indexer,
+    const catalog = this.catalogOrEmpty(client)
+    const items: ApiClaimSummary[] = []
+    const seen = new Set<string>()
+    let cursor = plan.cursor
+    let nextCursor: string | null = null
+    for (let i = 0; i < LIST_PAGES_MAX && items.length < plan.limit; i++) {
+      const page = await client.get('/api/v1/claims', claimListSchema, { ...plan.filters, ...(cursor ? { cursor } : {}), limit: plan.limit - items.length })
+      const policies = await catalog
+      const summary = (item: WireListedClaim, document: ClaimDocument | null) =>
+        claimSummaryFromApi({
+          view: item,
+          document,
+          hidden: false,
+          listed: item.listable,
+          policy: policyRefOf(item.policyDocument, item.policyId, policies, { verified: item.integrity.status === 'verified', document }),
+          indexer: page.indexer,
+        })
+      const fresh = page.items.filter((item) => !seen.has(item.market))
+      for (const item of fresh) seen.add(item.market)
+      // Documents are read only for claims that pass the platform filters.
+      const candidates = fresh.filter((item) => matchesPlatform(summary(item, null), q, plan))
+      const documents = await mapLimit(candidates, DOCUMENT_CONCURRENCY, (item) => this.listingDocument(client, item))
+      candidates.forEach((item, j) => {
+        const c = summary(item, documents[j] ?? null)
+        if (matchesSearch(c, q)) items.push(c)
       })
-    })
-    const items = sortClaims(
-      mapped.filter((c) => matchesQuery(c, q, plan)),
-      q.sort,
-    )
-    return page.nextCursor ? { items, nextCursor: page.nextCursor } : { items }
+      nextCursor = page.nextCursor
+      if (!nextCursor) break
+      cursor = nextCursor
+    }
+    const sorted = sortClaims(items, q.sort)
+    return nextCursor ? { items: sorted, nextCursor } : { items: sorted }
   }
 
   /** Every evidence page of a market (bounded); [] when the market is not a registered claim. */
@@ -401,10 +533,12 @@ export class ApiDataProvider implements PineDataProvider {
     ])
     if (!detail || detail.claim.market !== market) return null
     const view = detail.claim
+    const verified = view.integrity.status === 'verified'
     const sameClaim = agent !== null && agent.item.platform.market === market && agent.item.platform.claimDocument.sha256 === view.claimDocument.sha256
     // Moderation from either response withholds every user text (a race between the two reads errs on hiding).
     const hidden = hiddenView(view) || (sameClaim && hiddenAgent(agent))
-    const raw = !hidden && sameClaim ? agent.item.userSupplied?.document : undefined
+    // The terms of a claim that failed (or has not passed) the integrity check are never shown, like on the backend.
+    const raw = !hidden && verified && sameClaim ? agent.item.userSupplied?.document : undefined
     const document = verifiedClaimDocument(raw, view.claimDocument.sha256)
     if (document) this.rememberDocument(view.claimDocument.sha256, document)
     const evidenceItems: ApiEvidence[] = evidence.map((e) => evidenceFromApi(e, { claimHidden: hidden }))
@@ -413,7 +547,7 @@ export class ApiDataProvider implements PineDataProvider {
       document,
       hidden,
       listed: view.listed,
-      policy: policyRefOf(view.policyDocument.sha256, view.policyId, catalog, document),
+      policy: policyRefOf(view.policyDocument, view.policyId, catalog, { verified, document }),
       indexer: detail.indexer,
       evidence: evidenceItems,
       oracle: oracle && oracle.market === market ? oracle : null,

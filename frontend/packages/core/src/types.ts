@@ -463,8 +463,36 @@ export interface ClaimSummary {
   number: number // 42 → displayed "PINE-0042"
   title: string
   violation: string
-  policy: { id: string; version: string; family: PolicyFamilyId; title: string }
-  source: { owner: string; repo: string; commitSha: string; prNumber?: number; prTitle?: string }
+  policy: {
+    id: string
+    version: string
+    family: PolicyFamilyId
+    title: string
+    /**
+     * Additive (api mode): the policy the claim pins on chain cannot be named (its digest is no catalog policy and the
+     * claim is not integrity-verified). `id` is 'UNKNOWN' and `family` a placeholder: show `hash`/`uri`, never a
+     * /policies/<id> link or a family label.
+     */
+    unknown?: boolean
+    /** Additive (api mode): SHA-256 of the policy document the claim pins on chain. */
+    hash?: Hex
+    /** Additive (api mode): content address of that policy document (ipfs://<raw CID>). */
+    uri?: string
+  }
+  source: {
+    owner: string
+    repo: string
+    commitSha: string
+    prNumber?: number
+    prTitle?: string
+    /** Additive (api mode): the numeric GitHub repository id the claim pins on chain (its repository identity). */
+    repoId?: number
+    /**
+     * Additive: `owner`/`repo` are only as stated in the claim document; nothing tied them to `repoId`. Show them as
+     * unverified, never as the verified repository.
+     */
+    unverifiedName?: boolean
+  }
   status: ClaimStatus
   outcome?: Outcome
   createdAt: IsoDate
@@ -515,6 +543,11 @@ export interface ClaimQuery {
   policyId?: string
   family?: PolicyFamilyId
   repo?: string // owner/name
+  /**
+   * Additive: a GitHub repository id from a trusted source (GitHub's answer for owner/name, or a claim's
+   * `source.repoId`). api mode: sent as the backend's repositoryId filter; takes precedence over `repo`.
+   */
+  repositoryId?: number
   creator?: Address
   chainId?: ChainId
   search?: string
