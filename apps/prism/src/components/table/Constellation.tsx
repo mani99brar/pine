@@ -45,9 +45,9 @@ function layout(claims: ClaimSummary[], nowMs: number, w: number, h: number, com
     const x = 0.5 + scaleDt(dt) * 0.46
     const priced = c.yesPrice !== undefined && c.status !== 'publishing' && c.status !== 'failed'
     const p = isResolved(c.status) ? (c.outcome === 'yes' ? 0.96 : c.outcome === 'no' ? 0.06 : 0.5) : (c.yesPrice ?? 0.5)
-    const y = priced || isResolved(c.status) ? 0.08 + (1 - p) * 0.8 : 0.93
+    const y = priced || isResolved(c.status) ? 0.12 + (1 - p) * 0.72 : 0.9
     const liq = Number(c.liquidity) || 0
-    const size = (compact ? 34 : 44) + (compact ? 30 : 46) * Math.sqrt(liq / maxLiq)
+    const size = (compact ? 44 : 60) + (compact ? 40 : 64) * (Math.log10(1 + liq) / Math.log10(1 + maxLiq))
     return { claim: c, x, y, size, priced }
   })
   // Deterministic relaxation so crystals never sit on top of each other.
@@ -57,6 +57,7 @@ function layout(claims: ClaimSummary[], nowMs: number, w: number, h: number, com
       for (let j = i + 1; j < placed.length; j++) {
         const a = placed[i]
         const b = placed[j]
+        if (!a || !b) continue
         const dx = (a.x - b.x) * w
         const dy = (a.y - b.y) * h
         const minX = (a.size + b.size) * 0.34
@@ -126,7 +127,7 @@ function Card({ p, nowMs }: { p: Placed; nowMs: number }) {
 export function Constellation({ claims, nowMs, compact = false, className }: { claims: ClaimSummary[]; nowMs: number; compact?: boolean; className?: string }) {
   const reduce = useReduceMotion()
   const W = 1200
-  const H = compact ? 440 : 600
+  const H = compact ? 440 : 540
   const placed = useMemo(() => layout(claims, nowMs, W, H, compact), [claims, nowMs, H, compact])
   const [hover, setHover] = useState<string | null>(null)
   const active = placed.find((p) => p.claim.id === hover)
@@ -170,8 +171,8 @@ export function Constellation({ claims, nowMs, compact = false, className }: { c
           <span className="rounded-[3px] bg-[rgba(14,10,9,0.7)] px-1.5 text-lumen-2">now</span>
           <span>Evidence window open</span>
         </div>
-        <div aria-hidden className="pointer-events-none absolute bottom-2 left-3 text-[0.72rem] text-lumen-3">
-          Higher means the market sees a counterexample as more likely
+        <div aria-hidden className="pointer-events-none absolute left-3 top-7 text-[0.72rem] text-lumen-3">
+          Higher: the market sees a counterexample as more likely
         </div>
         <div aria-hidden className="pointer-events-none absolute inset-x-0 bottom-2 hidden text-[0.72rem] text-lumen-3 sm:block">
           {TICKS.map((t) => (

@@ -25,7 +25,17 @@ export function DemoFailToggle({ className, compact }: { className?: string; com
       )}
     >
       <Zap size={13} aria-hidden className={armed ? 'text-ha' : 'text-na'} />
-      {armed ? 'Next transaction will fail' : compact ? 'Fail the next transaction' : 'Demo: fail the next transaction'}
+      {armed ? (
+        <span>
+          Next <span className={compact ? 'hidden sm:inline' : ''}>transaction</span> will fail
+        </span>
+      ) : compact ? (
+        <span>
+          Fail next<span className="hidden sm:inline"> transaction</span>
+        </span>
+      ) : (
+        'Demo: fail the next transaction'
+      )}
     </button>
   )
 }

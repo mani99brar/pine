@@ -109,6 +109,13 @@ function Loading() {
 
 export function ClaimView({ id }: { id: string }) {
   const q = useClaim(id, { live: true })
+  const loaded = Boolean(q.data)
+  // Sections render after the claim loads, so honour #evidence / #oracle links once they exist.
+  useEffect(() => {
+    if (!loaded || typeof window === 'undefined' || !window.location.hash) return
+    const el = document.getElementById(decodeURIComponent(window.location.hash.slice(1)))
+    if (el) requestAnimationFrame(() => el.scrollIntoView({ block: 'start' }))
+  }, [loaded])
   if (q.isLoading) return <Loading />
   if (q.isError)
     return (
@@ -142,7 +149,7 @@ export function ClaimView({ id }: { id: string }) {
       {/* Header */}
       <header className="mt-6 grid gap-6 sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-8">
         <div className="flex justify-center sm:block">
-          <ClaimCrystal claim={claim} size={190} animateFracture={claim.outcome === 'yes'} />
+          <ClaimCrystal claim={claim} size={212} animateFracture={claim.outcome === 'yes'} />
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -193,9 +200,13 @@ export function ClaimView({ id }: { id: string }) {
                 <p className="text-[0.8125rem] text-lumen-3">Beam widths are prices</p>
               </div>
               <PrismBeam prices={prices} outcome={resolved ? claim.outcome : undefined} noMarket={!claim.market} />
-              <p className="mt-4 text-[0.84375rem] text-lumen-2">
-                <strong className="font-semibold text-lumen">{COPY.priceLabel}.</strong> {COPY.priceCaveat}
-              </p>
+              {resolved ? (
+                <p className="mt-4 text-[0.84375rem] text-lumen-2">The oracle answer is final, so the light shows only the settled outcome. Market prices no longer describe an open question.</p>
+              ) : (
+                <p className="mt-4 text-[0.84375rem] text-lumen-2">
+                  <strong className="font-semibold text-lumen">{COPY.priceLabel}.</strong> {COPY.priceCaveat}
+                </p>
+              )}
             </section>
           )}
           <OutcomeBanner claim={claim} />
@@ -207,7 +218,7 @@ export function ClaimView({ id }: { id: string }) {
               {claim.status === 'open' && <ButtonLink href={`/claims/${claim.id}/evidence`}>Submit evidence</ButtonLink>}
               {claim.market && (
                 <ButtonLink href={claim.market.seerUrl} external variant="glass">
-                  Trade on Seer
+                  {resolved ? 'View on Seer' : 'Trade on Seer'}
                 </ButtonLink>
               )}
             </div>

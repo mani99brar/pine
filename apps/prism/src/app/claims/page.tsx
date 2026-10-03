@@ -13,8 +13,9 @@ export default function ClaimsPage() {
   return (
     <Container wide>
       <PageHeader
+        className="pb-6 pt-8 sm:pt-10"
         title="Light table"
-        lead="Every published claim, placed around the present moment. Crystals right of the slit are still open for evidence; those to the left are with the oracle or resolved."
+        lead="Every published claim, placed around the present moment. Right of the slit the evidence window is still open; left of it, the oracle is answering or the claim is resolved."
       />
       <Suspense fallback={<Skeleton className="h-[28rem] w-full" />}>
         <LightTable />

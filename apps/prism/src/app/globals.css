@@ -293,7 +293,7 @@
     border: 1px solid var(--edge);
   }
   .glass-float {
-    background: rgba(28, 22, 19, 0.78);
+    background: rgba(28, 22, 19, 0.9);
     border: 1px solid var(--edge);
     backdrop-filter: blur(16px) saturate(1.25);
     -webkit-backdrop-filter: blur(16px) saturate(1.25);
@@ -557,6 +557,82 @@
   }
   .facet-check:checked::after {
     transform: rotate(-45deg) translate(1px, -1px) scale(1);
+  }
+
+  /* Switch: a slot of light that fills when on. */
+  .prism-switch {
+    appearance: none;
+    flex: none;
+    position: relative;
+    width: 2.6rem;
+    height: 1.45rem;
+    border-radius: 999px;
+    background: var(--void);
+    border: 1px solid var(--edge-strong);
+    transition: background-color var(--dur-hover), border-color var(--dur-hover);
+  }
+  .prism-switch::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: calc(1.45rem - 6px);
+    height: calc(1.45rem - 6px);
+    border-radius: 999px;
+    background: var(--lumen-3);
+    transition: transform var(--dur-panel) var(--ease-settle), background-color var(--dur-hover);
+  }
+  .prism-switch:checked {
+    background: rgba(90, 216, 255, 0.18);
+    border-color: var(--hb);
+  }
+  .prism-switch:checked::after {
+    transform: translateX(1.15rem);
+    background: var(--lumen);
+    box-shadow: 0 0 10px rgba(90, 216, 255, 0.8);
+  }
+
+  /* Range: the track is a thin beam, the thumb a small facet. */
+  .prism-range {
+    appearance: none;
+    height: 1.6rem;
+    background: transparent;
+  }
+  .prism-range::-webkit-slider-runnable-track {
+    height: 3px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #ff6b83, #a9b4c1);
+  }
+  .prism-range::-moz-range-track {
+    height: 3px;
+    border-radius: 3px;
+    background: linear-gradient(90deg, #ff6b83, #a9b4c1);
+  }
+  .prism-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    margin-top: -6.5px;
+    background: var(--lumen);
+    transform: rotate(45deg);
+    border-radius: 3px;
+    box-shadow: 0 0 12px rgba(255, 236, 220, 0.7);
+    transition: transform var(--dur-press) var(--ease-settle);
+  }
+  .prism-range:active::-webkit-slider-thumb {
+    transform: rotate(45deg) scale(1.2);
+  }
+  .prism-range::-moz-range-thumb {
+    width: 14px;
+    height: 14px;
+    background: var(--lumen);
+    border: 0;
+    border-radius: 3px;
+    transform: rotate(45deg);
+  }
+  .prism-range:focus-visible {
+    outline: 2px solid var(--hb);
+    outline-offset: 4px;
   }
 
   /* ========================================================================

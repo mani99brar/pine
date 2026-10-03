@@ -19,7 +19,7 @@ export const FACET_LABEL: Record<FacetId, string> = {
   policy: 'Policy',
   question: 'Question',
   environment: 'Environment',
-  deadline: 'Evidence deadline',
+  deadline: 'Deadline',
   oracle: 'Oracle',
   funding: 'Funding',
   manifest: 'Manifest',
@@ -169,13 +169,13 @@ export interface FacetShade {
 
 /** Per-facet shading from the bytes of that facet's input (its hash, SHA or value). */
 export function facetShade(facet: Facet, input: string | undefined): FacetShade {
-  const b = bytesOf(input ?? facet.id, 4)
-  const jitter = (b[0] / 255 - 0.5) * 0.28
+  const [b0 = 0, b1 = 0, b2 = 0] = bytesOf(input ?? facet.id, 4)
+  const jitter = (b0 / 255 - 0.5) * 0.28
   const hi = Math.min(0.98, Math.max(0.3, facet.light + jitter))
   return {
-    angle: Math.round(((b[1] / 255) * 120 - 60 + 135) % 360),
+    angle: Math.round(((b1 / 255) * 120 - 60 + 135) % 360),
     hi,
-    lo: Math.max(0.06, hi * (0.18 + (b[2] / 255) * 0.22)),
+    lo: Math.max(0.06, hi * (0.18 + (b2 / 255) * 0.22)),
   }
 }
 
@@ -192,8 +192,10 @@ export function crystalCrack(shape: CrystalShape, seed: string): Crack {
   const { left, right } = shape.bounds
   const leftTop = shape.facets.find((f) => f.id === 'policy')!.points
   const rightTop = shape.facets.find((f) => f.id === 'question')!.points
-  const y0 = leftTop[0][1] + (leftTop[3][1] - leftTop[0][1]) * (0.2 + r() * 0.55)
-  const y1 = rightTop[1][1] + (rightTop[2][1] - rightTop[1][1]) * (0.2 + r() * 0.55)
+  const [lt0 = [0, 50], , , lt3 = [0, 110]] = leftTop
+  const [, rt1 = [0, 50], rt2 = [0, 110]] = rightTop
+  const y0 = lt0[1] + (lt3[1] - lt0[1]) * (0.2 + r() * 0.55)
+  const y1 = rt1[1] + (rt2[1] - rt1[1]) * (0.2 + r() * 0.55)
   const steps = 6
   const path: Pt[] = []
   for (let i = 0; i <= steps; i++) {
@@ -204,8 +206,8 @@ export function crystalCrack(shape: CrystalShape, seed: string): Crack {
     path.push([round(x), round(base + jag)])
   }
   const reversed = [...path].reverse()
-  const upper: Pt[] = [[-10, -10], [110, -10], [110, path[steps][1]], ...reversed, [-10, path[0][1]]]
-  const lower: Pt[] = [[-10, 170], [110, 170], [110, path[steps][1]], ...reversed, [-10, path[0][1]]]
+  const upper: Pt[] = [[-10, -10], [110, -10], [110, round(y1)], ...reversed, [-10, round(y0)]]
+  const lower: Pt[] = [[-10, 170], [110, 170], [110, round(y1)], ...reversed, [-10, round(y0)]]
   return { path, upper, lower }
 }
 

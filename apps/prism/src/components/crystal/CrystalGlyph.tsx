@@ -75,13 +75,14 @@ function CrystalGlyphImpl({
   const color = stateHue(state, hue)
   const cutSet = useMemo(() => new Set<FacetId>(state === 'unlit' ? [] : (cut ?? FACET_ORDER)), [cut, state])
 
+  // facetSeeds is a fresh object on each render; its string form is the stable key.
+  const seedsKey = JSON.stringify(facetSeeds ?? {})
   const shades = useMemo(() => {
+    const seeds = JSON.parse(seedsKey) as Partial<Record<FacetId, string>>
     const m = new Map<FacetId, ReturnType<typeof facetShade>>()
-    for (const f of shape.facets) m.set(f.id, facetShade(f, facetSeeds?.[f.id] ?? `${seed}:${f.id}`))
+    for (const f of shape.facets) m.set(f.id, facetShade(f, seeds[f.id] ?? `${seed}:${f.id}`))
     return m
-    // facetSeeds values are strings; stringify for a stable key
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shape, seed, JSON.stringify(facetSeeds ?? {})])
+  }, [shape, seed, seedsKey])
 
   const dimFactor = state === 'dim' ? 0.42 : state === 'frosted' ? 0.55 : state === 'settling' ? 0.85 : state === 'unlit' ? 0 : 1
   const showGlow = glow && (state === 'luminous' || state === 'settling' || state === 'fractured' || sealed)

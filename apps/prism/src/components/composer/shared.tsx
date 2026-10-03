@@ -44,7 +44,7 @@ export interface StepNav {
 
 export function StageHeader({ step, children }: { step: UiStep; children?: ReactNode }) {
   const i = stepIndex(step)
-  const meta = UI_STEPS[i]
+  const meta = UI_STEPS[i] ?? UI_STEPS[0]!
   return (
     <div className="mb-7">
       <p className="text-[0.84375rem] text-lumen-3">

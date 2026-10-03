@@ -165,10 +165,10 @@ export function Segmented<T extends string>({
               const i = options.findIndex((x) => x.value === value)
               if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
                 e.preventDefault()
-                onChange(options[(i + 1) % options.length].value)
+                onChange(options[(i + 1) % options.length]!.value)
               } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
                 e.preventDefault()
-                onChange(options[(i - 1 + options.length) % options.length].value)
+                onChange(options[(i - 1 + options.length) % options.length]!.value)
               }
             }}
             tabIndex={active ? 0 : -1}

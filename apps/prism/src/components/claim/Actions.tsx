@@ -47,7 +47,14 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
       ) : portfolio.isLoading ? (
         <Skeleton className="mt-3 h-16 w-full" />
       ) : positions.length === 0 && lps.length === 0 ? (
-        <p className="mt-3 text-[0.9rem] text-lumen-2">This wallet holds no outcome tokens or liquidity in this market.</p>
+        redeem.runner.state === 'done' ? (
+          <div className="mt-3">
+            <p className="text-[0.9rem] text-lumen">Redeemed. The collateral is back in your wallet.</p>
+            <TxSteps runner={redeem.runner} chainId={claim.chainId} className="mt-4" />
+          </div>
+        ) : (
+          <p className="mt-3 text-[0.9rem] text-lumen-2">This wallet holds no outcome tokens or liquidity in this market.</p>
+        )
       ) : (
         <div className="mt-3 grid gap-4">
           {positions.length > 0 && (

@@ -115,7 +115,7 @@ export function useInViewport<T extends Element>(rootMargin = '120px'): [React.R
       setVisible(true)
       return
     }
-    const io = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), { rootMargin })
+    const io = new IntersectionObserver((entries) => setVisible(Boolean(entries[0]?.isIntersecting)), { rootMargin })
     io.observe(el)
     return () => io.disconnect()
   }, [rootMargin])
@@ -192,7 +192,7 @@ export function useElementWidth<T extends Element>(): [React.RefObject<T | null>
   useEffect(() => {
     const el = ref.current
     if (!el) return
-    const ro = new ResizeObserver(([entry]) => setWidth(Math.round(entry.contentRect.width)))
+    const ro = new ResizeObserver((entries) => setWidth(Math.round(entries[0]?.contentRect.width ?? 0)))
     ro.observe(el)
     return () => ro.disconnect()
   }, [])

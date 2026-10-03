@@ -64,7 +64,7 @@ function HeroPoster({ prices, hue, seed, mode }: { prices: BeamPrices; hue: stri
         {(
           [
             ['yes', 0.26, 0.95],
-            ['no', 0, 0.42],
+            ['no', 0, 0.3],
             ['invalid', -0.24, 0.5],
           ] as const
         ).map(([k, a, o]) => (
@@ -84,9 +84,9 @@ function HeroPoster({ prices, hue, seed, mode }: { prices: BeamPrices; hue: stri
 
 function Readout({ prices, live }: { prices: BeamPrices; live: { id: string; number: number; title: string; deadline: string } | null }) {
   const now = useNowMs()
-  if (!live) return <div className="cut-lg glass-quiet h-[7.5rem] w-full" aria-hidden />
+  if (!live) return <div className="cut-lg glass-quiet h-[12.5rem] w-full max-w-[34rem]" aria-hidden />
   return (
-    <div className="cut-lg glass relative mt-10 w-full max-w-[34rem] overflow-hidden px-5 py-4">
+    <div className="cut-lg glass relative min-h-[12.5rem] w-full max-w-[34rem] overflow-hidden px-5 py-4">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <p className="text-[0.8125rem] text-lumen-3">
           Live now{' '}
@@ -108,9 +108,7 @@ function Readout({ prices, live }: { prices: BeamPrices; live: { id: string; num
           ] as const
         ).map(([k, label]) => (
           <div key={k} className="min-w-0 border-l-2 pl-2.5" style={{ borderColor: OUTCOME_HEX[k] }}>
-            <dt className="truncate text-[0.75rem] text-lumen-3" title={label}>
-              {label}
-            </dt>
+            <dt className="min-h-[2.5em] text-[0.72rem] leading-[1.25] text-lumen-3">{label}</dt>
             <dd className="t-figure text-[1.6rem] leading-tight text-lumen">
               <AnimatedNumber value={prices[k]} format={formatPrice} />
             </dd>
@@ -203,7 +201,9 @@ export function Hero() {
                 Open the light table
               </Link>
             </div>
-            <Readout prices={prices} live={live} />
+            <div className="mt-10">
+              <Readout prices={prices} live={live} />
+            </div>
           </div>
         </div>
       </div>

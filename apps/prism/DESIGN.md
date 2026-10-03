@@ -70,7 +70,7 @@ Supporting tones:
 
 | Face | Role | Why |
 |---|---|---|
-| **Geologica** (variable: wght, SHRP, CRSV) | Display and headings, set **cut**: `SHRP 100`. Hero at wght 300, section heads at 400, card titles at 560. | Its *Sharpness* axis replaces curves with cut spurs, so the letterforms are literally faceted. The composer animates the claim title's SHRP from 0 to 100 as facets are cut. |
+| **Geologica** (variable: wght, SHRP, CRSV) | Display and headings, set **cut**: `SHRP 100`. Hero at wght 300, section heads at 400, card titles at 560. | Its *Sharpness* axis sharpens joins and terminals into cut spurs. The effect is subtle at text sizes and visible at display sizes. The composer animates the claim title's SHRP (and weight) as facets are cut. |
 | **Instrument Sans** (variable: wght, wdth) | Body and UI at wdth 100. Condensed (wdth 82) only for dense figures in tables. | A refined, slightly narrow grotesque that stays crisp in light-on-dark. Its quiet texture contrasts with the cut display. |
 | **Azeret Mono** | Only literal bytes: SHAs, hashes, addresses, commands, Markdown and curl. Never labels. | Clear 0/O and 1/l, with a slightly wide set that reads well light-on-dark. |
 
@@ -158,8 +158,16 @@ Micro-interactions:
   - A `<Canvas>` error boundary falls back to the poster.
   - DPR is capped at 1.75, and `frameloop` is switched to `never` when the canvas is offscreen (IntersectionObserver) or the tab is hidden.
 - **Crystal geometry.** `ConvexGeometry` is built from hash-seeded points arranged as an elongated hexagonal quartz point with a termination, so each seed gives a unique gem.
-  - The material is MeshPhysicalMaterial with transmission, ior 1.6, `dispersion`, iridescence, flat shading and attenuation tinted by policy family.
-  - The environment map is built from drei `Lightformer`s in Sodium, H-beta and H-alpha, so no HDR files and no external hosts are needed.
+  - Facets fly in through a per-triangle vertex offset patched into the material (`onBeforeCompile`).
+  - **Glass (revised during QA).** A transmission pass rendered opaque in software GL and is costly on low-end GPUs. The glass is faked instead:
+    - a tinted back shell (the policy-family hue);
+    - an additive, iridescent front shell that only adds reflections;
+    - an additive inner core glow;
+    - edge lines;
+    - a breathing glow pooled behind the crystal.
+
+    The result looks the same on every GPU.
+  - The environment map is built from narrow drei `Lightformer` strips in Sodium, H-beta, H-alpha and white, so facets catch light as the crystal turns. No HDR files or external hosts are needed.
 - **Beams.** Additive-blended planes with a custom shader: a soft gaussian falloff across the width, a fade along the length and a slow shimmer. One spectrum fan is used for the dispersion moment.
 - **SVG crystal generator** (`lib/crystal.ts`). This deterministic 2D quartz silhouette powers the light table, lists, claim header, composer, OG images and the posters.
   - It has 8 facets, and per-facet shading comes from the bytes of the input hashes.

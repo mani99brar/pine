@@ -128,7 +128,7 @@ export function CuttingBench({ c, facets, compact }: { c: ClaimComposer; facets:
         {FACET_ORDER.map((f) => {
           const isCut = facets.cut.includes(f)
           return (
-            <li key={f} className={cn('flex items-center gap-2.5 rounded-[4px] px-2 py-1 text-[0.8125rem] transition-colors', isCut ? 'text-lumen' : 'text-lumen-3')}>
+            <li key={f} className={cn('flex min-w-0 items-center gap-2.5 rounded-[4px] px-2 py-1 text-[0.8125rem] transition-colors', isCut ? 'text-lumen' : 'text-lumen-3')}>
               <span
                 aria-hidden
                 className={cn('flex h-4 w-4 shrink-0 rotate-45 items-center justify-center border transition-colors duration-500', isCut ? 'border-lumen bg-lumen' : 'border-edge-strong')}
@@ -136,8 +136,8 @@ export function CuttingBench({ c, facets, compact }: { c: ClaimComposer; facets:
               >
                 {isCut && <Check size={10} className="-rotate-45 text-umbra" strokeWidth={3} />}
               </span>
-              <span className="w-[6.5rem] shrink-0">{FACET_LABEL[f]}</span>
-              <span className={cn('min-w-0 truncate', isCut ? 'text-lumen-2' : 'text-lumen-3')}>
+              <span className="w-[6.25rem] shrink-0">{FACET_LABEL[f]}</span>
+              <span className={cn('min-w-0 flex-1 truncate', isCut ? 'text-lumen-2' : 'text-lumen-3')}>
                 {facets.values[f] && (isCut || f === 'deadline' || f === 'oracle' || f === 'funding') ? (
                   <span className={f === 'question' || f === 'environment' || f === 'manifest' || f === 'market' ? 't-code text-[0.75rem]' : ''}>{facets.values[f]}</span>
                 ) : (

@@ -39,9 +39,11 @@ export function PriceChart({ claimId, evidence = [], deadline }: { claimId: stri
   const points = useMemo(() => q.data ?? [], [q.data])
 
   const geo = useMemo(() => {
-    if (points.length < 2 || width < 100) return null
-    const t0 = points[0].t
-    const t1 = points[points.length - 1].t
+    const p0 = points[0]
+    const pN = points[points.length - 1]
+    if (!p0 || !pN || points.length < 2 || width < 100) return null
+    const t0 = p0.t
+    const t1 = pN.t
     const iw = width - pad.l - pad.r
     const ih = H - pad.t - pad.b
     const x = (t: number) => pad.l + ((t - t0) / Math.max(1, t1 - t0)) * iw

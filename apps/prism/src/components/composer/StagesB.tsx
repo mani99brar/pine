@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect, useRef } from 'react'
 import type { ClaimDraft, CostKind, FundingInput } from '@pine/core'
 import { formatAmount, formatPrice, SUPPORTED_CHAIN_IDS } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
@@ -288,6 +289,16 @@ export function StageReview({ c, nav, acknowledged, setAcknowledged }: { c: Clai
 // Publish
 // ---------------------------------------------------------------------------
 
+/** Brings the published confirmation into view once, when it first appears. */
+function RevealOnMount({ children, reduce }: { children: React.ReactNode; reduce: boolean }) {
+  const ref = useRef<HTMLDivElement | null>(null)
+  const reduceRef = useRef(reduce)
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: 'center', behavior: reduceRef.current ? 'auto' : 'smooth' })
+  }, [])
+  return <div ref={ref}>{children}</div>
+}
+
 export function StagePublish({ c, nav, acknowledged }: { c: ClaimComposer; nav: StepNav; acknowledged: boolean }) {
   const pub = usePublishClaim(c.draft.id)
   const wallet = useWallet()
@@ -299,7 +310,7 @@ export function StagePublish({ c, nav, acknowledged }: { c: ClaimComposer; nav: 
 
   if (pub.state === 'done') {
     return (
-      <div>
+      <RevealOnMount reduce={reduce}>
         <motion.div className="glass cut-xl relative overflow-hidden p-6 sm:p-8" initial={reduce ? false : { opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
           <span aria-hidden className="absolute inset-x-0 top-0 h-[2px]" style={{ background: 'var(--spectrum)' }} />
           <p className="tag gap-1.5 text-lumen">
@@ -319,7 +330,7 @@ export function StagePublish({ c, nav, acknowledged }: { c: ClaimComposer; nav: 
             </ButtonLink>
           </div>
         </motion.div>
-      </div>
+      </RevealOnMount>
     )
   }
 

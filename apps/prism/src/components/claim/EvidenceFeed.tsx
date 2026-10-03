@@ -63,7 +63,7 @@ function EvidenceItem({ e }: { e: Evidence }) {
         ) : null}
 
         {e.summary && (
-          <div className="mt-4">
+          <div className="mt-4 max-w-[82ch]">
             <Expandable collapsedHeight={150} label="Show the full submission">
               {raw ? <pre className="t-code untrusted cut-sm border border-edge bg-void p-3 text-lumen-2">{e.summary}</pre> : <SafeMarkdown>{e.summary}</SafeMarkdown>}
             </Expandable>
@@ -74,7 +74,7 @@ function EvidenceItem({ e }: { e: Evidence }) {
         )}
 
         {e.reproduction && (
-          <div className="cut-md well mt-4 p-4">
+          <div className="cut-md well mt-4 max-w-[82ch] p-4">
             <p className="text-[0.8125rem] font-semibold text-lumen">Reproduction (do not run outside an isolated environment)</p>
             <dl className="mt-3 grid gap-3 text-[0.84375rem]">
               {(

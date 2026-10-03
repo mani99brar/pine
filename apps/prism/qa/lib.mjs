@@ -40,6 +40,7 @@ export async function newPage(browser, { mobile = false, reduced = false, video 
     ...(video ? { recordVideo: { dir: join(OUT, 'video'), size: mobile ? { width: 390, height: 844 } : { width: 1440, height: 900 } } } : {}),
   })
   const page = await ctx.newPage()
+  if (reduced) await page.emulateMedia({ reducedMotion: 'reduce' })
   page.errors = []
   page.on('pageerror', (e) => page.errors.push(String(e)))
   page.on('console', (m) => {
@@ -47,6 +48,8 @@ export async function newPage(browser, { mobile = false, reduced = false, video 
     const t = m.text()
     // Third-party wallet SDK telemetry noise without network access is not an app error.
     if (/walletconnect|Reown|pulse\.walletconnect|ERR_NAME_NOT_RESOLVED|Failed to load resource: net::ERR_/i.test(t)) return
+    // The 404 page itself responds 404 by design.
+    if (/status of 404/.test(t) && /no-such-page|pine-9999/.test(page.url())) return
     page.errors.push(t)
   })
   return page

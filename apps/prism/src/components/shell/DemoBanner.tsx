@@ -41,12 +41,13 @@ export function DemoBanner() {
   return (
     <div className="relative z-[61] border-b border-edge bg-[#1c1512]">
       <span aria-hidden className="absolute inset-y-0 left-0 w-24 bg-[linear-gradient(90deg,rgba(255,182,72,0.22),transparent)]" />
-      <div className="relative mx-auto flex max-w-[1440px] flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2 sm:px-6 lg:px-8">
-        <p className="min-w-0 flex-1 text-[0.84375rem] leading-[1.45] text-lumen-2">
+      <div className="relative mx-auto flex max-w-[1440px] items-center gap-x-4 gap-y-2 px-4 py-2 sm:px-6 lg:px-8">
+        <p className="min-w-0 flex-1 text-[0.8125rem] leading-[1.4] text-lumen-2 sm:text-[0.84375rem]">
           <span className="tag mr-2 border-[rgba(255,182,72,0.45)] text-na">Demo</span>
-          {COPY.demoMode}
+          <span className="hidden sm:inline">{COPY.demoMode}</span>
+          <span className="sm:hidden">Sample data and a simulated wallet. No real funds move.</span>
         </p>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           <DemoFailToggle compact />
           <button
             type="button"

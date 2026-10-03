@@ -210,9 +210,9 @@ export function StoryDiagram({ step, className }: { step: number; className?: st
         <motion.div className="absolute inset-0 grid grid-cols-3 items-center px-4" initial={reduce ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.5 }}>
           {(
             [
-              ['fractured', OUTCOME_HEX.yes, 'Counterexample demonstrated'],
-              ['dim', OUTCOME_HEX.no, 'No qualifying counterexample submitted'],
-              ['frosted', OUTCOME_HEX.invalid, 'Resolved invalid'],
+              ['fractured', OUTCOME_HEX.yes, 'Yes: fractured'],
+              ['dim', OUTCOME_HEX.no, 'No: dimmed'],
+              ['frosted', OUTCOME_HEX.invalid, 'Invalid: clouded'],
             ] as const
           ).map(([state, color, label], i) => (
             <div key={state} className="flex flex-col items-center gap-3 text-center">
@@ -285,7 +285,7 @@ export function Story() {
           <div className="relative">
             <div aria-hidden className="absolute bottom-6 left-[19px] top-6 w-px bg-edge" />
             <motion.div aria-hidden className="absolute left-[18px] top-6 w-[3px] origin-top rounded-full" style={{ scaleY: progress, bottom: 24, background: 'linear-gradient(180deg,#5ad8ff,#ffb648 50%,#ff6b83)' }} />
-            <ol ref={listRef} className="grid gap-6 lg:gap-[28vh] lg:pb-[20vh]">
+            <ol ref={listRef} className="grid gap-6 lg:gap-[20vh] lg:pb-[16vh]">
               {STEPS.map((s, i) => (
                 <li
                   key={s.id}

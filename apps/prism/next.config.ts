@@ -48,6 +48,13 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }]
   },
+  async redirects() {
+    return [
+      { source: '/launch-gates', destination: '/risks#gates', permanent: false },
+      { source: '/table', destination: '/claims', permanent: false },
+      { source: '/new', destination: '/compose', permanent: false },
+    ]
+  },
 }
 
 export default nextConfig

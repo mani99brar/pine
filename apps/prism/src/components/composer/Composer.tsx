@@ -191,7 +191,7 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
             <motion.div
               key={step}
               initial={reduce ? false : { opacity: 0, y: 10, filter: 'blur(4px)' }}
-              animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
+              animate={{ opacity: 1, y: 0, filter: 'blur(0px)', transitionEnd: { filter: 'none', transform: 'none' } }}
               exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.14 } }}
               transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
             >

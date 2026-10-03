@@ -103,8 +103,9 @@ export function PrismBeam({
                 <feGaussianBlur stdDeviation="9" />
               </filter>
               <filter id={`${uid}-frost`} x="-5%" y="-20%" width="110%" height="140%">
-                <feTurbulence type="fractalNoise" baseFrequency="0.035 0.6" numOctaves={2} seed={7} result="n" />
-                <feDisplacementMap in="SourceGraphic" in2="n" scale="14" />
+                <feTurbulence type="fractalNoise" baseFrequency="0.02 0.25" numOctaves={2} seed={7} result="n" />
+                <feDisplacementMap in="SourceGraphic" in2="n" scale="5" result="d" />
+                <feGaussianBlur in="d" stdDeviation="1.2" />
               </filter>
             </defs>
 

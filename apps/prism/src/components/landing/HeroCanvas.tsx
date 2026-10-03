@@ -1,4 +1,5 @@
 'use client'
+/* eslint-disable react-hooks/immutability -- three.js materials and uniforms are mutated every frame inside useFrame by design; they are GPU state, not React state. */
 
 /**
  * The hero scene (WebGL). Loaded only through next/dynamic with ssr:false, only when WebGL is available
@@ -207,7 +208,7 @@ function Crystal({ seed, hue, start }: { seed: string; hue: string; start: React
       g.rotation.x += (targetX - g.rotation.x) * 0.04
       g.rotation.z += (targetZ - g.rotation.z) * 0.04
       g.position.y = Math.sin(state.clock.elapsedTime * 0.6) * 0.04
-      const s = 0.6 + 0.1 * a
+      const s = 0.66 + 0.1 * a
       g.scale.setScalar(s)
     }
   })
@@ -247,10 +248,10 @@ function OutcomeBeam({ k, price, start }: { k: keyof typeof OUT; price: number; 
     const target = Math.max(0.07, price * 2.3)
     width.current += (target - width.current) * 0.05
     if (mesh.current) mesh.current.scale.set(1, width.current, 1)
-    mat.uniforms.uTime.value = state.clock.elapsedTime
-    mat.uniforms.uDraw.value = 1.08 * phase(t, 2.0, 2.9)
+    mat.uniforms.uTime!.value = state.clock.elapsedTime
+    mat.uniforms.uDraw!.value = 1.08 * phase(t, 2.0, 2.9)
     const base = k === 'no' ? 0.62 : k === 'invalid' ? 0.55 : 0.95
-    mat.uniforms.uOpacity.value = base * phase(t, 2.0, 2.5)
+    mat.uniforms.uOpacity!.value = base * phase(t, 2.0, 2.5)
   })
   return <mesh ref={mesh} geometry={geo} material={mat} position={[0.08, 0, -0.02]} rotation={[0, 0, OUT[k].angle]} />
 }
@@ -261,9 +262,9 @@ function IncomingBeam({ start }: { start: React.RefObject<number> }) {
   useEffect(() => () => geo.dispose(), [geo])
   useFrame((state) => {
     const t = state.clock.elapsedTime - (start.current ?? 0)
-    mat.uniforms.uTime.value = state.clock.elapsedTime
-    mat.uniforms.uDraw.value = 1.08 * phase(t, 0, 0.7)
-    mat.uniforms.uOpacity.value = 1.1
+    mat.uniforms.uTime!.value = state.clock.elapsedTime
+    mat.uniforms.uDraw!.value = 1.08 * phase(t, 0, 0.7)
+    mat.uniforms.uOpacity!.value = 1.1
   })
   return <mesh geometry={geo} material={mat} position={[-6, 0, -0.04]} />
 }
@@ -274,12 +275,12 @@ function SpectrumFan({ start }: { start: React.RefObject<number> }) {
   useEffect(() => () => geo.dispose(), [geo])
   useFrame((state) => {
     const t = state.clock.elapsedTime - (start.current ?? 0)
-    mat.uniforms.uTime.value = state.clock.elapsedTime
-    mat.uniforms.uSpectrum.value = 1
-    mat.uniforms.uDraw.value = 1.08 * phase(t, 1.45, 2.0)
+    mat.uniforms.uTime!.value = state.clock.elapsedTime
+    mat.uniforms.uSpectrum!.value = 1
+    mat.uniforms.uDraw!.value = 1.08 * phase(t, 1.45, 2.0)
     const up = phase(t, 1.45, 1.9)
     const down = 1 - phase(t, 2.15, 2.9)
-    mat.uniforms.uOpacity.value = 0.85 * up * down
+    mat.uniforms.uOpacity!.value = 0.85 * up * down
   })
   return <mesh geometry={geo} material={mat} position={[0.08, 0, -0.05]} />
 }
@@ -328,12 +329,49 @@ function CausticFloor({ start }: { start: React.RefObject<number> }) {
   )
   useFrame((state) => {
     const t = state.clock.elapsedTime - (start.current ?? 0)
-    mat.uniforms.uTime.value = state.clock.elapsedTime
-    mat.uniforms.uOpacity.value = 0.5 * phase(t, 1.6, 2.8)
+    mat.uniforms.uTime!.value = state.clock.elapsedTime
+    mat.uniforms.uOpacity!.value = 0.5 * phase(t, 1.6, 2.8)
   })
   return (
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0.4, -1.62, 0]} material={mat}>
       <planeGeometry args={[7, 4]} />
+    </mesh>
+  )
+}
+
+const glowFragment = /* glsl */ `
+  uniform vec3 uColor;
+  uniform float uOpacity;
+  varying vec2 vUv;
+  void main() {
+    float d = length(vUv - 0.5) * 2.0;
+    float a = pow(max(0.0, 1.0 - d), 2.2) * uOpacity;
+    gl_FragColor = vec4(uColor, a);
+  }
+`
+
+/** A soft light pooled behind the crystal; it breathes slowly once the crystal has assembled. */
+function Glow({ hue, start }: { hue: string; start: React.RefObject<number> }) {
+  const mat = useMemo(
+    () =>
+      new THREE.ShaderMaterial({
+        vertexShader: beamVertex,
+        fragmentShader: glowFragment,
+        uniforms: { uColor: { value: new THREE.Color(hue) }, uOpacity: { value: 0 } },
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    [hue],
+  )
+  useEffect(() => () => mat.dispose(), [mat])
+  useFrame((state) => {
+    const t = state.clock.elapsedTime - (start.current ?? 0)
+    mat.uniforms.uOpacity!.value = 0.42 * phase(t, 0.9, 2.2) * (0.85 + 0.15 * Math.sin(state.clock.elapsedTime * 0.8))
+  })
+  return (
+    <mesh position={[0, 0.05, -0.6]} material={mat}>
+      <planeGeometry args={[3.6, 3.6]} />
     </mesh>
   )
 }
@@ -354,6 +392,7 @@ function Scene({ seed, hue, prices }: { seed: string; hue: string; prices: HeroP
         <Lightformer form="ring" intensity={2.5} color="#ffffff" position={[1.5, 1.2, 4]} scale={0.6} />
       </Environment>
       <ambientLight intensity={0.15} />
+      <Glow hue={hue} start={start} />
       <IncomingBeam start={start} />
       <SpectrumFan start={start} />
       <OutcomeBeam k="yes" price={prices.yes} start={start} />
@@ -366,14 +405,14 @@ function Scene({ seed, hue, prices }: { seed: string; hue: string; prices: HeroP
 }
 
 class CanvasBoundary extends Component<{ onError: () => void; children: ReactNode }, { failed: boolean }> {
-  state = { failed: false }
+  override state = { failed: false }
   static getDerivedStateFromError() {
     return { failed: true }
   }
-  componentDidCatch() {
+  override componentDidCatch() {
     this.props.onError()
   }
-  render() {
+  override render() {
     return this.state.failed ? null : this.props.children
   }
 }
