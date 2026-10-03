@@ -101,11 +101,17 @@ in-process, and documents deployment. Everything it touches that other features 
   where testers use throwaway keys only (a fork keeping chain id 100 could replay anything a real key signs there).
 
 ## 3a. assembly-004 review fixes (carried by assembly-005; composition)
-- CI tests (coverage P1): assert that ci.yml triggers on both `push` and `pull_request`; that the fork/e2e forge commands that
-  need `GNOSIS_RPC_URL` live only in their own job, which runs only when the secret is available; and that no other job
-  references the secret. Each assertion fails when the property is removed (parse the YAML structure, not substrings).
+- CI tests (coverage P1): assert that ci.yml triggers on both `push` and `pull_request`, and that the fork/e2e forge commands
+  that need `GNOSIS_RPC_URL` live only in their own job, which maps the secret into its job-level `env`
+  (`GNOSIS_RPC_URL: ${{ secrets.GNOSIS_RPC_URL }}`) and guards its steps with `if: env.GNOSIS_RPC_URL != ''` (operator
+  decision: GitHub does not allow `secrets` in a job-level `if`, so never write one, and add no gate job); no other job
+  references the secret. Parse ci.yml as YAML (the `yaml` package already resolvable in the workspace, no new dependency) in
+  one static test file (e.g. packages/api/test/e2e/deploy-assets.test.ts, which also holds the proxy, systemd and env-header
+  checks); each assertion fails when its property is removed.
 - E2E database cleanup (coverage P1): a failed `DROP DATABASE` is reported (the suite fails in afterAll with a redacted message),
-  never swallowed; a PostgreSQL test asserts that no `pine_e2e_*` database of the run remains after cleanup.
+  never swallowed. Put the cleanup and the loopback guard below in small pure functions with injectable executors, unit-test
+  them (forced failure, redaction, URL edge cases), and add one PostgreSQL test that creates its own run-prefixed database,
+  cleans it up and asserts it is gone from `pg_database`.
 - Disposable-cluster guard: `bootstrapRoles` (which sets fixed test passwords on the production role names) refuses to run
   unless the database URL host is loopback (127.0.0.1, ::1, localhost) or `PINE_E2E_DISPOSABLE_CLUSTER=1` is set; test it.
 - nginx: `log_format pine_noquery` moves to an http-context snippet (e.g. deploy/proxy/nginx-http.conf, included from the http
@@ -114,8 +120,9 @@ in-process, and documents deployment. Everything it touches that other features 
   a separate user-content host, per-IP limits on the user-content host, TLS, and no query strings in access logs.
 - Least privilege (SEC-OPS-10): separate OS users for pine-api, pine-indexer-native and pine-migrate in deploy/systemd; each
   secrets file is readable only by its unit's user (0640 root:<user>); the env file headers and deploy/README.md agree.
-- Allowance bound: a journey test asserts the residual allowance after the ladder mint is at most 10 wei and only toward the
-  position manager (decision 6), failing if the approval amount grows.
+- Allowance bound: assert at plan level that the ladder's approval goes only to the position manager and equals exactly the
+  mint's desired amounts (residual 0 at plan level, failing if the approval grows); cite the fork test for Algebra rounding
+  (at most 10 wei residual, decision 6).
 - The PGlite configuration is verified as its own check (`e2e-pglite`), alongside the PostgreSQL run.
 - gitleaks: not installed on the verification host; it stays a CI job and a launch gate (record as untested in the matrix).
 
