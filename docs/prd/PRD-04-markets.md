@@ -211,6 +211,23 @@ file part.
   the mint amount, recipient = account, max-loss formula against hand-computed values, withdraw/merge/redeem plans verified, quoter
   depth parsing, cache, NOT_READY and compliance refusals, reconciliation transitions.
 
+## 4a. markets-002 review fixes (carried by markets-003)
+funding:
+- Test the refusal of an existing pool priced OUTSIDE the range on the wrong side (YES dearer than upperPrice) for both token
+  orders (coverage P1), and assert every disclosure field of 3.2 step 6 (gasEstimate, lossIfNoOrInvalid, pool fee range).
+- SEC-LEGAL-03: the ladder request carries `riskAcknowledgement: { maxLossIfYesWei, feesBps, budgetWei }` that must equal the
+  figures the plan computes (else 409 with the fresh figures); the acknowledgement is stored with the plan. Test both paths.
+- `withdraw` requires `{market, tokenId}` (operator decision: the read model has no token → market lookup).
+- Reconcile bumps `reconciled_at` on every attempt, including errors, so failing plans cannot starve the batch.
+- `requireClaim` checks `claim.registry === manifest.pine.claimRegistry` like markets does.
+markets:
+- Record a revert only from a FINALIZED receipt (as funding does).
+- Tests: oracle helper routes refuse with NOT_READY when the read model LAGS (not only halted); the Kleros RequestCanceled stage in
+  dueActions; a first answer below minBond is refused; an HTTP/global fetch spy proves manifest locators are never fetched.
+- Evidence upload quota: consume only after the put succeeded and the row was newly inserted (concurrent identical uploads consume
+  once).
+Both: public routes that fan out to RPC (`/funding/positions/:wallet`, `/markets/:market/oracle`) use a 10 s per-key server cache.
+
 ## 5. Checks (per lane)
 `pnpm --filter @pine/api typecheck`, `pnpm exec eslint packages/api/src` (typecheck), `node scripts/check-forbidden.mjs` (unit),
 `pnpm --filter @pine/api exec vitest run src/modules/<lane-dir>` (unit).
