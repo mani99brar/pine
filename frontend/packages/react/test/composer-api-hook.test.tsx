@@ -122,6 +122,49 @@ describe('useClaimComposer in api mode', () => {
     expect(fake.of(/^\/api\/v1\/drafts\//, 'DELETE')).toHaveLength(1)
   })
 
+  it('never deletes a published draft, nor one whose publication may still land, even from a stale list', async () => {
+    const BACKEND = '0b6a8f1e-3a55-4c1e-9d55-6f4e1a2b3c4d'
+    const PUBLICATION = '5f0c2a8e-1b2c-4d3e-8f90-a1b2c3d4e5f6'
+    const MARKET = '0x99dc260548acafe5fac7fc81f4d4d01198161567'
+    let state = 'submitted'
+    const view = () => ({
+      id: PUBLICATION,
+      state,
+      previewId: '7c9e6679-7425-40de-944b-e07fc1f90ae7',
+      draftId: BACKEND,
+      documentSha256: SHA,
+      creator: '0x2222222222222222222222222222222222222222',
+      planId: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
+      market: null,
+      planExpiresAt: 1_791_000_000,
+      planExpired: false,
+      failureReason: null,
+      transactions: [],
+      createdAt: '2026-10-04T12:00:00.000Z',
+      updatedAt: '2026-10-04T12:00:00.000Z',
+    })
+    fake.on('GET', /^\/api\/v1\/publications\/([^/]+)$/, () => json(200, { publication: view() }))
+    fake.on('DELETE', /^\/api\/v1\/drafts\/([^/]+)$/, () => new Response(null, { status: 204 }))
+    const { result } = renderHook(() => ({ published: useClaimComposer('dapihook06'), sending: useClaimComposer('dapihook07'), drafts: useDrafts() }), { wrapper })
+    await waitFor(() => expect(result.current.sending.draft.id).toBe('dapihook07'))
+    // Published: the market exists although the create_market step was never recorded (its report did not reach Pine).
+    act(() => result.current.published.update((d) => ({ ...d, spec: { ...d.spec, title: 'x' }, publication: { steps: [], backend: { draftId: BACKEND, revision: 2, publicationId: PUBLICATION }, marketAddress: MARKET } })))
+    act(() => result.current.sending.update((d) => ({ ...d, spec: { ...d.spec, title: 'y' }, publication: { steps: [], backend: { draftId: BACKEND, revision: 3, publicationId: PUBLICATION } } })))
+    await act(async () => {
+      await result.current.published.saveNow()
+      await result.current.sending.saveNow()
+    })
+    await expect(result.current.drafts.remove('dapihook06')).rejects.toThrow(/market exists/)
+    await expect(result.current.drafts.remove('dapihook07')).rejects.toThrow(/may still land/)
+    expect(fake.of(/^\/api\/v1\/drafts\//, 'DELETE')).toEqual([])
+    await waitFor(() => expect(result.current.drafts.drafts.map((d) => d.id)).toEqual(expect.arrayContaining(['dapihook06', 'dapihook07'])))
+    // Once Pine reports the publication failed, its draft can go.
+    state = 'failed'
+    await act(async () => result.current.drafts.remove('dapihook07'))
+    await waitFor(() => expect(result.current.drafts.drafts.map((d) => d.id)).not.toContain('dapihook07'))
+    expect(result.current.drafts.drafts.map((d) => d.id)).toContain('dapihook06')
+  })
+
   it('keeps the demo composer unchanged (static catalog, local question, no api state)', async () => {
     function demo({ children }: { children: ReactNode }) {
       return (
