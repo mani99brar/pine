@@ -2,7 +2,9 @@
   "name": "pine",
   "private": true,
   "packageManager": "pnpm@11.0.9",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev:console": "pnpm --filter @pine/app-console dev",
     "dev:docket": "pnpm --filter @pine/app-docket dev",
@@ -10,6 +12,7 @@
     "build": "pnpm -r --filter './apps/*' build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
-    "test": "pnpm -r --filter './packages/*' test"
+    "test": "pnpm -r --filter './packages/*' test",
+    "dev:prism": "pnpm --filter @pine/app-prism dev"
   }
 }
