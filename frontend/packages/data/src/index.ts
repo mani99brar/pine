@@ -18,6 +18,7 @@ export {
 export { pineSessionSchema, siweChallengeSchema, githubStartSchema, anyBodySchema, type PineSession } from './api/auth'
 export * from './api/read'
 export * from './api/plan-schemas'
+export * from './api/identity-schemas'
 export { DEMO_WALLET_ADDRESS, DEMO_GITHUB_USER } from './demo'
 export { parseGitHubRef } from '@pine/core'
 
