@@ -245,18 +245,23 @@ markets:
 - loadOracle: use the RPC `reopened_questions(original)` id only when the read model's record for it has
   `reopens === claim.questionId` (or equals the original's `reopenedBy`); otherwise refuse with NOT_READY. Test with an RPC that
   returns another indexed Pine question id.
-- Evidence upload: check and consume the byte quota and the upload quota so that a refusal of either consumes neither (check
-  bytes first, or one atomic consume if the gateway allows it; document the remaining race). Extend the SEC-EVID-01 test to
-  assert the upload unit is not consumed when the byte quota refuses.
+- Evidence upload (operator decision): consume `evidence_bytes_per_day` FIRST, then `evidence_uploads_per_day`, both before
+  storage. The frozen QuotaGateway has only `consume()`, so when the byte quota succeeds and the upload-count quota refuses, the
+  bytes are spent: accepted and documented as a deterministic gap of the frozen gateway (self-inflicted, bounded by the count
+  quota), not as a race. Extend the SEC-EVID-01 test to assert the upload unit is not consumed when the byte quota refuses.
 - storeOnce answers a re-upload from the existing row only when `contentStore.has(sha256)`; otherwise it stores again (consuming
   quota as a first upload). Test it.
-- createOrReplayPlan looks up (user, route, key) BEFORE the readiness check and consumes `plans_per_day` BEFORE building (PRD-04
-  section 1 order, like funding). Tests: same-key replay succeeds while the read model is halted; an exhausted quota makes no RPC call.
+- createOrReplayPlan order (both lanes): look up (user, route, key) -> readiness check -> consume `plans_per_day` -> build ->
+  insert (so a NOT_READY refusal burns no quota). Tests: same-key replay succeeds while the read model is halted; an exhausted quota makes no RPC call.
 - Registration guard: tests that registration throws for a mismatching questionCategory/questionLanguage, a Seer/Kleros address
   different from the manifest, and maxUploadBytes outside 1..262144.
 - GET /markets/:market/evidence uses a 10 s per-(market, cursor, status) server cache (bounded, like the oracle route's).
 Both: the public RPC fan-out routes (`/funding/positions/:wallet`, `/markets/:market/oracle`) cap concurrent RPC fan-out per route
-(at most 4 in flight per process; excess requests wait or get 503 RATE_LIMITED) in addition to the 10 s cache. Test the cap.
+with a non-blocking semaphore (at most 4 in flight per process, checked after the 10 s cache lookup; a 5th concurrent miss is
+refused immediately with ApiError RATE_LIMITED (429) and retryAfterSeconds, never queued). Deterministic test: hold 4 scripted
+RPC promises open, assert the 5th request gets 429, then release them.
+Both: an audited tx-hash hint is a NEW {stepId, txHash}; an identical repeated hint is an idempotent replay and is not audited
+(funding mirrors markets/plans.ts; if markets audits repeats today, change it to this rule). State it in the coverage matrix.
 
 ## 5. Checks (per lane)
 `pnpm --filter @pine/api typecheck`, `pnpm exec eslint packages/api/src` (typecheck), `node scripts/check-forbidden.mjs` (unit),
