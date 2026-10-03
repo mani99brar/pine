@@ -278,7 +278,8 @@ describe('useApiPublish', () => {
       expect(await result.current.publish.requestPreview({} as { liveSystemImpactNone: true })).toBe(false)
     })
     expect(fake.of(/\/preview$/)).toEqual([])
-    expect(fake.requests).toEqual([])
+    // Reading the session (draft owner) is the only request allowed; nothing is written or previewed.
+    expect(fake.requests.filter((r) => r.path !== '/api/v1/auth/session')).toEqual([])
   })
 
   it('reports invalid drafts as field errors and sends nothing', async () => {
@@ -290,7 +291,7 @@ describe('useApiPublish', () => {
     await act(async () => {
       expect(await result.current.publish.saveDraft()).toBe(false)
     })
-    expect(fake.requests).toEqual([])
+    expect(fake.requests.filter((r) => r.path !== '/api/v1/auth/session')).toEqual([])
   })
 
   it('turns an expired publication offer into a request for a new preview', async () => {
