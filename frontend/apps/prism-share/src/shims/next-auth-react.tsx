@@ -3,7 +3,7 @@
  * Only the demo identity exists: GitHub OAuth needs a server, so `signIn('github')` also signs in as demo
  * (the UI never offers it, because NEXT_PUBLIC_PINE_GITHUB_OAUTH is unset).
  */
-import { useCallback, useMemo, useSyncExternalStore, type ReactNode } from 'react'
+import { createContext, useCallback, useMemo, useSyncExternalStore, type ReactNode } from 'react'
 import { demoSession, sessionStore, type DemoSession } from '../api/session'
 
 export type Session = DemoSession
@@ -15,6 +15,10 @@ export interface SessionContextValue {
   status: SessionStatus
   update: (data?: unknown) => Promise<Session | null>
 }
+
+/** next-auth's context object. The static build never reads it (useSession uses the demo store); @pine/react only
+ * provides it in api mode, which this build never uses. */
+export const SessionContext = createContext<SessionContextValue | undefined>(undefined)
 
 export function SessionProvider({ children }: { children: ReactNode; session?: unknown; basePath?: string; refetchInterval?: number; refetchOnWindowFocus?: boolean }) {
   return <>{children}</>
