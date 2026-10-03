@@ -167,6 +167,27 @@ indexer-envio and read-model-envio:
   Envio option trusts one data source unless HyperSync or a second verified RPC is configured, which is part of its launch gate.
 - A test pins that `schema.graphql` has no list-typed fields.
 
+## 3b. indexers-003 review fixes (carried by indexers-004)
+indexer-native:
+- The ACTIVE filter set is pruned: questions that are finalized, not pending arbitration and not settled too soon, and conditions
+  already resolved, are excluded from every log request (they stay in the database), so the per-cycle request count tracks only
+  live claims; test that a finalized question is no longer requested and a reopened or arbitrated one still is.
+- Single-response anomalies from one provider (a log outside the requested range, a duplicate log, a `removed` log, a wrong-shape
+  result, or a strict-decode failure of a log not yet cross-checked) are treated like a provider disagreement: re-fetch the same
+  plan from BOTH providers (up to 3 times, 10 s apart) and halt only if the anomaly persists. The JSON-RPC envelope parser accepts
+  extra fields (no `.strict()`); only the fields used are validated.
+- `RPC_ALLOW_INSECURE_HTTP` is honoured only together with an explicit `PINE_INDEXER_ENV=development` (never inferred from a
+  missing NODE_ENV); test the refusal without it.
+- Accepted: `applied_events` is dropped by `0003_drop_applied_events.sql` because `0002_roles.sql` already existed.
+- Required tests: `src/migrate-cli.ts` (export `main(env, io)`: URL validation, redacted fatal line, exit codes, applied ids);
+  the production defaults are pinned (MAX_RANGE_LOGS 50,000; MAX_RANGE_BYTES 32 MiB; MAX_RESPONSE_BYTES 16 MiB;
+  MAX_LOGS_PER_RESPONSE 20,000; MAX_REOPEN_ROUNDS 8) by tests that read the exported constants and fail if they change; the
+  halving sequence (e.g. 64 → 32 → … → 1, and a sub-range that succeeds is not split further) is asserted step by step.
+indexer-envio:
+- `scripts/start.mjs` forwards SIGTERM/SIGINT to the `envio start` child and exits with its code; test it with a stub child.
+Both lanes: an operator file `operator-coverage-gaps-<lane>.md` in the run directory lists further gaps found by an exhaustive
+pre-check; close every one.
+
 ## 4. Checks (per lane)
 - indexer-native: `pnpm --filter @pine/indexer-native typecheck` (typecheck), `pnpm exec eslint packages/indexer-native/src`
   (typecheck), `node scripts/check-forbidden.mjs` (unit), `pnpm --filter @pine/indexer-native test` (unit).

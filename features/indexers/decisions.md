@@ -38,6 +38,9 @@ Settled by the operator from ADR-0001 D12 and the security requirements (SEC-IDX
 - Coverage matrix (lesson from the platform and claims reviews): each lane's completion maps every required test of its PRD section
   and every decision/operator clarification to the test file and test name that would fail if the behaviour were removed, and
   closes every gap before completing (the independent coverage reviewer blocks on any untested requirement).
+- indexers-003 review fixes (indexers-004): pruned active filter set, re-fetch before halting on single-response anomalies,
+  explicit development marker for insecure RPC, migrate-cli tests, pinned production bounds, step-by-step halving test, Envio start
+  wrapper forwards signals; `0003_drop_applied_events.sql` accepted.
 
 ## Assumptions
 
