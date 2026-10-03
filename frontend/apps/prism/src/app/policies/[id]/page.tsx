@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { formatDate, getPolicy, POLICY_FAMILIES } from '@pine/core'
 import { COPY } from '@pine/core/copy'
+import { readPineEnv } from '@pine/data'
 import { FamilyIcon } from '@/components/icons'
 import { HashChip } from '@/components/ui/interactive'
 import { Container, Notice } from '@/components/ui/primitives'
@@ -19,8 +20,14 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return {
     title: `${p.id}@${p.version}: ${p.title}`,
     description: p.summary,
-    alternates: { canonical: `/policies/${p.id}`, types: { 'application/json': `/api/agent/v1/policies/${p.id}` } },
+    alternates: { canonical: `/policies/${p.id}`, types: { 'application/json': policyJsonPath(p.id, p.version) } },
   }
+}
+
+/** The policy's JSON alternate: the Pine backend's catalog route in `api` mode, else the app's agent route. */
+function policyJsonPath(id: string, version: string): string {
+  if (readPineEnv().dataSource !== 'api') return `/api/agent/v1/policies/${id}`
+  return `/api/v1/policies/${encodeURIComponent(id)}/${encodeURIComponent(version)}`
 }
 
 function Section({ title, items }: { title: string; items: string[] }) {
