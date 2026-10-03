@@ -1,9 +1,10 @@
 import type { Metadata } from 'next'
 import type { ClaimDetail } from '@pine/core'
-import { formatClaimNumber, formatPrice, OUTCOME_META } from '@pine/core'
+import { formatPrice, OUTCOME_META } from '@pine/core'
 import { buildClaimJsonLd, jsonLdString } from '@pine/core/agent'
 import { readPineEnv } from '@pine/data'
 import { ClaimView } from '@/components/claim/ClaimView'
+import { claimLabel, repoLabel } from '@/lib/claims'
 import { getClaimServer } from '@/lib/server/data'
 import { siteUrl } from '@/lib/site'
 
@@ -54,14 +55,14 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
     return { title: 'Claim not found', alternates: json ? { types: { 'application/json': json } } : undefined, robots: { index: false } }
   }
   const json = agentJsonPath(id, claim.marketAddress)
-  const title = `${formatClaimNumber(claim.number)}: ${claim.title}`
+  const title = `${claimLabel(claim)}: ${claim.title}`
   const state =
     (claim.status === 'resolved' || claim.status === 'settled') && claim.outcome
       ? ` Resolved: ${OUTCOME_META[claim.outcome].label}.`
       : claim.yesPrice !== undefined
         ? ` Market-implied chance a qualifying counterexample is accepted: ${formatPrice(claim.yesPrice)}.`
         : ''
-  const description = `${claim.policy.id} claim on ${claim.source.owner}/${claim.source.repo} at commit ${claim.source.commitSha.slice(0, 7)}.${state}`
+  const description = `${claim.policy.id} claim on ${repoLabel(claim)} at commit ${claim.source.commitSha.slice(0, 7)}.${state}`
   return {
     title,
     description,
