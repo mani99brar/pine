@@ -14,10 +14,17 @@ const short = `${stack.account.slice(0, 6)}`
 async function connectAndSignIn(page: Page): Promise<void> {
   await page.goto('/account')
   await caption(page, 'Sign in: connect a wallet, then Sign-In with Ethereum (the backend issues the message; the browser checks it first)')
-  await page.getByRole('button', { name: /connect wallet/i }).first().click()
-  const wallet = page.getByRole('button', { name: /pine test wallet|browser wallet|injected/i }).first()
-  await wallet.click()
-  await page.getByRole('button', { name: /sign in with ethereum/i }).click()
+  const signIn = page.getByRole('button', { name: /sign in with ethereum/i })
+  // A wallet that already authorized this site reconnects by itself (EIP-6963 discovery); otherwise connect it.
+  await expect(signIn.or(page.getByRole('button', { name: /^connect wallet$/i })).first()).toBeVisible()
+  if (!(await page.getByRole('heading', { name: /connect a wallet \(done\)/i }).isVisible())) {
+    await page.getByRole('main').getByRole('button', { name: /connect wallet/i }).first().click()
+    await page.getByRole('button', { name: /pine test wallet|browser wallet|injected/i }).first().click()
+  }
+  await signIn.click()
+  // Signed in: the backend session exists (the page now offers GitHub linking and sign-out).
+  await expect(page.getByRole('button', { name: /link github/i })).toBeVisible()
+  await expect(page.getByRole('button', { name: /^sign out$/i })).toBeVisible()
   await expect(page.getByText(new RegExp(short, 'i')).first()).toBeVisible()
 }
 
