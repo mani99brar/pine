@@ -12,10 +12,11 @@ import { buildStep, newPlan, planToWire, verifyPlan, type TxPlan, type WireTxPla
 import type { Address, Hex32 } from "@pine/shared/types";
 import { GitHubGatewayError, type AppContext, type AuditEntry, type SessionInfo } from "../../contracts/app.js";
 import { ApiError } from "../../contracts/errors.js";
-import { flushAudit, outboxInsert, outboxSelect } from "./audit.js";
+import { flushAuditInBackground, outboxInsert, outboxSelect } from "./audit.js";
 import { POLICY_FILE_MAX_BYTES, type PolicyEntry } from "./catalog.js";
 import { assertReadModelReady, auditIp, CLAIM_DOCUMENT_FETCH_MAX, isoSeconds, nowSeconds, sessionOf } from "./common.js";
 import { fromMs, msOf, one, rows, sql, toBytes, toNumber, ts, type Executor } from "./db.js";
+import { finalityOf } from "./finality.js";
 import { publicationInsertRaceError } from "./races.js";
 import type { ClaimsRouteDeps } from "./state.js";
 
@@ -373,7 +374,7 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
     const { previewId, documentSha256 } = request.body;
     // Fixed order on every request, new or retry (PRD-03 §6).
     await ctx.compliance.assertAllowed(request, session, "publish_claim");
-    await assertReadModelReady(ctx);
+    const status = await assertReadModelReady(ctx);
     const preview = await findPreview(ctx.db, session.userId, previewId);
     if (!preview) throw new ApiError("NOT_FOUND", "Preview not found");
     if (preview.documentSha256 !== documentSha256) throw new ApiError("CONFLICT", "The document digest does not match the preview; preview again");
@@ -407,8 +408,8 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
     };
 
     const result = await createOrReusePublication(ctx, request, session, preview, documentSha256, gate, recheckRepository);
-    // A new row's audit entry, or entries a replay finds still pending (SEC-OPS-07).
-    await flushAudit(ctx);
+    // A new row's audit entry, or entries a replay finds still pending (SEC-OPS-07); not awaited (PRD-07 §3f).
+    flushAuditInBackground(ctx, request.log);
     let publication = result.publication;
     if (publication.previewId !== preview.id) throw new ApiError("CONFLICT", "This document belongs to another preview");
 
@@ -417,21 +418,29 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
     const now = nowSeconds(ctx);
     const view = async (plan: WireTxPlan | null) => ({ publication: await publicationView(ctx.db, publication, now), planExpired: plan === null && publication.market === null && now >= publication.planExpiresAt, plan });
     if ((FINAL_STATES as readonly string[]).includes(publication.state) || publication.state === "mined") return view(null);
-    // Only finalized evidence moves the state (PRD-07 §3b): the claim in the finalized read model makes it `mined`.
+    const creating = () => new ApiError("NOT_READY", "the claim is being created on chain; retry when it is final", { retryAfterSeconds: 30 });
+    // Only final evidence moves the state (PRD-07 §3b, §3f): the read model serving the claim for this creator and digest
+    // in a block at or below F makes it `mined`; a claim above F (or with F unknown) withholds the plan, state unchanged.
     const indexed = await ctx.readModel.listClaims({ creator: publication.creator, claimDocumentSha256: documentSha256, order: "created_desc", limit: 10 });
-    const market = indexed.items.find((claim) => claim.registry === state.manifest.pine.claimRegistry)?.market ?? null;
-    if (market) {
+    const claim =
+      indexed.items.find((item) => item.registry === state.manifest.pine.claimRegistry && item.creator === publication.creator && item.claimDocumentSha256 === documentSha256) ?? null;
+    if (claim) {
+      if (!(await finalityOf(ctx, status)).isFinal(claim.createdBlock)) throw creating();
+      const market = claim.market;
       const at = ctx.clock.now();
       const audit: AuditEntry = { actorUserId: null, action: "claim.publication.mined", subjectType: "claim_publication", subjectId: publication.id, details: { market, via: "request" }, ip: null };
       const moved = await transitionPublication(ctx.db, publication.id, ["planned", "submitted"], "mined", at, { market }, audit);
       if (moved) {
         publication = moved;
-        await flushAudit(ctx);
+        flushAuditInBackground(ctx, request.log);
       } else {
         publication = (await findPublication(ctx.db, { userId: session.userId, id: publication.id })) ?? publication;
       }
       return view(null);
     }
+    // A hint whose final receipt created this claim only withholds the plan until the read model serves the claim.
+    const hintSucceeded = await one<{ tx_hash: string }>(ctx.db, sql`SELECT tx_hash FROM claim_publication_txs WHERE publication_id = ${publication.id}::uuid AND status = 'succeeded' LIMIT 1`);
+    if (hintSucceeded) throw creating();
     // A market at the latest block alone is not final: it never moves the state, and no plan is offered for a claim
     // that may already exist (SEC-TX-08) until the read model has it.
     let onChain: Address | null;
@@ -440,7 +449,7 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
     } catch {
       throw new ApiError("UPSTREAM_UNAVAILABLE", "Could not check the chain for an existing claim; try again");
     }
-    if (onChain) throw new ApiError("NOT_READY", "the claim is being created on chain; retry when it is final", { retryAfterSeconds: 30 });
+    if (onChain) throw creating();
     // The plan offer expired: the stored publication without a plan, before the gate (no plan would be built).
     if (now >= publication.planExpiresAt) return view(null);
     // Existing-row path: the gate and the repository recheck run after the chain re-check and before content and plan
@@ -489,8 +498,8 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
             ), audited AS (${outboxSelect(entry("claim.publication.tx_reported"), now, sql`added`)})
             SELECT tx_hash FROM added`,
       );
-      // Flushed after each audited write (in the order they happened), and on a same-hash replay.
-      await flushAudit(ctx);
+      // Flushed after each audited write (in the order they happened), and on a same-hash replay; not awaited (PRD-07 §3f).
+      flushAuditInBackground(ctx, request.log);
       if (!added) {
         const known = await one<{ tx_hash: string }>(ctx.db, sql`SELECT tx_hash FROM claim_publication_txs WHERE publication_id = ${publication.id}::uuid AND tx_hash = ${txHash}`);
         if (!known) throw new ApiError("UNPROCESSABLE", `At most ${MAX_TX_HINTS} transaction hashes can be reported`);
@@ -498,7 +507,7 @@ export function registerPublicationRoutes({ app, ctx, state }: ClaimsRouteDeps):
       const moved = await transitionPublication(ctx.db, publication.id, ["planned"], "submitted", now, {}, entry("claim.publication.submitted"));
       if (moved) {
         publication = moved;
-        await flushAudit(ctx);
+        flushAuditInBackground(ctx, request.log);
       } else {
         publication = (await findPublication(ctx.db, { userId: session.userId, id: publication.id })) ?? publication;
       }

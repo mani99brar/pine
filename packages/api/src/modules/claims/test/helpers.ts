@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { cp, mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { FastifyInstance, LightMyRequestResponse } from "fastify";
+import type { FastifyInstance, InjectOptions, LightMyRequestResponse } from "fastify";
 import {
   decodeFunctionData,
   encodeAbiParameters,
@@ -23,7 +23,7 @@ import type { ClaimCreatedEvent } from "@pine/shared/chain-events";
 import { renderQuestion } from "@pine/shared/question";
 import { exampleClaimDocument } from "@pine/shared/testing/fixtures";
 import type { Address, Hex32 } from "@pine/shared/types";
-import type { RouteModule, SessionInfo } from "../../../contracts/app.js";
+import type { AppContext, RouteModule, SessionInfo } from "../../../contracts/app.js";
 import type { AppConfig } from "../../../contracts/config.js";
 import { afterAll, afterEach, beforeAll, beforeEach } from "vitest";
 import { MemoryReadModel } from "@pine/shared/testing/memory-read-model";
@@ -44,6 +44,7 @@ import {
   testSessionHeaders,
   type TestContext,
 } from "../../../contracts/testing.js";
+import { settledAudit } from "../audit.js";
 import { createClaimsModule, DEFAULT_CATALOG_DIR } from "../index.js";
 import { releaseSuiteLock } from "./lock.js";
 
@@ -111,6 +112,11 @@ export interface ChainScript {
    */
   receipts: Map<string, { status: "success" | "reverted"; logs: RawLog[]; blockNumber?: bigint } | "error" | Error>;
   failMarketOf: boolean;
+  /**
+   * eth_getBlockByNumber: the `finalized` tag answers `finalized.number` (or fails with "error"); a block number answers
+   * its timestamp from `finalized.timestamps`. Unset (null): every eth_getBlockByNumber call is unscripted and throws.
+   */
+  finalized: { number: bigint; timestamps: Map<bigint, number> } | "error" | null;
   calls: string[];
   /** Transaction hashes passed to eth_getTransactionReceipt, in call order (lower case). */
   receiptLookups: string[];
@@ -148,7 +154,7 @@ function rawReceipt(hash: string, receipt: { status: "success" | "reverted"; log
 }
 
 export function scriptChain(ctx: TestContext): ChainScript {
-  const script: ChainScript = { gasPrice: 2_000_000_000n, markets: new Map(), receipts: new Map(), failMarketOf: false, calls: [], receiptLookups: [] };
+  const script: ChainScript = { gasPrice: 2_000_000_000n, markets: new Map(), receipts: new Map(), failMarketOf: false, finalized: null, calls: [], receiptLookups: [] };
   ctx.chain.setHandler(async (method, params) => {
     script.calls.push(method);
     switch (method) {
@@ -174,6 +180,15 @@ export function scriptChain(ctx: TestContext): ChainScript {
         if (receipt === "error") throw new Error("receipt fetch failed");
         if (receipt instanceof Error) throw receipt;
         return receipt ? rawReceipt(hash, receipt) : null;
+      }
+      case "eth_getBlockByNumber": {
+        const [tag] = params as [string, boolean];
+        if (script.finalized === null) throw new Error("Unscripted RPC call: eth_getBlockByNumber");
+        if (script.finalized === "error") throw new Error("finalized block unavailable https://rpc.example/secret-key");
+        const number = tag === "finalized" ? script.finalized.number : BigInt(tag);
+        const timestamp = script.finalized.timestamps.get(number);
+        if (tag !== "finalized" && timestamp === undefined) throw new Error(`unscripted block ${number}`);
+        return { number: `0x${number.toString(16)}`, hash: `0x${number.toString(16).padStart(64, "0")}`, timestamp: `0x${(timestamp ?? 0).toString(16)}`, transactions: [] };
       }
       default:
         throw new Error(`Unscripted RPC call: ${method}`);
@@ -295,17 +310,21 @@ export function addOnChainClaim(
 }
 
 let indexedBlock = 10_000n;
-/** Marks the read model as indexed up to the fake clock (fresh, not halted). */
-export function markFresh(ctx: TestContext, atLeast: bigint = 0n): bigint {
+/**
+ * Marks the read model as indexed up to the fake clock (fresh, not halted). Native-like by default (PRD-07 §3f harness
+ * default): finalized = indexedBlock. `finalized: null` reports an Envio-like status (finalizedBlock null).
+ */
+export function markFresh(ctx: TestContext, atLeast: bigint = 0n, options: { finalized?: bigint | null } = {}): bigint {
   indexedBlock = (indexedBlock > atLeast ? indexedBlock : atLeast) + 1n;
-  ctx.readModel.markIndexed(indexedBlock, ctx.clock.unix());
+  ctx.readModel.markIndexed(indexedBlock, ctx.clock.unix(), null, options.finalized === undefined ? indexedBlock : options.finalized);
   return indexedBlock;
 }
 
-/** Marks the read model as indexed up to chain time `timestamp`, independently of the fake clock (not halted). */
-export function markIndexedAt(ctx: TestContext, timestamp: number): void {
+/** Marks the read model as indexed up to chain time `timestamp`, independently of the fake clock (not halted); finalized as markFresh. */
+export function markIndexedAt(ctx: TestContext, timestamp: number, options: { finalized?: bigint | null } = {}): bigint {
   indexedBlock += 1n;
-  ctx.readModel.markIndexed(indexedBlock, timestamp);
+  ctx.readModel.markIndexed(indexedBlock, timestamp, null, options.finalized === undefined ? indexedBlock : options.finalized);
+  return indexedBlock;
 }
 
 export function documentWith(mutate: (document: ClaimDocument) => void = () => {}): { document: ClaimDocument; bytes: Uint8Array; sha256: Hex32 } {
@@ -316,6 +335,32 @@ export function documentWith(mutate: (document: ClaimDocument) => void = () => {
 }
 
 // ------------------------------------------------------------------------------------------------ app
+
+/** The unwrapped inject of each test app (see awaitAuditAfterInject). */
+const rawInjects = new WeakMap<FastifyInstance, FastifyInstance["inject"]>();
+
+/**
+ * Test-harness rule (PRD-07 §3f, as markets §3c): handlers start the audit flush without awaiting it, so every inject of
+ * a test app waits for the module's in-flight flush after the response (it requests no further drain). The existing
+ * exact-match audit tests therefore see the recorded entries right after the response.
+ */
+function awaitAuditAfterInject(app: FastifyInstance, ctx: AppContext): void {
+  const raw = app.inject.bind(app) as FastifyInstance["inject"];
+  rawInjects.set(app, raw);
+  const wrapped = async (options: InjectOptions | string): Promise<LightMyRequestResponse> => {
+    const response = await raw(options);
+    await settledAudit(ctx);
+    return response;
+  };
+  app.inject = wrapped as unknown as FastifyInstance["inject"];
+}
+
+/** An inject that does not wait for the audit flush its request started (the "slow audit store" tests). */
+export function rawInject(app: FastifyInstance, options: InjectOptions): Promise<LightMyRequestResponse> {
+  const raw = rawInjects.get(app);
+  if (!raw) throw new Error("not a claims test app");
+  return raw(options);
+}
 
 export interface Harness {
   ctx: TestContext;
@@ -408,6 +453,7 @@ export function useHarness(): () => Harness {
       const catalogDir = await copyCatalog();
       const module = createClaimsModule({ catalogDir });
       const app = await buildTestApp([module], ctx);
+      awaitAuditAfterInject(app, ctx);
       harness = {
         ctx,
         app,
@@ -430,6 +476,7 @@ export function useHarness(): () => Harness {
           }
           const variantModule = createClaimsModule({ catalogDir: harness!.catalogDir });
           const app = await buildTestApp([variantModule], view);
+          awaitAuditAfterInject(app, view);
           variants.push(app);
           return { ctx: view, app, module: variantModule };
         },

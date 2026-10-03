@@ -3,7 +3,9 @@
 //      `pending` in ONE transaction (an error inserts nothing);
 //   2. verification takes up to 50 due never-attempted rows (oldest first) and up to 50 due retries (by next_attempt_at),
 //      so retries can never crowd out new claims; each row in its own try/catch and its own compare-and-set write.
-// Only `verified` claims are listed. Transient failures are not results: the row stays as it is with backoff.
+// Only `verified` claims are listed. Transient failures are not results: the row stays as it is with backoff. A verdict is
+// final, so it is reached only for a claim created in a final block (PRD-07 §3g, finality.ts): `isFinal(claim.createdBlock)`
+// with one bound F per run; otherwise the claim stays pending with backoff.
 
 import { keccak256, toBytes as utf8Bytes } from "viem";
 import { ClaimDocumentError, parseClaimDocumentBytes, type ClaimDocument } from "@pine/shared/claim-document";
@@ -15,6 +17,7 @@ import { safeErrorMessage } from "../../contracts/redact.js";
 import { flushAudit, outboxInsert } from "./audit.js";
 import { CLAIM_DOCUMENT_FETCH_MAX, DAY } from "./common.js";
 import { fromMs, msOf, rows, sql, toNumber, ts, type Executor, type SQL } from "./db.js";
+import { finalityOf, type Finality } from "./finality.js";
 import { claimCreatedMarkets, fetchReceipt, hasMatchingNewMarket } from "./receipts.js";
 import type { ClaimsState } from "./state.js";
 
@@ -285,6 +288,9 @@ export async function verifyPendingClaims(ctx: AppContext, state: ClaimsState, s
     ...(await work(false, sql`created_block ASC, created_log_index ASC`)),
     ...(await work(true, sql`next_attempt_at ASC, created_block ASC, created_log_index ASC`)),
   ];
+  // One finality bound F for the whole run (PRD-07 §3f, §3g), computed when the first due claim needs it.
+  let finality: Promise<Finality> | null = null;
+  const finalityOfRun = () => (finality ??= ctx.readModel.status().then((status) => finalityOf(ctx, status)));
   for (const row of due) {
     if (signal?.aborted) break;
     const attempts = toNumber(row.attempts) + 1;
@@ -293,6 +299,8 @@ export async function verifyPendingClaims(ctx: AppContext, state: ClaimsState, s
     try {
       const claim = await ctx.readModel.getClaim(row.market as ClaimRecord["market"]);
       if (!claim) throw new TransientError("claim not in the read model");
+      // No verdict (verified, mismatch or unavailable) for a claim a reorg could still remove or change: pending with backoff.
+      if (!(await finalityOfRun()).isFinal(claim.createdBlock)) throw new TransientError("claim creation not final");
       const verdict = await evaluateClaim(ctx, state, claim);
       let update;
       if (verdict.status === "document_unavailable") {
