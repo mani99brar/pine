@@ -6,32 +6,58 @@ Pine Prism (`apps/prism`) is a Next.js 16 deployable inside the self-contained `
 
 | Mode | Set | What works | What you must run |
 |---|---|---|---|
+| `api` (production) | `NEXT_PUBLIC_PINE_DATA_SOURCE=api` plus the deployment below | Everything, against the Pine backend: SIWE sign-in, GitHub linking, claims, drafts, previews, publication, evidence, oracle and funding plans verified in the browser | The backend of this repository (`../packages/api`, the native indexer, PostgreSQL) behind one edge proxy: see `../deploy/README.md` |
 | `mock` (default) | nothing | Everything, with fixtures, a simulated wallet and demo sign-in | Nothing. Use it for previews, design review and demos |
-| `rest` | `NEXT_PUBLIC_PINE_DATA_SOURCE=rest`, `NEXT_PUBLIC_PINE_API_URL` | Indexed reads plus server-side drafts and accounts | A service implementing `docs/indexer/rest-api.openapi.yaml` |
-| `envio` | `NEXT_PUBLIC_PINE_DATA_SOURCE=envio`, `NEXT_PUBLIC_ENVIO_GRAPHQL_URL` | Indexed on-chain reads; manifests hydrated from IPFS. Drafts and preferences stay in the browser | An Envio HyperIndex deployment per `docs/indexer/envio/` |
+| `rest` / `envio` | `NEXT_PUBLIC_PINE_DATA_SOURCE=rest\|envio` | Read-only adapters for the frontend's own earlier contracts (`docs/indexer/`) | A service implementing those contracts (the Pine backend does not) |
 
-See `docs/indexer/README.md` for the trade-offs between the two.
+### `api` mode
 
-## 2. Required environment for live operation
+The browser talks to the backend on the page's own origin (`/api/v1`): the session is the backend's HttpOnly
+`__Host-pine_session` cookie, and every unsafe request carries the backend's CSRF contract (`x-pine-csrf: 1`, exact
+`Origin`, JSON bodies). In production the edge proxy routes `/api/*`, `/healthz`, `/readyz` and
+`/.well-known/pine.json` to `pine-api` and everything else to this app; locally, `PINE_API_INTERNAL_URL` makes Next.js
+proxy those paths itself.
+
+- **Identity.** A wallet signs in with Sign-In with Ethereum. The server issues the EIP-4361 message and the browser
+  checks its domain, URI, address, chain, terms statement and expiry before the wallet signs it. Signing accepts the
+  terms digest in the statement. GitHub is linked afterwards through the backend (PKCE, state bound to the session);
+  the callback lands on `/settings`. next-auth stays mounted but signed out and silent.
+- **Transactions.** The backend proposes every transaction as a plan. The browser decodes each plan with its own
+  vendored copy of `@pine/shared` (`packages/core/src/pine-shared`, kept identical by `scripts/sync-shared.mjs --check`)
+  and verifies it against the deployment pinned in this build (`NEXT_PUBLIC_PINE_*`) and against markets read from
+  ClaimRegistry on the user's RPC, within the user's limits, before any wallet prompt. Step labels come from the decoded
+  calldata. A publication's preview is verified too: the claim document digest is recomputed, the question re-rendered
+  and the `createClaim` arguments compared with the document.
+- **The app's own `/api/*` handlers** (Auth.js, GitHub proxy, IPFS upload, account store, agent API) are demo-mode
+  features: in `api` mode they answer 404, and in production the proxy never routes `/api/*` to this app. Agents use the
+  backend's `/api/v1/agents/claims`, `/.well-known/pine.json` and `/api/openapi.json`.
+
+## 2. Environment for production (`api` mode)
+
+`NEXT_PUBLIC_*` values are compiled into the browser bundle: set them before `next build`.
 
 ```bash
-NEXT_PUBLIC_PINE_DATA_SOURCE=rest            # or envio
-NEXT_PUBLIC_PINE_API_URL=https://api.example.org
-NEXT_PUBLIC_ENVIO_GRAPHQL_URL=https://indexer.example.org/v1/graphql
-NEXT_PUBLIC_SITE_URL=https://console.example.org   # absolute URLs in agent data, feeds, OG tags
+NEXT_PUBLIC_PINE_DATA_SOURCE=api
+NEXT_PUBLIC_SITE_URL=https://app.pine.example        # = PINE_PUBLIC_ORIGIN of the API
 NEXT_PUBLIC_CHAIN_ID=100
-NEXT_PUBLIC_IPFS_GATEWAY=https://cdn.kleros.link
-NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=...           # optional; injected wallets work without it
-NEXT_PUBLIC_PINE_DEMO_WALLET=0
-PINE_IPFS_UPLOAD_URL=...                           # server-side pinning endpoint used by /api/ipfs
-PINE_IPFS_UPLOAD_TOKEN=...
-AUTH_SECRET=$(openssl rand -base64 32)             # required outside mock mode
-AUTH_URL=https://console.example.org              # REQUIRED in production: SIWE domain + Origin checks use it instead of forwarded headers
-AUTH_GITHUB_ID=...                                 # GitHub OAuth app
-AUTH_GITHUB_SECRET=...
+NEXT_PUBLIC_PINE_CLAIM_REGISTRY=0x...                # = PINE_CLAIM_REGISTRY (forge deployment record)
+NEXT_PUBLIC_PINE_EVIDENCE_REGISTRY=0x...             # = PINE_EVIDENCE_REGISTRY
+NEXT_PUBLIC_PINE_DEPLOYMENT_BLOCK=...                # = PINE_DEPLOYMENT_BLOCK
+NEXT_PUBLIC_RPC_URL_100=                             # optional public Gnosis RPC for wallet reads (no API keys: it is public)
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=                # optional; injected wallets work without it
+PINE_API_INTERNAL_URL=http://127.0.0.1:3000          # runtime, server only: public reads for page metadata
 ```
 
-**GitHub OAuth app:** set the callback URL to `https://<host>/api/auth/callback/github`. The requested scope is `read:user` only. Public repositories need no repository scope (SPEC §2).
+`AUTH_*`, `PINE_IPFS_UPLOAD_*` and `NEXT_PUBLIC_PINE_API_URL` are not used in `api` mode. The reference deployment
+(systemd unit, env template, nginx and Caddy examples) is in `../deploy/` (`pine-web.service`, `env/web.env`).
+
+### Local development against the backend
+
+```bash
+scripts/dev-stack/up.sh            # repository root: Postgres, anvil fork of Gnosis with Pine deployed, pine-api, indexer
+set -a && . scripts/dev-stack/.state/frontend.env && set +a
+cd frontend && NEXT_PUBLIC_RPC_URL_100=http://127.0.0.1:8545 pnpm dev:prism    # http://localhost:3004
+```
 
 ## 3. Vercel
 
@@ -79,7 +105,8 @@ CMD node $APP_DIR/server.js
 - [ ] Evidence mechanism and commit-reveal design approved (SPEC §10.5).
 - [ ] Oracle answering, monitoring and escalation funding assigned (SPEC §10.7).
 - [ ] Legal and regulatory review completed (SPEC §8).
-- [ ] `NEXT_PUBLIC_PINE_DEMO_WALLET=0` and the data source is not `mock`. The demo banner disappears automatically.
+- [ ] `NEXT_PUBLIC_PINE_DATA_SOURCE=api` and `NEXT_PUBLIC_PINE_DEMO_WALLET` unset or `0`. The demo banner disappears automatically.
+- [ ] `NEXT_PUBLIC_PINE_CLAIM_REGISTRY`, `NEXT_PUBLIC_PINE_EVIDENCE_REGISTRY` and `NEXT_PUBLIC_PINE_DEPLOYMENT_BLOCK` equal the API's deployment (a mismatch makes every plan fail verification), and `node scripts/sync-shared.mjs --check` passes for the release.
 - [ ] `AUTH_URL` (or `NEXTAUTH_URL`) set to the public origin. Without it, wallet linking (SIWE domain) and Auth.js trust `X-Forwarded-Host`. In that case run behind a proxy that overwrites the header.
 - [ ] `AUTH_SECRET` set. Production mock mode without it uses a public development secret, so sessions can be forged. Mock mode is for previews only.
 - [ ] Demo sign-in is disabled automatically in production `rest` mode without GitHub OAuth. Configure `AUTH_GITHUB_ID` and `AUTH_GITHUB_SECRET` before launch.
