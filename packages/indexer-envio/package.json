@@ -1,0 +1,19 @@
+{
+  "name": "@pine/indexer-envio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "codegen": "envio codegen",
+    "typecheck": "envio codegen && tsc --noEmit -p tsconfig.json",
+    "test": "envio codegen && vitest run",
+    "start": "node scripts/start.mjs"
+  },
+  "dependencies": {
+    "envio": "3.12.1",
+    "viem": "2.57.0"
+  },
+  "devDependencies": {
+    "@pine/shared": "workspace:*"
+  }
+}

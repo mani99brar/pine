@@ -1,0 +1,37 @@
+{
+  "version": "1.2.0",
+  "feature": "Indexers",
+  "independent_review": true,
+  "integration_approval": true,
+  "max_verification_attempts": 3,
+  "setup": [
+    { "argv": ["pnpm", "install", "--frozen-lockfile", "--prefer-offline"], "timeout_seconds": 1200 }
+  ],
+  "workers": [
+    {
+      "node_id": "indexer-native",
+      "role": "backend",
+      "required_check_kinds": ["typecheck", "unit"],
+      "owned_paths": ["packages/indexer-native"],
+      "checks": [
+        { "id": "typecheck", "kind": "typecheck", "argv": ["pnpm", "--filter", "@pine/indexer-native", "typecheck"], "timeout_seconds": 900, "scenarios": [] },
+        { "id": "lint", "kind": "typecheck", "argv": ["pnpm", "exec", "eslint", "packages/indexer-native/src"], "timeout_seconds": 900, "scenarios": [] },
+        { "id": "forbidden", "kind": "unit", "argv": ["node", "scripts/check-forbidden.mjs"], "timeout_seconds": 120, "scenarios": [] },
+        { "id": "unit", "kind": "unit", "argv": ["pnpm", "--filter", "@pine/indexer-native", "test"], "timeout_seconds": 1800, "scenarios": [] }
+      ]
+    },
+    {
+      "node_id": "indexer-envio",
+      "role": "backend",
+      "required_check_kinds": ["typecheck", "unit"],
+      "owned_paths": ["packages/indexer-envio", "packages/read-model-envio"],
+      "checks": [
+        { "id": "typecheck-envio", "kind": "typecheck", "argv": ["pnpm", "--filter", "@pine/indexer-envio", "typecheck"], "timeout_seconds": 900, "scenarios": [] },
+        { "id": "typecheck-read-model", "kind": "typecheck", "argv": ["pnpm", "--filter", "@pine/read-model-envio", "typecheck"], "timeout_seconds": 900, "scenarios": [] },
+        { "id": "forbidden", "kind": "unit", "argv": ["node", "scripts/check-forbidden.mjs"], "timeout_seconds": 120, "scenarios": [] },
+        { "id": "unit-envio", "kind": "unit", "argv": ["pnpm", "--filter", "@pine/indexer-envio", "test"], "timeout_seconds": 1800, "scenarios": [] },
+        { "id": "unit-read-model", "kind": "unit", "argv": ["pnpm", "--filter", "@pine/read-model-envio", "test"], "timeout_seconds": 1800, "scenarios": [] }
+      ]
+    }
+  ]
+}

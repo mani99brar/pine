@@ -1,0 +1,36 @@
+# gitleaks configuration of the CI secret scan (.github/workflows/ci.yml, job `secrets`): the default rules plus a
+# deliberately narrow allowlist. Nothing is excluded by path alone: a real secret committed into a test file is found.
+# Kept under .github/workflows/ because that is the composition lane's owned path. Review every new entry.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Ethereum addresses (20 bytes, public chain data: contracts, tokens, wallets in fixtures). A 0x-prefixed 32-byte value is NOT allowlisted: it may be a private key."
+regexTarget = "secret"
+regexes = ['''^0x[0-9a-fA-F]{40}$''']
+
+[[allowlists]]
+description = "Fake credentials of the test suites (exact values; tests assert they never reach logs or responses)."
+regexTarget = "secret"
+regexes = [
+  '''^s3cretDbPassw0rd$''',
+  '''^rpcKEY0123456789abcdef$''',
+  '''^MigrAtorPassw0rd$''',
+  '''^abcDEF0123456789secretKEY$''',
+  '''^QwErTy0123456789$''',
+  '''^k3y-0123456789abcdef-SECRET$''',
+  '''^Zq9xKEYk3y0123456789secret$''',
+  # The canonical jwt.io example token used by the redaction tests.
+  '''^eyJhbGciOiJIUzI1NiJ9\.eyJzdWIiOiIxMjM0NTY3ODkwIn0\.''',
+  # packages/api/test/e2e and the deploy test: fake secrets are named e2e-*, deploy-test-*, pglite-*, pine-*-e2e-password-*.
+  '''^(?:e2e|deploy-test|pglite)-[a-z-]*[0-9a-f]{4,}$''',
+  '''^pine-[a-z]+-e2e-password-2026$''',
+]
+
+[[allowlists]]
+description = "Redaction examples in the security requirements (documentation, not credentials)."
+condition = "AND"
+paths = ['''^docs/security/requirements\.md$''']
+regexTarget = "secret"
+regexes = ['''^abc123def456$''', '''^-----BEGIN RSA PRIVATE KEY-----…''']

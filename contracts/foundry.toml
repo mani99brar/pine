@@ -1,0 +1,47 @@
+[profile.default]
+src = "src"
+test = "test"
+script = "script"
+out = "out"
+cache_path = "cache"
+libs = ["lib"]
+# Pinned compiler: 0.8.37 is the only release with no entries in solidity's bugs_by_version.json (checked 2026-10-02).
+solc_version = "0.8.37"
+evm_version = "cancun"
+optimizer = true
+optimizer_runs = 200
+via_ir = false
+# Reproducible metadata for source verification.
+bytecode_hash = "ipfs"
+cbor_metadata = true
+# Tests and scripts never read or write the filesystem.
+fs_permissions = []
+# Never broadcast from tests; fork tests read state only.
+ffi = false
+remappings = [
+  "forge-std/=lib/forge-std/src/",
+  "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",
+]
+
+[fuzz]
+runs = 1000
+seed = "0x7069_6e65"
+
+[invariant]
+runs = 256
+depth = 64
+fail_on_revert = false
+
+[profile.ci.fuzz]
+runs = 5000
+
+[profile.ci.invariant]
+runs = 512
+depth = 128
+
+[rpc_endpoints]
+gnosis = "${GNOSIS_RPC_URL}"
+
+[lint]
+# forge lint runs separately; build never fails on lint notes.
+lint_on_build = false

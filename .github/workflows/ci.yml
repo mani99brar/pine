@@ -1,0 +1,139 @@
+# Pine CI (PRD-06 section 3, ADR-0001): every controller check of features/*/policy.json, plus `pnpm audit --prod`, the
+# forbidden-pattern gate and gitleaks over the whole history. Actions are pinned to full commit SHAs (tag in the
+# comment) and the token is read-only. The e2e suite runs on a postgres:16 service with PINE_E2E_REQUIRE_PG=1 (it fails
+# rather than falling back to PGlite); `pnpm -r test` runs it once more on PGlite. Fork tests need GNOSIS_RPC_URL and run
+# in a separate job. Repository secrets used: GNOSIS_RPC_URL (fork job only); nothing else. Checked statically by
+# packages/api/test/e2e/deploy-assets.test.ts (parsed as YAML).
+
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FOUNDRY_VERSION: v1.8.1
+
+jobs:
+  checks:
+    name: checks (audit, forbidden, abi, typecheck, lint, tests, e2e on PostgreSQL 16)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          # Disposable CI cluster; the e2e suite creates its own roles and one database per test file.
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: pnpm 12.8.1 through corepack
+        run: |
+          corepack enable
+          corepack prepare pnpm@12.8.1 --activate
+          pnpm --version
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+      - name: Dependency audit (fails on high and critical)
+        run: pnpm audit --prod --audit-level high
+      - name: Forbidden-pattern gate
+        run: node scripts/check-forbidden.mjs
+      - name: Contracts build
+        run: forge build --root contracts
+      - name: ABI export is current
+        run: node scripts/export-abis.mjs --check
+      - name: Plan vectors are current
+        run: pnpm --filter @pine/api exec node --import tsx ../../scripts/fixtures/export-plan-vectors.mts --check
+      - name: Typecheck (every package)
+        run: pnpm -r typecheck
+      - name: Lint
+        run: pnpm exec eslint packages
+      - name: Unit and integration tests (every package; API e2e on PGlite)
+        run: pnpm -r --workspace-concurrency=1 test
+      - name: Contract unit tests (TAP)
+        run: node scripts/forge-test-tap.mjs --match-path "test/{claim-registry,evidence-registry}/**/*.sol"
+      - name: End-to-end suite on PostgreSQL 16
+        env:
+          PINE_E2E_DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
+          PINE_E2E_REQUIRE_PG: "1"
+        run: pnpm --filter @pine/api exec vitest run test/e2e
+
+  secrets:
+    name: secret scanning (gitleaks, full history)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      # sha256 of gitleaks_8.30.1_linux_x64.tar.gz from the release's gitleaks_8.30.1_checksums.txt.
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks (pinned release, checksum verified)
+        run: |
+          curl -fsSLo gitleaks.tar.gz "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "${GITLEAKS_SHA256}  gitleaks.tar.gz" | sha256sum --check --strict
+          tar -xzf gitleaks.tar.gz gitleaks
+          rm gitleaks.tar.gz
+      # Every commit reachable from the checked-out ref (the whole history, not only the pushed commits); findings are
+      # redacted in the log and never uploaded. The allowlist is narrow and reviewed: .github/workflows/gitleaks.toml.
+      - name: Scan the whole history
+        run: ./gitleaks git --redact --no-banner --config .github/workflows/gitleaks.toml .
+
+  fork:
+    name: Gnosis fork tests (pinned block, no broadcast)
+    # The only job that sees GNOSIS_RPC_URL (an archive RPC; it may embed an API key and is redacted by the TAP wrapper).
+    # GitHub allows no `secrets` in a job-level `if`, so the secret is mapped into this job's env and every step is
+    # guarded on it: pull requests from forks (no secrets) skip the fork tests and say so.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      GNOSIS_RPC_URL: ${{ secrets.GNOSIS_RPC_URL }}
+    steps:
+      - name: No GNOSIS_RPC_URL secret (pull request from a fork); fork tests skipped
+        if: env.GNOSIS_RPC_URL == ''
+        run: echo "GNOSIS_RPC_URL is not available to this run; the Gnosis fork tests were skipped."
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: env.GNOSIS_RPC_URL != ''
+        with:
+          persist-credentials: false
+      - uses: foundry-rs/foundry-toolchain@908c540300062bd5a7e473851cdb4282204cee09 # v1.9.1
+        if: env.GNOSIS_RPC_URL != ''
+        with:
+          version: ${{ env.FOUNDRY_VERSION }}
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        if: env.GNOSIS_RPC_URL != ''
+        with:
+          node-version-file: .nvmrc
+          package-manager-cache: false
+      - name: Fork tests (registry against the real Seer/Reality deployment)
+        if: env.GNOSIS_RPC_URL != ''
+        run: node scripts/forge-test-tap.mjs --match-path "test/fork/**/*.sol"
+      - name: Deployment and lifecycle e2e on the fork (real contract pair, replayed plan vectors)
+        if: env.GNOSIS_RPC_URL != ''
+        run: node scripts/forge-test-tap.mjs --match-path "test/e2e/**/*.sol"

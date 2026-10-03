@@ -1,0 +1,17 @@
+{
+  "version": "2.3.0",
+  "name": "Indexers: finalized-only native indexer with dual-RPC integrity checks, and the Envio HyperIndex option with its GraphQL read model, both conformant to the frozen read model",
+  "branch_prefix": "feature/indexers",
+  "prd": "docs/prd/PRD-05-indexers.md",
+  "policy": "policy.json",
+  "workers": [
+    { "node_id": "indexer-native", "task": "indexer-native-task.md" },
+    { "node_id": "indexer-envio", "task": "indexer-envio-task.md" }
+  ],
+  "reviewers": [
+    { "reviewer_id": "general", "prompt": "builtin:general" },
+    { "reviewer_id": "coverage", "prompt": "builtin:coverage" },
+    { "reviewer_id": "security", "prompt": "security-review.md" }
+  ],
+  "sidecar": { "prompt": "builtin:senior-review", "cadence_seconds": 1800, "max_passes": 12 }
+}

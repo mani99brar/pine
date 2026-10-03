@@ -1,0 +1,323 @@
+{
+  "scenario": "oracle",
+  "eventsSha256": "b829d845c53cc991418250d2151b983351a3546cbd3d9159c7047f5d0e2b9c4a",
+  "entities": {
+    "AnswerCommitment": [
+      {
+        "answerId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1002:1",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:0xccb05ad3832978c5cd5a0a58b7bf8d866d770ef365d4363fcbe5dc7c9dbd2c9a"
+      }
+    ],
+    "Arbitration": [
+      {
+        "arbitratorAnswer": null,
+        "id": "0x6364f0ea81c8726c147ef74ec14a8b01295c7998f7cdeb0f560a40695bb9359b",
+        "rejectionReason": "Bond has changed",
+        "requester": "0x3440326f551b8a7ee198cee35cb5d517f2d296a2",
+        "stage": "RequestRejected",
+        "updatedAt": "1802307235"
+      },
+      {
+        "arbitratorAnswer": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "rejectionReason": null,
+        "requester": "0x3440326f551b8a7ee198cee35cb5d517f2d296a2",
+        "stage": "ArbitrationFinished",
+        "updatedAt": "1801227120"
+      }
+    ],
+    "ArbitrationStage": [
+      {
+        "at": "1802307235",
+        "blockNumber": "1015",
+        "id": "0x6364f0ea81c8726c147ef74ec14a8b01295c7998f7cdeb0f560a40695bb9359b:1015:1",
+        "logIndex": "1",
+        "questionId": "0x6364f0ea81c8726c147ef74ec14a8b01295c7998f7cdeb0f560a40695bb9359b",
+        "stage": "RequestRejected",
+        "txHash": "0xd1f85bcf8fc6b069788ad5e1950289537ef201e29b05e005d8690579028badf0"
+      },
+      {
+        "at": "1800792660",
+        "blockNumber": "1005",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1005:0",
+        "logIndex": "0",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "stage": "RequestNotified",
+        "txHash": "0x97359b60cfbadfd37e92048167203d71f2b4fa0b035d6926eba046d57ab88144"
+      },
+      {
+        "at": "1800793260",
+        "blockNumber": "1006",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1006:0",
+        "logIndex": "0",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "stage": "RequestCanceled",
+        "txHash": "0x92bc793fc457796f8880dcc04468938af914fb21435d6b4f477ee4653431cf99"
+      },
+      {
+        "at": "1800793860",
+        "blockNumber": "1007",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1007:0",
+        "logIndex": "0",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "stage": "RequestNotified",
+        "txHash": "0x796d9c3d98e5f03a0543b480ef7c286caf06bd9eaf94c71a5f71bc500ba187f7"
+      },
+      {
+        "at": "1800795060",
+        "blockNumber": "1008",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1008:0",
+        "logIndex": "0",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "stage": "RequestAcknowledged",
+        "txHash": "0x1fb0102b0b655b660ccc10a08ccd67e4eb489764302fb6476805368434d9ca9d"
+      },
+      {
+        "at": "1801227060",
+        "blockNumber": "1009",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1009:0",
+        "logIndex": "0",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "stage": "ArbitratorAnswered",
+        "txHash": "0x201bd7cffd23a2f8406b0adf7920bc641442da4ed6d6c597cd67b34a616a271b"
+      },
+      {
+        "at": "1801227120",
+        "blockNumber": "1010",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1010:2",
+        "logIndex": "2",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "stage": "ArbitrationFinished",
+        "txHash": "0x525e331bc64c96d2adfa809986891bf4381cd79c94eafdf5bd1a676fb5f4c019"
+      }
+    ],
+    "Claim": [
+      {
+        "claimDocumentSha256": "0x9897e1675bc17d04e46a50dc68ac644fb0f74ec63a7be7b5e0cb7edde1afe932",
+        "commit": "abababababababababababababababababababab",
+        "conditionId": "0xf8d900aa53c48d3e89a009674fc793021bdcc62a65aff1ac8a350e7ccb3a7089",
+        "createdAt": "1801227185",
+        "createdBlock": "1012",
+        "createdLogIndex": "0",
+        "createdTxHash": "0x240567340cf492981b3a52302c1ec11454abd46808628b8e2e38f2e0fdc2e15b",
+        "creator": "0x9304a750cb071da81d06de5b88f9a05f785ad055",
+        "evidenceDeadline": "1801831985",
+        "id": "0x61b2900aadd58831ebabdc80dd6f01ef9425454f",
+        "invalidToken": "0x1487e77b9c49faa25e45230b9f084ad62ff0fbb5",
+        "marketName": "Pine claim [Claim delta]: was a reproducible counterexample submitted?",
+        "marketNameHash": "0x165c5abe50af1e2dec4915a42e85a3f498c7eb2ed8cf522dc0d9ee372a0d173f",
+        "minBond": "1000000000000000000",
+        "noToken": "0x38c9ee144362a70e3b9cb5f517ea11152e18cceb",
+        "policyDocumentSha256": "0xff1c9ed88c493f35ccedb6df7f957433cf568a873458a45eb62a995e160a692b",
+        "questionId": "0x3db92502b9f044b06384662be7433fe71584d1d9db7fe0583747fa4e71404a2a",
+        "registry": "0x00000000000000000000000000000000000c1a10",
+        "repositoryId": "123456789",
+        "revealDeadline": "1802004785",
+        "title": "Claim delta",
+        "yesToken": "0x1c4f2f84437d4d400deab8d5b95b13a8541eec58"
+      },
+      {
+        "claimDocumentSha256": "0x60469b78a32d24a7ca607efa5518573a284ee01b40599030adfcc9c703208fba",
+        "commit": "abababababababababababababababababababab",
+        "conditionId": "0xd0f74e398b09adece595b328e09fa13507b9971839209c257a984b98aaef56e2",
+        "createdAt": "1800000000",
+        "createdBlock": "1000",
+        "createdLogIndex": "0",
+        "createdTxHash": "0x24bf609624b9edf3598e770e42fa37ba4d3af1d40d27fb39f1cd3e49ffcdaa35",
+        "creator": "0xbc138968ca7e0cd550b9d5dca19e9df5fe29d6be",
+        "evidenceDeadline": "1800604800",
+        "id": "0x9de78939179a8741b84f78314fe30ee9eeae20f3",
+        "invalidToken": "0x76434c11dbe94fa865fa54adf83a62a7331c095e",
+        "marketName": "Pine claim [Claim gamma]: was a reproducible counterexample submitted?",
+        "marketNameHash": "0x4c2f5129c43bb3096e51505573efefbf549472ab4fa44e17d167051b930677a1",
+        "minBond": "1000000000000000000",
+        "noToken": "0xd9b69fede2375d85868d9a909fe2bf7c867875fa",
+        "policyDocumentSha256": "0xff1c9ed88c493f35ccedb6df7f957433cf568a873458a45eb62a995e160a692b",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "registry": "0x00000000000000000000000000000000000c1a10",
+        "repositoryId": "123456789",
+        "revealDeadline": "1800777600",
+        "title": "Claim gamma",
+        "yesToken": "0xd0b7b65fc5f0bb2df4cc6723d67639cff0725807"
+      }
+    ],
+    "ConditionResolution": [
+      {
+        "blockNumber": "1011",
+        "ctfQuestionId": "0x5aa5d3a650eb2d64855da21238282aab17bd56b6c6bf1d892842260ef5488494",
+        "id": "0xd0f74e398b09adece595b328e09fa13507b9971839209c257a984b98aaef56e2",
+        "payoutNumerators": [
+          "1",
+          "0",
+          "0"
+        ],
+        "resolvedAt": "1801227180",
+        "txHash": "0x5d435e8615050ca3ca05248c9a2c81d676a6fa85cf3ce5c800a45f2bbae20024"
+      }
+    ],
+    "EvidenceSubmission": [],
+    "IndexerProgress": [
+      {
+        "blockNumber": "1015",
+        "blockTimestamp": "1802307235",
+        "id": "100"
+      }
+    ],
+    "OracleAnswer": [
+      {
+        "answer": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+        "answerer": "0x5dad7600c5d89fe3824ffa99ec1c3eb8bf3b0501",
+        "blockNumber": "1013",
+        "bond": "1000000000000000000",
+        "historyHash": "0x895d01736261f10d47623e8b2e6baa88c35608bba8dad857b088c15c13aa8e1e",
+        "id": "0x3db92502b9f044b06384662be7433fe71584d1d9db7fe0583747fa4e71404a2a:1013:0",
+        "isCommitment": false,
+        "logIndex": "0",
+        "questionId": "0x3db92502b9f044b06384662be7433fe71584d1d9db7fe0583747fa4e71404a2a",
+        "revealedAnswer": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+        "ts": "1802004795",
+        "txHash": "0xf1af810d57f0b6379332430408f91057e716ac4f0dd5ef09fade72ceca644298"
+      },
+      {
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "answerer": "0xacfb09713f4f9cc14aa498cbf844b94a27da64ff",
+        "blockNumber": "1015",
+        "bond": "1000000000000000000",
+        "historyHash": "0xbe8d816aabb0213706fd8d68e7853abb15ed15c33b0d548b2663387827e13b69",
+        "id": "0x6364f0ea81c8726c147ef74ec14a8b01295c7998f7cdeb0f560a40695bb9359b:1015:0",
+        "isCommitment": false,
+        "logIndex": "0",
+        "questionId": "0x6364f0ea81c8726c147ef74ec14a8b01295c7998f7cdeb0f560a40695bb9359b",
+        "revealedAnswer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "ts": "1802307235",
+        "txHash": "0xc8992043c190e727e6b40bb9ad61287d7967d93c1eb9d6a896d39e5fe4df2d06"
+      },
+      {
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "answerer": "0x5dad7600c5d89fe3824ffa99ec1c3eb8bf3b0501",
+        "blockNumber": "1001",
+        "bond": "1000000000000000000",
+        "historyHash": "0x2df13e12b7aa6fa1106dfd2437b6e7698d696a1ce9fb2c2e608bbd62f902ef5d",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1001:1",
+        "isCommitment": false,
+        "logIndex": "1",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "revealedAnswer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "ts": "1800777660",
+        "txHash": "0x98b9f1bf8f6f20f1fe31189bfb9308322f32e9cf2b0f155077385bf646364219"
+      },
+      {
+        "answer": "0xccb05ad3832978c5cd5a0a58b7bf8d866d770ef365d4363fcbe5dc7c9dbd2c9a",
+        "answerer": "0x3440326f551b8a7ee198cee35cb5d517f2d296a2",
+        "blockNumber": "1002",
+        "bond": "2000000000000000000",
+        "historyHash": "0x939df96a935ecdd2e0ba6577ae45072dbaeef53b04851ee315577aa0308c63f2",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1002:1",
+        "isCommitment": true,
+        "logIndex": "1",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "revealedAnswer": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "ts": "1800781260",
+        "txHash": "0x42ffc6a53c7456b09b0d2d2206961fea054afc17b61a650024f34654db776f31"
+      },
+      {
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "answerer": "0xacfb09713f4f9cc14aa498cbf844b94a27da64ff",
+        "blockNumber": "1004",
+        "bond": "4000000000000000000",
+        "historyHash": "0x5901f64953a0249f078b954da0677947de2fdb8465a68550b93512a2bb2a613a",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1004:0",
+        "isCommitment": false,
+        "logIndex": "0",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "revealedAnswer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "ts": "1800789060",
+        "txHash": "0x8dcb9ccf2580562e28a1d18c829b788dd413eb94b19d186bd6bf4e4318d1af60"
+      },
+      {
+        "answer": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "answerer": "0x3440326f551b8a7ee198cee35cb5d517f2d296a2",
+        "blockNumber": "1010",
+        "bond": "0",
+        "historyHash": "0x338a3f3207a01c4aa3fe904c82d16c6105089db39c2cefbd98b41adb71fbf0e4",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db:1010:1",
+        "isCommitment": false,
+        "logIndex": "1",
+        "questionId": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "revealedAnswer": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "ts": "1801227120",
+        "txHash": "0xafc75d5c8385573ea5dfd34064b90a7b8266ae73f83a845a249709f97833b7cf"
+      }
+    ],
+    "OracleQuestion": [
+      {
+        "answerCount": "1",
+        "answeredByArbitrator": false,
+        "arbitrationRequestedBy": null,
+        "bestAnswer": "0xfffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
+        "bond": "1000000000000000000",
+        "bounty": "0",
+        "finalizeTs": "1802307195",
+        "id": "0x3db92502b9f044b06384662be7433fe71584d1d9db7fe0583747fa4e71404a2a",
+        "lastEventBlock": "1014",
+        "markets": [
+          "0x61b2900aadd58831ebabdc80dd6f01ef9425454f"
+        ],
+        "minBond": "1000000000000000000",
+        "openingTs": "1802004785",
+        "pendingArbitration": false,
+        "reopenedBy": "0x6364f0ea81c8726c147ef74ec14a8b01295c7998f7cdeb0f560a40695bb9359b",
+        "reopens": null,
+        "timeout": "302400"
+      },
+      {
+        "answerCount": "1",
+        "answeredByArbitrator": false,
+        "arbitrationRequestedBy": null,
+        "bestAnswer": "0x0000000000000000000000000000000000000000000000000000000000000001",
+        "bond": "1000000000000000000",
+        "bounty": "0",
+        "finalizeTs": "1802609635",
+        "id": "0x6364f0ea81c8726c147ef74ec14a8b01295c7998f7cdeb0f560a40695bb9359b",
+        "lastEventBlock": "1015",
+        "markets": [
+          "0x61b2900aadd58831ebabdc80dd6f01ef9425454f"
+        ],
+        "minBond": "1000000000000000000",
+        "openingTs": "1802004785",
+        "pendingArbitration": false,
+        "reopenedBy": null,
+        "reopens": "0x3db92502b9f044b06384662be7433fe71584d1d9db7fe0583747fa4e71404a2a",
+        "timeout": "302400"
+      },
+      {
+        "answerCount": "4",
+        "answeredByArbitrator": true,
+        "arbitrationRequestedBy": "0x3440326f551b8a7ee198cee35cb5d517f2d296a2",
+        "bestAnswer": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "bond": "4000000000000000000",
+        "bounty": "500000000000000000",
+        "finalizeTs": "1801227120",
+        "id": "0xa0f4f70a209bbb082f2c200d0b7cb2f660dd2aee1c509bf521768489c38655db",
+        "lastEventBlock": "1010",
+        "markets": [
+          "0x9de78939179a8741b84f78314fe30ee9eeae20f3"
+        ],
+        "minBond": "1000000000000000000",
+        "openingTs": "1800777600",
+        "pendingArbitration": false,
+        "reopenedBy": null,
+        "reopens": null,
+        "timeout": "302400"
+      }
+    ],
+    "TrackedCondition": [
+      {
+        "id": "0xd0f74e398b09adece595b328e09fa13507b9971839209c257a984b98aaef56e2"
+      },
+      {
+        "id": "0xf8d900aa53c48d3e89a009674fc793021bdcc62a65aff1ac8a350e7ccb3a7089"
+      }
+    ]
+  }
+}

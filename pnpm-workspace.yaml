@@ -1,0 +1,29 @@
+packages:
+  - "packages/*"
+
+# Do not install versions published less than 3 days ago (typosquat/compromised-release window).
+minimumReleaseAge: 4320
+
+autoInstallPeers: true
+strictPeerDependencies: false
+
+# Supply-chain hardening: dependency lifecycle scripts are blocked unless allowed here.
+allowBuilds:
+  esbuild: true
+
+saveExact: true
+# envio 3.12.x depends on @fuel-ts/*@0.96.1 which declares only Node 18/20/22; strict engines would refuse Node 24.
+engineStrict: false
+
+# Security overrides for vulnerable transitive dependencies of envio (express server, its tsx/esbuild and viem/ws),
+# found by `pnpm audit --prod` on 2026-10-02. Verified: envio codegen and createTestIndexer tests still pass.
+overrides:
+  express@4: 4.22.3
+  body-parser@1: 1.20.8
+  path-to-regexp@0.1: 0.1.13
+  qs@6: 6.16.0
+  ws@8: 8.22.0
+  esbuild@<0.28.1: 0.28.2
+  cookie@<0.7.0: 0.7.2
+  send@0: 0.19.2
+  serve-static@1: 1.16.3

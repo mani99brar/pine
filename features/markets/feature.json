@@ -1,0 +1,17 @@
+{
+  "version": "2.3.0",
+  "name": "Markets, evidence, oracle and funding modules: evidence intake and plans, oracle status and helper plans, notifications, YES-ladder funding, positions, withdrawal and redemption",
+  "branch_prefix": "feature/markets",
+  "prd": "docs/prd/PRD-04-markets.md",
+  "policy": "policy.json",
+  "workers": [
+    { "node_id": "markets", "task": "markets-task.md" },
+    { "node_id": "funding", "task": "funding-task.md" }
+  ],
+  "reviewers": [
+    { "reviewer_id": "general", "prompt": "builtin:general" },
+    { "reviewer_id": "coverage", "prompt": "builtin:coverage" },
+    { "reviewer_id": "security", "prompt": "security-review.md" }
+  ],
+  "sidecar": { "prompt": "builtin:senior-review", "cadence_seconds": 1800, "max_passes": 12 }
+}

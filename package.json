@@ -1,0 +1,27 @@
+{
+  "name": "pine",
+  "private": true,
+  "description": "GitHub claim verification backend: contracts, API, indexers",
+  "license": "UNLICENSED",
+  "type": "module",
+  "packageManager": "pnpm@12.8.1",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 run build",
+    "typecheck": "pnpm -r --workspace-concurrency=1 run typecheck",
+    "lint": "eslint .",
+    "test": "pnpm -r --workspace-concurrency=1 run test",
+    "contracts:build": "cd contracts && forge build",
+    "contracts:test": "node scripts/forge-test-tap.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.0",
+    "eslint": "10.11.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.71.0",
+    "vitest": "5.0.2"
+  }
+}

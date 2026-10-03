@@ -1,0 +1,20 @@
+{
+  "name": "@pine/read-model-envio",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.ts"
+  },
+  "dependencies": {
+    "@pine/shared": "workspace:*",
+    "viem": "2.57.0",
+    "zod": "4.6.5"
+  }
+}

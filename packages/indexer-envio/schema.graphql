@@ -1,0 +1,153 @@
+# Pine read-model entities (records of packages/shared/src/read-model.ts). Conventions (decisions.md, PRD-05 3.1):
+# - ids, addresses and hashes are lowercase hex;
+# - every block number, log index, timestamp, amount, bond and repositoryId is BigInt (Envio maps Int to int4);
+# - lists returned by the read model are Json arrays (markets: sorted addresses; payoutNumerators: decimal strings),
+#   never Postgres arrays.
+# Field names are part of the read-model-envio contract (packages/read-model-envio/src/queries.ts).
+
+enum EvidenceStatus {
+  committed
+  revealed
+  published
+}
+
+enum KlerosHomeStage {
+  RequestNotified
+  RequestRejected
+  RequestAcknowledged
+  RequestCanceled
+  ArbitrationFailed
+  ArbitratorAnswered
+  ArbitrationFinished
+}
+
+"A claim (ClaimRegistry ClaimCreated); id = market."
+type Claim {
+  id: ID!
+  registry: String!
+  creator: String! @index
+  claimDocumentSha256: String! @index
+  policyDocumentSha256: String!
+  repositoryId: BigInt!
+  "40 lowercase hex characters, no 0x."
+  commit: String!
+  questionId: String! @index
+  conditionId: String!
+  evidenceDeadline: BigInt! @index
+  revealDeadline: BigInt!
+  minBond: BigInt!
+  title: String!
+  marketName: String!
+  marketNameHash: String!
+  yesToken: String!
+  noToken: String!
+  invalidToken: String!
+  createdAt: BigInt!
+  createdBlock: BigInt! @index
+  createdTxHash: String!
+  createdLogIndex: BigInt!
+}
+
+"An evidence submission; id = registry:submissionId (decimal)."
+type EvidenceSubmission {
+  id: ID!
+  registry: String!
+  submissionId: BigInt!
+  market: String! @index
+  submitter: String! @index
+  status: EvidenceStatus! @index
+  commitment: String
+  contentSha256: String
+  committedAt: BigInt!
+  revealedAt: BigInt
+  committedTxHash: String!
+  committedBlock: BigInt! @index
+  committedLogIndex: BigInt!
+}
+
+"A tracked Reality.eth question; id = question id. Its existence is what makes the question tracked."
+type OracleQuestion {
+  id: ID!
+  "Json array of lowercase market addresses, sorted ascending."
+  markets: Json!
+  openingTs: BigInt!
+  minBond: BigInt!
+  timeout: BigInt!
+  bestAnswer: String
+  bond: BigInt!
+  finalizeTs: BigInt!
+  pendingArbitration: Boolean!
+  arbitrationRequestedBy: String
+  answeredByArbitrator: Boolean!
+  bounty: BigInt!
+  reopenedBy: String
+  reopens: String
+  answerCount: BigInt!
+  lastEventBlock: BigInt!
+}
+
+"A Reality.eth answer of a tracked question; id = questionId:blockNumber:logIndex."
+type OracleAnswer {
+  id: ID!
+  questionId: String! @index
+  answer: String!
+  historyHash: String!
+  answerer: String!
+  bond: BigInt!
+  ts: BigInt!
+  isCommitment: Boolean!
+  revealedAnswer: String
+  txHash: String!
+  blockNumber: BigInt!
+  logIndex: BigInt!
+}
+
+"First committed answer per (question, commitment id); id = questionId:commitmentId. Lets a reveal find its commitment by id."
+type AnswerCommitment {
+  id: ID!
+  answerId: String!
+}
+
+"Kleros home-proxy arbitration of a tracked question; id = question id."
+type Arbitration {
+  id: ID!
+  stage: KlerosHomeStage!
+  requester: String
+  rejectionReason: String
+  arbitratorAnswer: String
+  updatedAt: BigInt!
+}
+
+"One Kleros home-proxy stage (arbitration history); id = questionId:blockNumber:logIndex."
+type ArbitrationStage {
+  id: ID!
+  questionId: String! @index
+  stage: KlerosHomeStage!
+  at: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+  logIndex: BigInt!
+}
+
+"Conditional Tokens resolution of a tracked condition; id = condition id. First resolution wins."
+type ConditionResolution {
+  id: ID!
+  ctfQuestionId: String!
+  "Json array of decimal strings."
+  payoutNumerators: Json!
+  resolvedAt: BigInt!
+  txHash: String!
+  blockNumber: BigInt!
+}
+
+"A condition referenced by a claim; id = condition id."
+type TrackedCondition {
+  id: ID!
+}
+
+"Singleton per chain (id = chain id): the last block whose events were applied and its timestamp (read by status())."
+type IndexerProgress {
+  id: ID!
+  blockNumber: BigInt!
+  blockTimestamp: BigInt!
+}

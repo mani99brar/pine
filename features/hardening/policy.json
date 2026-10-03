@@ -1,0 +1,256 @@
+{
+  "version": "1.2.0",
+  "feature": "Pre-deployment hardening of the merged contracts, deploy script and API modules",
+  "independent_review": true,
+  "integration_approval": true,
+  "max_verification_attempts": 3,
+  "setup": [
+    {
+      "argv": [
+        "pnpm",
+        "install",
+        "--frozen-lockfile",
+        "--prefer-offline"
+      ],
+      "timeout_seconds": 1200
+    }
+  ],
+  "workers": [
+    {
+      "node_id": "contracts-hardening",
+      "role": "contracts",
+      "required_check_kinds": [
+        "build",
+        "unit",
+        "integration",
+        "typecheck"
+      ],
+      "owned_paths": [
+        "contracts/src/EvidenceRegistry.sol",
+        "contracts/test/evidence-registry",
+        "contracts/test/claim-registry",
+        "contracts/test/fork",
+        "contracts/test/e2e",
+        "contracts/script",
+        "scripts/fixtures"
+      ],
+      "checks": [
+        {
+          "id": "build",
+          "kind": "build",
+          "argv": [
+            "forge",
+            "build",
+            "--root",
+            "contracts"
+          ],
+          "timeout_seconds": 1200,
+          "scenarios": []
+        },
+        {
+          "id": "abi",
+          "kind": "typecheck",
+          "argv": [
+            "node",
+            "scripts/export-abis.mjs",
+            "--check"
+          ],
+          "timeout_seconds": 120,
+          "scenarios": []
+        },
+        {
+          "id": "vectors",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "node",
+            "--import",
+            "tsx",
+            "../../scripts/fixtures/export-plan-vectors.mts",
+            "--check"
+          ],
+          "timeout_seconds": 600,
+          "scenarios": []
+        },
+        {
+          "id": "unit",
+          "kind": "unit",
+          "argv": [
+            "node",
+            "scripts/forge-test-tap.mjs",
+            "--match-path",
+            "test/{claim-registry,evidence-registry}/**/*.sol"
+          ],
+          "timeout_seconds": 2400,
+          "scenarios": []
+        },
+        {
+          "id": "fork",
+          "kind": "integration",
+          "argv": [
+            "node",
+            "scripts/forge-test-tap.mjs",
+            "--match-path",
+            "test/fork/**/*.sol"
+          ],
+          "timeout_seconds": 2400,
+          "scenarios": []
+        },
+        {
+          "id": "e2e",
+          "kind": "integration",
+          "argv": [
+            "node",
+            "scripts/forge-test-tap.mjs",
+            "--match-path",
+            "test/e2e/**/*.sol"
+          ],
+          "timeout_seconds": 2400,
+          "scenarios": []
+        },
+        {
+          "id": "forbidden",
+          "kind": "unit",
+          "argv": [
+            "node",
+            "scripts/check-forbidden.mjs"
+          ],
+          "timeout_seconds": 120,
+          "scenarios": []
+        }
+      ]
+    },
+    {
+      "node_id": "api-hardening",
+      "role": "backend",
+      "required_check_kinds": [
+        "typecheck",
+        "unit"
+      ],
+      "owned_paths": [
+        "packages/api/src/modules/markets",
+        "packages/api/src/modules/funding",
+        "packages/api/migrations/markets",
+        "packages/api/migrations/funding"
+      ],
+      "checks": [
+        {
+          "id": "typecheck",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "typecheck"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "lint",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "exec",
+            "eslint",
+            "packages/api/src"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "forbidden",
+          "kind": "unit",
+          "argv": [
+            "node",
+            "scripts/check-forbidden.mjs"
+          ],
+          "timeout_seconds": 120,
+          "scenarios": []
+        },
+        {
+          "id": "unit",
+          "kind": "unit",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "vitest",
+            "run",
+            "src/modules/markets",
+            "src/modules/funding"
+          ],
+          "timeout_seconds": 2400,
+          "scenarios": []
+        }
+      ]
+    },
+    {
+      "node_id": "claims-hardening",
+      "role": "backend",
+      "required_check_kinds": [
+        "typecheck",
+        "unit"
+      ],
+      "owned_paths": [
+        "packages/api/src/modules/claims",
+        "packages/api/migrations/claims"
+      ],
+      "checks": [
+        {
+          "id": "typecheck",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "typecheck"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "lint",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "exec",
+            "eslint",
+            "packages/api/src"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "forbidden",
+          "kind": "unit",
+          "argv": [
+            "node",
+            "scripts/check-forbidden.mjs"
+          ],
+          "timeout_seconds": 120,
+          "scenarios": []
+        },
+        {
+          "id": "unit",
+          "kind": "unit",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "vitest",
+            "run",
+            "src/modules/claims"
+          ],
+          "timeout_seconds": 2400,
+          "scenarios": []
+        }
+      ]
+    }
+  ]
+}

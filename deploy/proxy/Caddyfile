@@ -1,0 +1,87 @@
+# Edge proxy for Pine with Caddy 2 (automatic TLS). Same topology as nginx.conf: one trusted hop
+# (PINE_TRUST_PROXY_HOPS=1), API same-origin under /api, user content on another registrable domain.
+# Requirements and limits of this example (not validated in the repository: no caddy binary in CI; run
+# `caddy validate --config Caddyfile` before use):
+#   - per-IP rate limits need the github.com/mholt/caddy-ratelimit plugin (build with xcaddy); the user-content host
+#     has NO in-app per-IP limit, so do not run it without one;
+#   - stock Caddy has no GeoIP lookup: this example only STRIPS any client-supplied X-Pine-Country, so the API sees an
+#     unknown country and, in production, refuses publish_claim and fund_market (451). Use nginx.conf (GeoIP2) or a
+#     GeoIP-capable build that sets the header from its own lookup before relying on geofencing.
+
+{
+	order rate_limit before reverse_proxy
+}
+
+(pine_noquery_log) {
+	log {
+		output file /var/log/caddy/pine.log
+		# Drop query strings, cookies and authorization headers from access logs.
+		format filter {
+			wrap json
+			fields {
+				request>uri regexp "\?.*$" ""
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				resp_headers>Set-Cookie delete
+			}
+		}
+	}
+}
+
+app.pine.example {
+	import pine_noquery_log
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	request_body {
+		max_size 600KB
+	}
+
+	@api path /api/* /healthz /readyz /.well-known/pine.json
+	handle @api {
+		rate_limit {
+			zone pine_api {
+				key {remote_host}
+				events 1200
+				window 1m
+			}
+		}
+		reverse_proxy 127.0.0.1:3000 {
+			# One hop: overwrite the client's chain; never forward a client-supplied country header.
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Pine-Country
+		}
+	}
+	# Never routed: metrics stay on the private listener. A `handle` block (not a bare `respond`, which Caddy orders
+	# after `handle` and the catch-all below would shadow); a path matcher sorts it before the catch-all.
+	handle /metrics {
+		respond 404
+	}
+
+	handle {
+		root * /opt/pine/web
+		try_files {path} /index.html
+		file_server
+	}
+}
+
+pine-usercontent.example {
+	import pine_noquery_log
+	@content {
+		method GET HEAD
+		path_regexp ^/c/0x[0-9a-fA-F]{64}$
+	}
+	handle @content {
+		rate_limit {
+			zone pine_content {
+				key {remote_host}
+				events 600
+				window 1m
+			}
+		}
+		reverse_proxy 127.0.0.1:3001 {
+			header_up -Cookie
+			header_up -Authorization
+			header_down -Set-Cookie
+		}
+	}
+	respond 404
+}

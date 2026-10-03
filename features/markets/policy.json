@@ -1,0 +1,146 @@
+{
+  "version": "1.2.0",
+  "feature": "Markets and funding modules",
+  "independent_review": true,
+  "integration_approval": true,
+  "max_verification_attempts": 3,
+  "setup": [
+    {
+      "argv": [
+        "pnpm",
+        "install",
+        "--frozen-lockfile",
+        "--prefer-offline"
+      ],
+      "timeout_seconds": 1200
+    }
+  ],
+  "workers": [
+    {
+      "node_id": "markets",
+      "role": "backend",
+      "required_check_kinds": [
+        "typecheck",
+        "unit"
+      ],
+      "owned_paths": [
+        "packages/api/src/modules/markets",
+        "packages/api/migrations/markets"
+      ],
+      "checks": [
+        {
+          "id": "typecheck",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "typecheck"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "lint",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "exec",
+            "eslint",
+            "packages/api/src"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "forbidden",
+          "kind": "unit",
+          "argv": [
+            "node",
+            "scripts/check-forbidden.mjs"
+          ],
+          "timeout_seconds": 120,
+          "scenarios": []
+        },
+        {
+          "id": "unit",
+          "kind": "unit",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "vitest",
+            "run",
+            "src/modules/markets"
+          ],
+          "timeout_seconds": 1800,
+          "scenarios": []
+        }
+      ]
+    },
+    {
+      "node_id": "funding",
+      "role": "backend",
+      "required_check_kinds": [
+        "typecheck",
+        "unit"
+      ],
+      "owned_paths": [
+        "packages/api/src/modules/funding",
+        "packages/api/migrations/funding"
+      ],
+      "checks": [
+        {
+          "id": "typecheck",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "typecheck"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "lint",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "exec",
+            "eslint",
+            "packages/api/src"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "forbidden",
+          "kind": "unit",
+          "argv": [
+            "node",
+            "scripts/check-forbidden.mjs"
+          ],
+          "timeout_seconds": 120,
+          "scenarios": []
+        },
+        {
+          "id": "unit",
+          "kind": "unit",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "vitest",
+            "run",
+            "src/modules/funding"
+          ],
+          "timeout_seconds": 1800,
+          "scenarios": []
+        }
+      ]
+    }
+  ]
+}
