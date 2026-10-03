@@ -192,6 +192,66 @@ describe('listClaims', () => {
     expect(await ids({ search: 'nothing-like-this' })).toEqual([])
   })
 
+  describe('pages filled across backend pages', () => {
+    const resolvedYes = { phase: 'resolved', oracle: { state: 'finalized', outcome: 'yes', byArbitrator: false }, resolution: { payoutNumerators: ['1', '0', '0'], resolvedAt: NOW - 60, txHash: CREATE_TX } }
+    const awaiting = { phase: 'oracle_open', oracle: { state: 'open_unanswered' } }
+    const market = (n: number) => `0x00000000000000000000000000000000000001${String(n).padStart(2, '0')}`
+
+    it('reads further backend pages when moderation or local filters leave a page short, asking only for what is missing', async () => {
+      const { p, calls } = provider({
+        '/api/v1/policies': policyList,
+        // Moderation dropped the whole first page; its cursor continues.
+        '/api/v1/claims?phase=closed&limit=2': claimList([], 'c1'),
+        '/api/v1/claims?phase=closed&cursor=c1&limit=2': claimList([listedClaim({ market: market(1), ...awaiting }), listedClaim({ market: market(2), ...resolvedYes })], 'c2'),
+        '/api/v1/claims?phase=closed&cursor=c2&limit=1': claimList([listedClaim({ market: market(3), ...resolvedYes })], 'c3'),
+      })
+      const page = await p.listClaims({ status: 'resolved', limit: 2 })
+      expect(page.items.map((c) => c.id)).toEqual([market(2), market(3)])
+      expect(page.nextCursor).toBe('c3')
+      expect(calls.filter((u) => u.startsWith('/api/v1/claims'))).toEqual([
+        '/api/v1/claims?phase=closed&limit=2',
+        '/api/v1/claims?phase=closed&cursor=c1&limit=2',
+        '/api/v1/claims?phase=closed&cursor=c2&limit=1',
+      ])
+    })
+
+    it('never returns an empty first page while older claims remain, within four backend pages', async () => {
+      let served = 0
+      const { p, calls } = provider({
+        '/api/v1/policies': policyList,
+        '/api/v1/claims': () => {
+          served += 1
+          return json(claimList(served < 3 ? [] : [listedClaim({ market: market(served), ...resolvedYes })], `c${served}`))
+        },
+      })
+      const page = await p.listClaims({ status: 'resolved' })
+      expect(page.items.map((c) => c.id)).toEqual([market(3), market(4)])
+      expect(page.nextCursor).toBe('c4')
+      expect(calls.filter((u) => u.startsWith('/api/v1/claims'))).toHaveLength(4)
+    })
+
+    it('stops after four backend pages or at the end of the cursor', async () => {
+      let served = 0
+      const endless = provider({ '/api/v1/policies': policyList, '/api/v1/claims': () => json(claimList([], `c${++served}`)) })
+      expect(await endless.p.listClaims()).toEqual({ items: [], nextCursor: 'c4' })
+      expect(endless.calls.filter((u) => u.startsWith('/api/v1/claims'))).toEqual(['/api/v1/claims?limit=20', '/api/v1/claims?cursor=c1&limit=20', '/api/v1/claims?cursor=c2&limit=20', '/api/v1/claims?cursor=c3&limit=20'])
+      const ending = provider({ '/api/v1/policies': policyList, '/api/v1/claims?limit=20': claimList([], 'c1'), '/api/v1/claims?cursor=c1&limit=20': claimList([]) })
+      expect(await ending.p.listClaims()).toEqual({ items: [] })
+      expect(ending.calls.filter((u) => u.startsWith('/api/v1/claims'))).toHaveLength(2)
+    })
+
+    it('reads claim documents only for claims that pass the platform filters, and never lists a claim twice', async () => {
+      const { p, calls } = provider({
+        '/api/v1/policies': policyList,
+        // A backend repeating its page under a new cursor: the repeated claims are dropped.
+        '/api/v1/claims?phase=closed&limit=20': claimList([listedClaim({ market: market(1), ...awaiting }), listedClaim({ market: market(2), ...resolvedYes })], 'c1'),
+        '/api/v1/claims?phase=closed&cursor=c1&limit=19': claimList([listedClaim({ market: market(2), ...resolvedYes })]),
+      })
+      expect((await p.listClaims({ status: 'resolved' })).items.map((c) => c.id)).toEqual([market(2)])
+      expect(calls.filter((u) => u.startsWith('/api/v1/agents/'))).toEqual([`/api/v1/agents/claims/${market(2)}`])
+    })
+  })
+
   it('sorts the returned page by evidence deadline on request and keeps the backend order otherwise', async () => {
     const items = [
       listedClaim({ market: '0x0000000000000000000000000000000000000b01', deadlines: { ...listedClaim().deadlines, evidence: { unix: EVIDENCE_DEADLINE + 100, iso: isoSeconds(EVIDENCE_DEADLINE + 100), operator: 'x' } } }),

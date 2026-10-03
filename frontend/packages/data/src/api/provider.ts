@@ -82,6 +82,11 @@ const SEMVER = /^\d+\.\d+\.\d+$/
 const LIST_LIMIT_MAX = 25
 const LIST_LIMIT_DEFAULT = 20
 const LIST_CURSOR_MAX = 200
+/**
+ * Backend pages read per listClaims call (at most 100 claims scanned): moderation and the filters applied here can
+ * leave a backend page short or empty while its cursor continues, so pages are read until the limit is filled.
+ */
+const LIST_PAGES_MAX = 4
 const ACTIVITY_CURSOR_MAX = 2_048
 /** Parallel claim-document reads when a listing page is enriched (each is one agent-feed request). */
 const DOCUMENT_CONCURRENCY = 4
@@ -161,8 +166,11 @@ function hiddenAgent(a: WireAgentClaim): boolean {
 }
 
 interface ClaimQueryPlan {
-  /** Exactly the backend's listing parameters, in URL order. */
-  query: { phase?: ListingPhase; repositoryId?: number; creator?: Address; cursor?: string; limit: number }
+  /** The backend's listing filters, in URL order (each page request adds its cursor and limit). */
+  filters: { phase?: ListingPhase; repositoryId?: number; creator?: Address }
+  cursor?: string
+  /** Claims wanted in this page: 1..25. Backend pages are read until they are found (bounded). */
+  limit: number
   statuses: ReadonlySet<ClaimStatus> | null
   outcome?: Outcome
   /** Lowercase owner/name whose GitHub repository id is still needed (no trusted id was given). */
@@ -214,20 +222,21 @@ export function planClaimQuery(q: ClaimQuery, resolvedRepositoryId?: number): Cl
   if (q.cursor !== undefined && q.cursor.length > LIST_CURSOR_MAX) return null
   const limit = Math.min(Math.max(1, Math.floor(q.limit ?? LIST_LIMIT_DEFAULT) || 1), LIST_LIMIT_MAX)
   return {
-    query: {
+    filters: {
       ...(phase ? { phase } : {}),
       ...(repositoryId !== undefined ? { repositoryId } : {}),
       ...(creator ? { creator } : {}),
-      ...(q.cursor ? { cursor: q.cursor } : {}),
-      limit,
     },
+    ...(q.cursor ? { cursor: q.cursor } : {}),
+    limit,
     statuses: statuses.length > 0 ? new Set(statuses) : null,
     ...(q.outcome ? { outcome: q.outcome } : {}),
     ...(repo ? { repo } : {}),
   }
 }
 
-function matchesQuery(c: ApiClaimSummary, q: ClaimQuery, plan: ClaimQueryPlan): boolean {
+/** Filters on platform facts (status, outcome, policy, repository id): applied before any claim document is read. */
+function matchesPlatform(c: ApiClaimSummary, q: ClaimQuery, plan: ClaimQueryPlan): boolean {
   if (plan.statuses && !plan.statuses.has(c.status)) return false
   if (plan.outcome && c.outcome !== plan.outcome) return false
   // An unknown policy matches no policy or family filter (its family is a placeholder).
@@ -235,13 +244,16 @@ function matchesQuery(c: ApiClaimSummary, q: ClaimQuery, plan: ClaimQueryPlan): 
   if (q.policyId && c.policy.id !== q.policyId.trim().toUpperCase()) return false
   if (q.family && c.policy.family !== q.family) return false
   // The backend filters by repository id; the on-chain id of every returned claim must agree.
-  if (plan.query.repositoryId !== undefined && c.api.repositoryId !== plan.query.repositoryId) return false
-  const terms = (q.search ?? '').toLowerCase().split(/\s+/).filter(Boolean)
-  if (terms.length > 0) {
-    const haystack = [c.title, c.violation, c.policy.id, `${c.source.owner}/${c.source.repo}`, c.source.commitSha, c.marketAddress ?? '', c.creator].join(' ').toLowerCase()
-    if (!terms.every((t) => haystack.includes(t))) return false
-  }
+  if (plan.filters.repositoryId !== undefined && c.api.repositoryId !== plan.filters.repositoryId) return false
   return true
+}
+
+/** Search terms over the title, the document's violation and stated repository, policy, commit, market and creator. */
+function matchesSearch(c: ApiClaimSummary, q: ClaimQuery): boolean {
+  const terms = (q.search ?? '').toLowerCase().split(/\s+/).filter(Boolean)
+  if (terms.length === 0) return true
+  const haystack = [c.title, c.violation, c.policy.id, `${c.source.owner}/${c.source.repo}`, c.source.commitSha, c.marketAddress ?? '', c.creator].join(' ').toLowerCase()
+  return terms.every((t) => haystack.includes(t))
 }
 
 /**
@@ -401,34 +413,56 @@ export class ApiDataProvider implements PineDataProvider {
     }
   }
 
+  /**
+   * One page of listed claims. Backend pages (moderation applied after its SQL limit) and the filters applied here can
+   * come back short or empty while the backend cursor continues, so backend pages are read until `limit` claims match,
+   * the cursor ends or LIST_PAGES_MAX pages were read; each page asks for the claims still missing only, so nothing
+   * past the returned cursor is skipped. `nextCursor` is the last backend cursor: after an unlucky bounded scan a page
+   * can still be empty with a nextCursor (callers offer "load more" whenever it is set).
+   */
   async listClaims(q: ClaimQuery = {}): Promise<Page<ApiClaimSummary>> {
     const client = this.client
     if (!client) return { items: [] }
-    let plan = planClaimQuery(q)
-    if (plan?.repo) {
-      const id = await this.repositoryIdOf(client, plan.repo)
+    let planned = planClaimQuery(q)
+    if (planned?.repo) {
+      const id = await this.repositoryIdOf(client, planned.repo)
       // No public repository by that name on GitHub: no claim can be on it.
-      plan = id === null ? null : planClaimQuery(q, id)
+      planned = id === null ? null : planClaimQuery(q, id)
     }
+    const plan = planned
     if (!plan) return { items: [] }
-    const [page, catalog] = await Promise.all([client.get('/api/v1/claims', claimListSchema, plan.query), this.catalogOrEmpty(client)])
-    const documents = await mapLimit(page.items, DOCUMENT_CONCURRENCY, (item) => this.listingDocument(client, item))
-    const mapped = page.items.map((item, i) => {
-      const document = documents[i] ?? null
-      return claimSummaryFromApi({
-        view: item,
-        document,
-        hidden: false,
-        listed: item.listable,
-        policy: policyRefOf(item.policyDocument, item.policyId, catalog, { verified: item.integrity.status === 'verified', document }),
-        indexer: page.indexer,
+    const catalog = this.catalogOrEmpty(client)
+    const items: ApiClaimSummary[] = []
+    const seen = new Set<string>()
+    let cursor = plan.cursor
+    let nextCursor: string | null = null
+    for (let i = 0; i < LIST_PAGES_MAX && items.length < plan.limit; i++) {
+      const page = await client.get('/api/v1/claims', claimListSchema, { ...plan.filters, ...(cursor ? { cursor } : {}), limit: plan.limit - items.length })
+      const policies = await catalog
+      const summary = (item: WireListedClaim, document: ClaimDocument | null) =>
+        claimSummaryFromApi({
+          view: item,
+          document,
+          hidden: false,
+          listed: item.listable,
+          policy: policyRefOf(item.policyDocument, item.policyId, policies, { verified: item.integrity.status === 'verified', document }),
+          indexer: page.indexer,
+        })
+      const fresh = page.items.filter((item) => !seen.has(item.market))
+      for (const item of fresh) seen.add(item.market)
+      // Documents are read only for claims that pass the platform filters.
+      const candidates = fresh.filter((item) => matchesPlatform(summary(item, null), q, plan))
+      const documents = await mapLimit(candidates, DOCUMENT_CONCURRENCY, (item) => this.listingDocument(client, item))
+      candidates.forEach((item, j) => {
+        const c = summary(item, documents[j] ?? null)
+        if (matchesSearch(c, q)) items.push(c)
       })
-    })
-    const items = sortClaims(
-      mapped.filter((c) => matchesQuery(c, q, plan)),
-      q.sort,
-    )
-    return page.nextCursor ? { items, nextCursor: page.nextCursor } : { items }
+      nextCursor = page.nextCursor
+      if (!nextCursor) break
+      cursor = nextCursor
+    }
+    const sorted = sortClaims(items, q.sort)
+    return nextCursor ? { items: sorted, nextCursor } : { items: sorted }
   }
 
   /** Every evidence page of a market (bounded); [] when the market is not a registered claim. */
