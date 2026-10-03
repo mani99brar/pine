@@ -6,7 +6,8 @@
   "policy": "policy.json",
   "workers": [
     { "node_id": "contracts-hardening", "task": "contracts-hardening-task.md" },
-    { "node_id": "api-hardening", "task": "api-hardening-task.md" }
+    { "node_id": "api-hardening", "task": "api-hardening-task.md" },
+    { "node_id": "claims-hardening", "task": "claims-hardening-task.md" }
   ],
   "reviewers": [
     { "reviewer_id": "general", "prompt": "builtin:general" },

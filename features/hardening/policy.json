@@ -188,6 +188,69 @@
           "scenarios": []
         }
       ]
+    },
+    {
+      "node_id": "claims-hardening",
+      "role": "backend",
+      "required_check_kinds": [
+        "typecheck",
+        "unit"
+      ],
+      "owned_paths": [
+        "packages/api/src/modules/claims",
+        "packages/api/migrations/claims"
+      ],
+      "checks": [
+        {
+          "id": "typecheck",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "typecheck"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "lint",
+          "kind": "typecheck",
+          "argv": [
+            "pnpm",
+            "exec",
+            "eslint",
+            "packages/api/src"
+          ],
+          "timeout_seconds": 900,
+          "scenarios": []
+        },
+        {
+          "id": "forbidden",
+          "kind": "unit",
+          "argv": [
+            "node",
+            "scripts/check-forbidden.mjs"
+          ],
+          "timeout_seconds": 120,
+          "scenarios": []
+        },
+        {
+          "id": "unit",
+          "kind": "unit",
+          "argv": [
+            "pnpm",
+            "--filter",
+            "@pine/api",
+            "exec",
+            "vitest",
+            "run",
+            "src/modules/claims"
+          ],
+          "timeout_seconds": 2400,
+          "scenarios": []
+        }
+      ]
     }
   ]
 }

@@ -82,7 +82,37 @@ Contracts are immutable once deployed, so every contract change here lands befor
 - Claims items (job abort for claims reconcile/integrity, catalog policy-text pinning) are carried by a later claims-hardening
   lane after the claims feature merges.
 
+## 3b. claims-hardening (claims module; run after claims-010 merged at 74659eb)
+- Cooperative abort: claims reconcile and integrity jobs (including discovery and backfillParameters) check `signal.aborted`
+  between items and stop promptly; tests abort before a run and from inside a fake during the first item (second untouched);
+  mutation evidence that each check is needed.
+- Policy-text pinning: at module registration, put every digest-verified catalog policy text into `ctx.contentStore` (which
+  pins it), so the `ipfs://<policy cid>` referenced by every immutable question stays retrievable; `POST /publications` refuses
+  a plan (503 NOT_READY, no quota) until both the claim document and its policy text are stored. Tests.
+- SEC-GH-12 at publish: `assertRepositoryStillPublic` also compares the returned owner login and name (case-insensitive) with
+  the frozen `document.target.repository`; a mismatch (renamed or transferred since preview) refuses with 409 CONFLICT
+  ("repository changed since preview; create a new preview") and no plan. The publish recheck keeps consuming one
+  `github_calls_per_hour` unit (it is a real upstream call; operator decision), and that refusal returns no plan. Tests.
+- New-row path: a first `POST /publications` for a preview whose plan offer already expired (now >= planExpiresAt) answers
+  the existing plan-expired response without calling GitHub, consuming `publications_per_day` or inserting a row. Test.
+- Integrity: `evaluateClaim` requires `claimCreatedMarkets(receipt, claim.registry, claim.creator, claim.documentSha256)` to
+  include `claim.market` (the creation receipt proves registry, creator and digest; the read model is not trusted alone);
+  otherwise `mismatch` on `creation`. Test with a read model whose creator differs from the receipt's ClaimCreated event.
+- Verification starvation: each integrity run takes up to 50 never-attempted rows (attempts = 0, oldest first) AND up to 50
+  retry rows (attempts > 0, ordered by next_attempt_at), so retries of unavailable documents can never crowd out new claims.
+  Test: 60 always-due unavailable rows plus one new claim → the new claim is verified in the first run.
+- Reorg reopen (reconcile step 2a): a `mined` publication returns to the plan-able state only on positive evidence: the read
+  model is fresh, its covered (finalized) block is at least 64 blocks after the block of the recorded success, the read model
+  has no claim for this creator and document digest, and the hint's receipt is absent in two runs at least 10 minutes apart
+  (record the first absence). One absent receipt never reopens. Tests for each condition.
+- Audit atomicity (SEC-OPS-07): claims audit writes (publication created, hint reported, transitions, integrity verdicts) use a
+  `claims_audit_outbox` with the same design as section 3 (same-statement CTE insert, single-flight record-then-delete flush
+  at the start of every claims job run and after each audited write, at-least-once, details unchanged). Tests as in section 3.
+- Tests: the two 8d recovery assertions (`publication.test.ts` recovery after the UPSTREAM outage, `reconcile.test.ts` retry
+  after reopen) assert the status code 200 and a non-null plan; the existing-row order test (publish, make the repository
+  private or GitHub rate-limited, advance past planExpiresAt, retry → 200, plan null, planExpired true, no GitHub call).
+
 ## 4. Checks
 contracts-hardening: `forge build`, `export-abis --check`, the plan-vector `--check`, forge unit tests (claim-registry and
-evidence-registry), the fork tests, the e2e tests, `check-forbidden`. api-hardening: `pnpm --filter @pine/api typecheck`,
+evidence-registry), the fork tests, the e2e tests, `check-forbidden`. api-hardening (and claims-hardening with `src/modules/claims`): `pnpm --filter @pine/api typecheck`,
 `eslint packages/api/src`, `check-forbidden`, `vitest run src/modules/markets src/modules/funding` (single vitest worker in verification).
