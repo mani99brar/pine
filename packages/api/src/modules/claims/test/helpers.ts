@@ -388,7 +388,7 @@ export function useHarness(): () => Harness {
 
   beforeEach(async () => {
     const ctx = base!;
-    await ctx.database.sql.exec("TRUNCATE claims_index, claim_publication_txs, claim_publications, claim_previews, claim_drafts");
+    await ctx.database.sql.exec("TRUNCATE claims_audit_outbox, claims_index, claim_publication_txs, claim_publications, claim_previews, claim_drafts");
     ctx.clock.set(START);
     ctx.readModel = new MemoryReadModel({ chainId: ctx.config.chainId, questionTimeout: ctx.config.seer.questionTimeoutSeconds });
     ctx.contentStore = new MemoryContentStore();
