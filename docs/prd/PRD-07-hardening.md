@@ -13,7 +13,10 @@ Contracts are immutable once deployed, so every contract change here lands befor
 
 ## 2. contracts-hardening
 - EvidenceRegistry: replace the three `uint64(block.timestamp)` casts (commit, reveal, publish) with `SafeCast.toUint64`
-  (behaviour unchanged; project rule for narrowing).
+  (behaviour unchanged; project rule for narrowing). This item is exempt from the "test that fails when the behaviour is
+  removed" rule: each cast follows a strict check against a uint64 deadline returned by a validated ABI decode, so the SafeCast
+  revert branch is unreachable and no test can distinguish the two; the change is verified by review and the existing suites
+  must keep passing.
 - Fork test (Gnosis block 48550000, within the RPC budget: one direct `createCategoricalMarket` plus one `createClaim`): a copycat
   Seer market created directly with Pine's question and swapped token names BEFORE `createClaim`; assert `createClaim` succeeds,
   Pine's record carries its own market and PY_/PN_ tokens, the questionId, conditionId and INVALID token equal the copycat's, the
