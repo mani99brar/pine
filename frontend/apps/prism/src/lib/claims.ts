@@ -131,6 +131,17 @@ export function claimLabel(c: { number: number; id: string; marketAddress?: stri
   return ADDRESS.test(address) ? shortHash(address.toLowerCase(), 4) : formatClaimNumber(c.number)
 }
 
+const POLICY_VERSION = /^\d+\.\d+\.\d+$/
+
+/**
+ * The page of the policy a claim pins: for a backend claim its exact version (each catalog version is its own page and
+ * older ones stay readable), else the policy's page.
+ */
+export function claimPolicyHref(c: ClaimSummary): string {
+  const { id, version } = c.policy
+  return apiFactsOf(c) && POLICY_VERSION.test(version) ? `/policies/${encodeURIComponent(`${id}@${version}`)}` : `/policies/${id}`
+}
+
 /**
  * The status text where the backend knows more than the domain status: its reveal window (status "open", but no new
  * evidence) is named as such. Undefined keeps the default label.

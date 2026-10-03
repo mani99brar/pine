@@ -121,7 +121,7 @@ export function ApiStagePolicy({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
       {policy && (
         <div className="mt-6 flex flex-wrap items-center gap-3">
           <HashChip value={policy.contentHash} label="Policy sha256" />
-          <Link href={`/policies/${encodeURIComponent(policy.id)}`} className="link text-[0.875rem]">
+          <Link href={`/policies/${encodeURIComponent(`${policy.id}@${policy.version}`)}`} className="link text-[0.875rem]">
             Read {policy.id}
           </Link>
         </div>

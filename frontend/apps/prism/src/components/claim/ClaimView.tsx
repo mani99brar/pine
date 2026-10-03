@@ -26,7 +26,7 @@ import { ApiMarketPanel } from './ApiMarket'
 import { ButtonLink } from '@/components/ui/Button'
 import { Container, EmptyState, ErrorState, Skeleton } from '@/components/ui/primitives'
 import { FAMILY_VAR, OUTCOME_HEX } from '@/lib/crystal'
-import { apiDetailFactsOf, apiStatusLabel, claimLabel, isResolved, repoLabel, shortRepo } from '@/lib/claims'
+import { apiDetailFactsOf, apiStatusLabel, claimLabel, claimPolicyHref, isResolved, repoLabel, shortRepo } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 
 const SECTIONS = [
@@ -185,7 +185,7 @@ export function ClaimView({ id }: { id: string }) {
                 Unknown policy{claim.policy.hash ? ` ${shortHash(claim.policy.hash)}` : ''}
               </span>
             ) : (
-              <Link href={`/policies/${claim.policy.id}`} className="tag hover:text-lumen">
+              <Link href={claimPolicyHref(claim)} className="tag hover:text-lumen">
                 <span style={{ color: FAMILY_VAR[fam] }}>
                   <FamilyIcon family={fam} size={13} />
                 </span>

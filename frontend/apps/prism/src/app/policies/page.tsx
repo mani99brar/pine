@@ -24,6 +24,8 @@ async function catalog(): Promise<PolicyVersion[]> {
 
 export default async function PoliciesPage() {
   const policies = await catalog()
+  // The backend lists every catalog version (claims keep pinning older ones): each card names and opens its own version.
+  const versioned = readPineEnv().dataSource === 'api'
   return (
     <Container>
       <PageHeader
@@ -36,8 +38,8 @@ export default async function PoliciesPage() {
           const fam = POLICY_FAMILIES.find((f) => f.id === p.family)
           const gated = p.status === 'gated' || p.status === 'retired'
           return (
-            <li key={p.id}>
-              <Link href={`/policies/${p.id}`} className="glass cut-xl group relative grid gap-5 overflow-hidden p-6 transition-colors hover:border-edge-strong sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start">
+            <li key={`${p.id}@${p.version}`}>
+              <Link href={versioned ? `/policies/${encodeURIComponent(`${p.id}@${p.version}`)}` : `/policies/${p.id}`} className="glass cut-xl group relative grid gap-5 overflow-hidden p-6 transition-colors hover:border-edge-strong sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-start">
                 <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: FAMILY_VAR[p.family] }} />
                 <span className="cut-md flex h-14 w-14 items-center justify-center border border-edge bg-void" style={{ color: FAMILY_VAR[p.family] }}>
                   <FamilyIcon family={p.family} size={28} />
