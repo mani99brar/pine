@@ -86,6 +86,22 @@ pnpm build       # production builds of all three apps
 node scripts/smoke.mjs   # crawl all running apps + agent endpoints, check status codes and forbidden wording
 ```
 
+## Verification (2026-10-03)
+
+- `pnpm test`: 420 tests passing (core 204, data 104, react 57, server 55), including security regression suites.
+- `pnpm typecheck` and `pnpm lint`: clean for every package and app.
+- `pnpm build`: all three apps build for production.
+- `node scripts/smoke.mjs` against the three production servers: 80 pages crawled plus every agent endpoint, all 200, no forbidden outcome wording.
+- Each app was QA'd by its builder with Playwright screenshots at 1440px and 390px. A fresh reviewer then walked every journey (account, compose and publish with failure, reload and resume, evidence, redeem, all claim states, keyboard) and fixed what it found. Docket reports 0 axe violations.
+
+## Known issues
+
+- **Account defaults load late.** A new draft can read account preferences (default spending limit and chain) before the account query resolves (`packages/react/src/composer/use-claim-composer.ts`, `makeDefault`). Each app works around this; a package-level fix is still pending.
+- **Demo claims stay in the browser.** In demo mode, claims you publish exist only in browser storage, so the server-side agent API doesn't list them. A run that fails after market creation is resumed from Drafts.
+- **Sealed exhibits can't be revealed yet.** Commit-reveal evidence records the commitment, but there is no reveal step (launch gate 5).
+- **Some preferences do nothing yet.** Notification preferences and the USD display preference are stored but have no effect.
+- **Production config needs `AUTH_URL` and `AUTH_SECRET`.** See `docs/frontend/deployment.md`.
+
 ## Status
 
 Frontend only. Not built here: the indexer, the evidence relay, the IPFS pinning service, and smart contracts. Open product and launch decisions from SPEC §10 are tracked in [`docs/frontend/launch-gates.md`](docs/frontend/launch-gates.md) and shown in-app. Deployment is covered in [`docs/frontend/deployment.md`](docs/frontend/deployment.md).
