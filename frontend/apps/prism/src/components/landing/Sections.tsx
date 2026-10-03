@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useClaims, usePine, useStats } from '@pine/react'
 import { formatAmount } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { Constellation, ConstellationLegend } from '@/components/table/Constellation'
+import { Constellation, ConstellationLegend, nothingPriced } from '@/components/table/Constellation'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { CopyButton } from '@/components/ui/interactive'
 import { Skeleton } from '@/components/ui/primitives'
@@ -16,6 +16,19 @@ export function TablePreview() {
   const stats = useStats()
   const now = useNowMs()
   const s = stats.data
+  // api mode: Pine does not index liquidity (its stats would say 0) and lists claims without prices.
+  const backend = usePine().env.dataSource === 'api'
+  const figures: [string, string][] = s
+    ? [
+        ['Open for evidence', String(s.openClaims)],
+        ['Resolved', String(s.resolvedClaims)],
+        ...(backend ? [] : [['Liquidity across markets', `${formatAmount(s.totalLiquidity, { maxDecimals: 0 })} ${s.collateralSymbol}`] as [string, string]]),
+        ['Counterexamples accepted', String(s.counterexamplesAccepted)],
+      ]
+    : []
+  const caption = backend
+    ? `${q.data && nothingPriced(q.data.items) ? 'Position is the time to the evidence deadline; open a claim to see its pool prices.' : `Height is the Yes price, the ${COPY.priceLabel.toLowerCase()}.`} Liquidity is not indexed, so every crystal has the same size. The slit is now. ${COPY.volumeCaveat}`
+    : `Height is the Yes price, size is liquidity, and the slit is now. ${COPY.volumeCaveat}`
   return (
     <section className="py-16 sm:py-24" aria-labelledby="preview-title">
       <div className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 lg:px-8">
@@ -32,12 +45,7 @@ export function TablePreview() {
         </div>
         {s && (
           <dl className="mt-8 flex flex-wrap gap-x-10 gap-y-4">
-            {[
-              ['Open for evidence', String(s.openClaims)],
-              ['Resolved', String(s.resolvedClaims)],
-              ['Liquidity across markets', `${formatAmount(s.totalLiquidity, { maxDecimals: 0 })} ${s.collateralSymbol}`],
-              ['Counterexamples accepted', String(s.counterexamplesAccepted)],
-            ].map(([label, value]) => (
+            {figures.map(([label, value]) => (
               <div key={label}>
                 <dt className="text-[0.8125rem] text-lumen-3">{label}</dt>
                 <dd className="t-figure text-[1.75rem] text-lumen">{value}</dd>
@@ -49,7 +57,7 @@ export function TablePreview() {
           {q.data && now !== null ? <Constellation claims={q.data.items} nowMs={now} compact /> : <Skeleton className="aspect-[1200/440] w-full" />}
           <ConstellationLegend className="px-2 pb-1 pt-4" />
         </div>
-        <p className="mt-3 text-[0.8125rem] text-lumen-3">Height is the Yes price, size is liquidity, and the slit is now. {COPY.volumeCaveat}</p>
+        <p className="mt-3 text-[0.8125rem] text-lumen-3">{caption}</p>
       </div>
     </section>
   )
@@ -86,6 +94,8 @@ const ENDINGS = [
 ]
 
 export function Endings() {
+  // The examples are demo claims; api mode has no such ids, so it links none.
+  const examples = usePine().env.dataSource !== 'api'
   return (
     <section className="py-16 sm:py-24" aria-labelledby="endings-title">
       <div className="mx-auto w-full max-w-[1240px] px-4 sm:px-6 lg:px-8">
@@ -104,9 +114,11 @@ export function Endings() {
               </h3>
               <p className="mt-2 text-[0.96875rem] leading-[1.6] text-lumen-2">{e.body}</p>
               <p className="mt-3 text-[0.84375rem] text-lumen-3">{e.note}</p>
-              <Link href={e.href} className="link mt-auto pt-5 text-[0.9rem] font-semibold text-lumen-2">
-                See a claim that ended this way
-              </Link>
+              {examples && (
+                <Link href={e.href} className="link mt-auto pt-5 text-[0.9rem] font-semibold text-lumen-2">
+                  See a claim that ended this way
+                </Link>
+              )}
             </li>
           ))}
         </ol>

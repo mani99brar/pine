@@ -31,7 +31,11 @@ export async function generateMetadata({ params }: Params): Promise<Metadata> {
   return {
     title: `${p.id}@${p.version}: ${p.title}`,
     description: p.summary,
-    alternates: { canonical: `/policies/${p.id}`, types: { 'application/json': policyJsonPath(p.id, p.version) } },
+    // api mode: every catalog version is its own page (claims pin older versions), so the canonical URL keeps it.
+    alternates: {
+      canonical: readPineEnv().dataSource === 'api' ? `/policies/${encodeURIComponent(`${p.id}@${p.version}`)}` : `/policies/${p.id}`,
+      types: { 'application/json': policyJsonPath(p.id, p.version) },
+    },
   }
 }
 

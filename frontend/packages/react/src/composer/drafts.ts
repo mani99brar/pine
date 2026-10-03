@@ -4,7 +4,7 @@ import { useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import type { ClaimDraft } from '@pine/core'
-import { anyBodySchema, seg, type DraftStore } from '@pine/data'
+import { anyBodySchema, PineBackendError, PineWriteApi, seg, type DraftStore } from '@pine/data'
 import { usePine } from '../providers/context'
 import { pineKeys } from '../queries/keys'
 import { usePineSession } from '../api/session'
@@ -71,6 +71,10 @@ export function useDrafts(): {
   drafts: ClaimDraft[]
   create(partial?: Partial<ClaimDraft>): ClaimDraft
   save(d: ClaimDraft): Promise<ClaimDraft>
+  /**
+   * Deletes a draft. In api mode it rejects, deleting nothing, when the stored draft's market exists or its publication
+   * may still land (Pine does not report it failed or expired).
+   */
   remove(id: string): Promise<void>
   isLoading: boolean
   error: Error | null
@@ -120,9 +124,29 @@ export function useDrafts(): {
   const remove = useCallback(
     async (id: string) => {
       if (api) {
-        // api mode: Pine's copy of the draft goes too, unless a publication exists for it (Pine keeps those and
-        // answers 409). Best effort: a copy that stays behind is readable by this wallet only.
-        const backend = (await store.get(id))?.publication?.backend
+        // api mode, checked on the draft as stored now (a list shown earlier, or another tab, may be stale): a draft
+        // whose market exists, or whose publication may still land, is kept with its recovery data.
+        const stored = await store.get(id)
+        const publication = stored?.publication
+        if (publication?.marketAddress || publication?.steps?.some((s) => s.id === 'create_market' && s.status === 'confirmed')) {
+          throw new Error('This draft’s market exists: its terms are on-chain, so the draft cannot be deleted.')
+        }
+        if (publication?.backend?.publicationId) {
+          const state = await new PineWriteApi(api).getPublication(publication.backend.publicationId).then(
+            (view) => view.state,
+            (e: unknown) => {
+              // No such publication for this wallet: nothing of it can land.
+              if (e instanceof PineBackendError && e.status === 404) return null
+              throw new Error('Pine could not say whether this draft’s publication may still land, so the draft is kept. Try again later.')
+            },
+          )
+          if (state !== null && state !== 'failed' && state !== 'expired') {
+            throw new Error('This draft’s publication may still land, so the draft is kept until Pine reports it failed or expired.')
+          }
+        }
+        // Pine's copy of the draft goes too, unless a publication exists for it (Pine keeps those and answers 409).
+        // Best effort: a copy that stays behind is readable by this wallet only.
+        const backend = publication?.backend
         if (backend?.draftId && !backend.publicationId) {
           await api.request('DELETE', `/api/v1/drafts/${seg(backend.draftId)}`, anyBodySchema).catch(() => undefined)
         }

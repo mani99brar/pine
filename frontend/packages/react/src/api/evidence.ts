@@ -428,7 +428,15 @@ export interface ApiEvidence {
   planState: MarketsPlanResponse['planState'] | null
   /** Platform warnings of the last reveal template (plain text). */
   revealWarnings: { code: string; text: string }[]
+  /**
+   * What the user last started on this page: new evidence (prepare, commit, publish) or a reveal. `error` belongs to
+   * it, including a reveal that failed before its plan (when `action` still names the earlier commit). Null until then.
+   */
+  attempt: 'submit' | 'reveal' | null
+  /** The seal whose reveal is being checked, uploaded or sent (from the click until the run stops). */
+  revealing: Hex32 | null
   error: WriteErrorInfo | null
+  /** An evidence action is being prepared or sent (a reveal included, from its first check on). */
   busy: boolean
   /** Forgets the current action when nothing of it is pending (a failed or never-sent run). */
   abandon(): void
@@ -461,6 +469,9 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
   const [preparing, setPreparing] = useState(false)
   const [sealVersion, setSealVersion] = useState(0)
   const [revealWarnings, setRevealWarnings] = useState<{ code: string; text: string }[]>([])
+  const [attempt, setAttempt] = useState<'submit' | 'reveal' | null>(null)
+  const [revealing, setRevealing] = useState<Hex32 | null>(null)
+  const revealingRef = useRef<Hex32 | null>(null)
   const [action, setAction] = useStoredRecord<StoredEvidenceAction>(account ? `pine:api-evidence-action:${m}:${account}` : null, isStoredEvidenceAction)
 
   const latest = useRef({ action, account, claim, manifest, prepared, reader })
@@ -575,6 +586,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
 
   const prepare = useCallback(
     async (input: EvidenceComposition): Promise<PreparedEvidence | null> => {
+      setAttempt('submit')
       setError(null)
       setFieldErrors([])
       const { account: acct, claim: c } = latest.current
@@ -616,6 +628,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
   }, [nowSec])
 
   const publish = useCallback(async () => {
+    setAttempt('submit')
     const { prepared: p, claim: c } = latest.current
     if (!p) {
       setError({ code: 'UNKNOWN', action: 'fix_input', message: 'Prepare the evidence first.' })
@@ -626,6 +639,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
   }, [checkOpen, start])
 
   const commit = useCallback(async () => {
+    setAttempt('submit')
     const { prepared: p, claim: c, account: acct, manifest: pinned } = latest.current
     if (!p || !acct || !pinned) {
       setError({ code: 'UNKNOWN', action: 'fix_input', message: p ? 'Connect the wallet you signed in with.' : 'Prepare the evidence first.' })
@@ -650,48 +664,56 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
 
   const reveal = useCallback(
     async (contentSha256: Hex32, opts: { files?: Blob[]; acknowledgeUnavailableContent?: boolean } = {}) => {
+      // One reveal at a time. It is busy, and owns `error`, from its first check until its run stops: a reveal that
+      // fails before its plan starts leaves `action` on the earlier commit, so `attempt` says where the error belongs.
+      if (revealingRef.current) return
+      const sha = contentSha256.toLowerCase() as Hex32
+      revealingRef.current = sha
+      setRevealing(sha)
+      setAttempt('reveal')
       setError(null)
       setRevealWarnings([])
-      const { account: acct, claim: c, manifest: pinned, reader: rpc } = latest.current
-      const client = api
-      if (!acct || !pinned || !client) {
-        setError({ code: 'UNKNOWN', action: 'none', message: 'Connect the wallet that committed this evidence.' })
-        return
-      }
-      if (inFlight()) {
-        setError({ code: 'UNKNOWN', action: 'none', message: 'Another evidence transaction is in progress. Wait for it to finish.' })
-        return
-      }
-      const seal = readSeal(storage, m, contentSha256.toLowerCase() as Hex32, acct)
-      if (!seal) {
-        setError({ code: 'UNKNOWN', action: 'none', message: 'This browser has no salt for that evidence, so it cannot reveal it.' })
-        return
-      }
-      if (seal.revealedAt) {
-        setError({ code: 'UNKNOWN', action: 'none', message: 'This evidence is already revealed.' })
-        return
-      }
-      if (!checkOpen(c?.revealDeadline, 'reveal')) return
       try {
+        const { account: acct, claim: c, manifest: pinned, reader: rpc } = latest.current
+        const client = api
+        if (!acct || !pinned || !client) {
+          setError({ code: 'UNKNOWN', action: 'none', message: 'Connect the wallet that committed this evidence.' })
+          return
+        }
+        if (inFlight()) {
+          setError({ code: 'UNKNOWN', action: 'none', message: 'Another evidence transaction is in progress. Wait for it to finish.' })
+          return
+        }
+        const seal = readSeal(storage, m, sha, acct)
+        if (!seal) {
+          setError({ code: 'UNKNOWN', action: 'none', message: 'This browser has no salt for that evidence, so it cannot reveal it.' })
+          return
+        }
+        if (seal.revealedAt) {
+          setError({ code: 'UNKNOWN', action: 'none', message: 'This evidence is already revealed.' })
+          return
+        }
+        if (!checkOpen(c?.revealDeadline, 'reveal')) return
         // Re-attached files are matched to the manifest by digest.
         for (const file of opts.files ?? []) {
           if (file.size > EVIDENCE_UPLOAD_MAX_BYTES) continue
           const bytes = new Uint8Array(await file.arrayBuffer())
-          const sha = sha256Hex(bytes)
-          if (seal.manifest.artifacts.some((a) => a.sha256 === sha)) sessionArtifacts.set(sha, bytes)
+          const digest = sha256Hex(bytes)
+          if (seal.manifest.artifacts.some((a) => a.sha256 === digest)) sessionArtifacts.set(digest, bytes)
         }
         const missing = seal.manifest.artifacts.filter((a) => !sessionArtifacts.has(a.sha256))
         if (missing.length > 0 && opts.acknowledgeUnavailableContent !== true) {
           setError({
             code: 'UNKNOWN',
             action: 'fix_input',
-            message: `Attach the committed files again to reveal: ${missing.map((a) => a.name).join(', ')}. Without them adjudicators cannot obtain your evidence.`,
+            message: `Attach the committed files again to reveal: ${missing.map((a) => a.name).join(', ')}. Pine stores your evidence (the written report and its files) only when every committed file is attached.`,
           })
           return
         }
         // SEC-EVID-13: nothing of the sealed evidence reaches Pine unless the reveal can go ahead now: the commitment is
         // indexed, the reveal template describes this seal, and the reveal plan verifies. Only then is it uploaded,
-        // right before the reveal transaction.
+        // right before the reveal transaction. With a file missing nothing is uploaded at all: Pine stores a manifest
+        // only once every artifact it lists is stored.
         const submission = seal.submissionId ? { submissionId: seal.submissionId } : await findCommittedSubmission(client, m, acct, seal.commitment)
         if (!submission) {
           setError({ code: 'NOT_READY', action: 'retry_later', message: 'Pine has not indexed your commitment yet. Try again in a minute.' })
@@ -709,6 +731,9 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
         await start({ v: 1, kind: 'reveal', contentSha256: seal.contentSha256, submissionId: submission.submissionId })
       } catch (e) {
         setError(describeWriteError(e))
+      } finally {
+        revealingRef.current = null
+        setRevealing(null)
       }
     },
     [api, env.defaultChainId, inFlight, storage, m, checkOpen, updateSeal, start],
@@ -755,8 +780,10 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
     runner,
     planState: polled.value?.planState ?? null,
     revealWarnings,
+    attempt,
+    revealing,
     error: error ?? plan.lastError ?? (runner.error ? { code: 'UNKNOWN', action: 'none', message: runner.error } : null),
-    busy: preparing || runnerIsBusy(runner),
+    busy: preparing || revealing !== null || runnerIsBusy(runner),
     abandon,
   }
 }

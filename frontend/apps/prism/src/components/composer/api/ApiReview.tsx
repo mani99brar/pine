@@ -72,8 +72,17 @@ function PreviewPanel({ preview, chainId }: { preview: VerifiedPreview; chainId:
     <div className="grid gap-6">
       <div className="cut-xl well relative overflow-hidden p-5 sm:p-6">
         <span aria-hidden className="absolute inset-y-0 left-0 w-[3px]" style={{ background: 'linear-gradient(180deg,#5ad8ff,#ffb648,#ff6b83)' }} />
-        <p className="text-[0.8125rem] text-lumen-3">The market question, verified</p>
-        <p className="mt-2 text-[1.0625rem] leading-[1.65] text-lumen [overflow-wrap:anywhere]">{preview.question}</p>
+        {preview.question !== null ? (
+          <>
+            <p className="text-[0.8125rem] text-lumen-3">The market question, verified</p>
+            <p className="mt-2 text-[1.0625rem] leading-[1.65] text-lumen [overflow-wrap:anywhere]">{preview.question}</p>
+          </>
+        ) : (
+          <>
+            <p className="text-[0.8125rem] text-ha">No market question can be composed from this document</p>
+            <p className="mt-2 text-[0.9375rem] leading-[1.6] text-lumen-2">This browser does not show the question Pine stated: it could not check it. Do not publish this preview.</p>
+          </>
+        )}
         <div className="mt-4 flex flex-wrap gap-2">
           <HashChip value={preview.documentSha256} label="Claim document sha256" />
           <HashChip value={`ipfs://${preview.cid}`} label="Claim document CID" />
@@ -252,6 +261,19 @@ export function ApiStageReview({ c, nav, acknowledged, setAcknowledged }: { c: C
         )}
 
         {pub.error && !started && <WriteErrorNotice error={pub.error} onRetry={requestPreview} onRepreview={requestPreview} saveDraft={c.saveNow} />}
+
+        {/* A preview whose document is unusable has nothing to show: its issues still say why. */}
+        {!preview && !started && pub.verifyIssues.length > 0 && (
+          <Notice tone="critical" role="alert" title="Pine's preview cannot be used">
+            <ul className="mt-1 grid gap-1">
+              {pub.verifyIssues.map((i) => (
+                <li key={`${i.code}|${i.field ?? ''}|${i.message}`} className="[overflow-wrap:anywhere]">
+                  {i.message}
+                </li>
+              ))}
+            </ul>
+          </Notice>
+        )}
 
         {preview && (
           <section aria-labelledby="preview-title" className="grid gap-4">

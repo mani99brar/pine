@@ -41,6 +41,10 @@ interface FakeState {
   hideCommitments?: boolean
   /** The reveal template names another commitment. */
   tamperTemplate?: boolean
+  /** The session expired: the session-guarded reveal template answers 401. */
+  signedOut?: boolean
+  /** Holds reveal template responses until it resolves. */
+  revealGate?: Promise<void>
 }
 
 function planView(id: string, kind: string, route: string, wire: ReturnType<typeof wirePlan>, state = 'planned') {
@@ -121,7 +125,9 @@ function backend(state: FakeState): FakePine {
       const encoded = encodeEvidenceManifest(req.json as EvidenceManifest)
       return json(201, { sha256: encoded.sha256, cid: 'bafkreimanifest', size: encoded.bytes.byteLength })
     })
-    .on('POST', /^\/api\/v1\/evidence\/reveal-template$/, (req) => {
+    .on('POST', /^\/api\/v1\/evidence\/reveal-template$/, async (req) => {
+      if (state.revealGate) await state.revealGate
+      if (state.signedOut) return apiError(401, 'UNAUTHENTICATED', 'Sign in required')
       const body = req.json as { submissionId: string; contentSha256: Hex32 }
       const commitment = state.tamperTemplate ? `0x${'42'.repeat(32)}` : (state.commitments[Number(body.submissionId) - 7] ?? `0x${'00'.repeat(32)}`)
       return json(200, {
@@ -361,6 +367,50 @@ describe('useApiEvidence', () => {
       void result.current.ev.reveal(sha, { files: [new File([ARTIFACT_TEXT], 'renamed.txt', { type: 'text/plain' })] })
     })
     await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('revealed'))
+  })
+
+  it('a reveal is busy from its first check, and an error before its plan is reported as the reveal’s', async () => {
+    const { result } = render()
+    await ready(result)
+    const sha = result.current.ev.prepared?.contentSha256 as Hex32
+    await act(async () => {
+      void result.current.ev.commit()
+    })
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('committed'))
+    expect(result.current.ev.attempt).toBe('submit')
+    // Days later the session has expired: the session-guarded reveal template answers 401.
+    state.signedOut = true
+    let release: () => void = () => undefined
+    state.revealGate = new Promise<void>((r) => (release = r))
+    let done: Promise<void> = Promise.resolve()
+    act(() => {
+      done = result.current.ev.reveal(sha)
+    })
+    await waitFor(() => expect(fake.of(/\/reveal-template$/)).toHaveLength(1))
+    // While the template is requested the reveal is busy (no second reveal can start) and owns the error slot.
+    expect(result.current.ev.busy).toBe(true)
+    expect(result.current.ev.revealing).toBe(sha)
+    expect(result.current.ev.attempt).toBe('reveal')
+    await act(async () => {
+      await result.current.ev.reveal(sha)
+    })
+    expect(fake.of(/\/reveal-template$/)).toHaveLength(1)
+    await act(async () => {
+      release()
+      await done
+    })
+    expect(result.current.ev.error).toMatchObject({ code: 'UNAUTHENTICATED', action: 'sign_in' })
+    // The plan never started, so the stored action still names the commit: `attempt` says the error is the reveal's.
+    expect(result.current.ev.action?.kind).toBe('commit')
+    expect(result.current.ev.attempt).toBe('reveal')
+    expect(result.current.ev.busy).toBe(false)
+    expect(result.current.ev.revealing).toBeNull()
+    expect(fake.of(/^\/api\/v1\/evidence\/(artifacts|manifests)$/)).toEqual([])
+    // Starting new evidence moves the error slot back to the submission form.
+    await act(async () => {
+      await result.current.ev.prepare(composition())
+    })
+    expect(result.current.ev.attempt).toBe('submit')
   })
 
   it('refuses a commit plan for another commitment before any wallet prompt', async () => {

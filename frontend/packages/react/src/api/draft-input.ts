@@ -300,8 +300,36 @@ function evidenceWindow(c: Collector, deadline: string | undefined, now: Date): 
  * for format reasons; policy parameters are still checked by the backend against the policy's own schema.
  */
 export function toDraftInput(draft: ClaimDraft, opts: DraftInputOptions = {}): DraftInputResult {
+  return mapDraft(draft, opts, opts.now ?? new Date())
+}
+
+/** The composed terms: the draft input without the evidence window, which is relative to the time of saving. */
+export type DraftTerms = Omit<DraftInput, 'evidenceWindowSeconds'>
+
+export type DraftTermsResult = { ok: true; terms: DraftTerms } | { ok: false; errors: DraftFieldError[] }
+
+/**
+ * The draft's terms, mapped and checked exactly like toDraftInput except for the evidence window. Independent of the
+ * clock: a deadline that drifted under the backend's minimum never hides an edit of the terms. Compare the absolute
+ * deadline separately (chosenEvidenceDeadline).
+ */
+export function toDraftTerms(draft: ClaimDraft, opts: Omit<DraftInputOptions, 'now'> = {}): DraftTermsResult {
+  const result = mapDraft(draft, opts, null)
+  if (!result.ok) return result
+  const { evidenceWindowSeconds: _window, ...terms } = result.input
+  return { ok: true, terms }
+}
+
+/** The evidence deadline the composer shows, in unix seconds; undefined when unset or not a date. */
+export function chosenEvidenceDeadline(draft: ClaimDraft): number | undefined {
+  const raw = draft.spec.evidence?.deadline
+  const at = raw ? Date.parse(raw) : Number.NaN
+  return Number.isFinite(at) ? Math.floor(at / 1000) : undefined
+}
+
+/** `windowFrom` null: the evidence window is neither checked nor sent (toDraftTerms). */
+function mapDraft(draft: ClaimDraft, opts: Omit<DraftInputOptions, 'now'>, windowFrom: Date | null): DraftInputResult {
   const c = new Collector()
-  const now = opts.now ?? new Date()
   const spec = draft.spec
   const source = draft.source
   const expectedChain = opts.chainId ?? 100
@@ -366,7 +394,7 @@ export function toDraftInput(draft: ClaimDraft, opts: DraftInputOptions = {}): D
   const exclusions = list(c, 'exclusions', spec.exclusions, 1_000, { max: 50 })
   const policyParameters = parameters(c, spec.parameters)
   const environment = environmentOf(c, spec.environment)
-  const evidenceWindowSeconds = evidenceWindow(c, spec.evidence?.deadline, now)
+  const evidenceWindowSeconds = windowFrom === null ? null : evidenceWindow(c, spec.evidence?.deadline, windowFrom)
   const bond = minBondWei(c, spec.oracle?.minBond)
 
   if (c.errors.length > 0) return { ok: false, errors: c.errors }

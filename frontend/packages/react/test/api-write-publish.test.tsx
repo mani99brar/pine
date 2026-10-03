@@ -10,6 +10,7 @@ import { __resetTxRunners, getTxMachine } from '../src/tx/use-tx-runner'
 import { setDemoTxDelays } from '../src/tx/demo-executor'
 import { useApiPublish } from '../src/api/publish'
 import { toDraftInput } from '../src/api/draft-input'
+import { apiDeadlineForDays } from '../src/composer/api-rules'
 import { ACCOUNT, chainClaims, claimStruct, COMMIT, createClaimParams, documentFor, MARKET, NOW, NOW_S, OTHER, previewFor, resetChain, wirePlan } from './api-write-chain'
 import { apiError, FakePine, iso, json, noSleep, wrapper } from './api-write-support'
 
@@ -132,11 +133,15 @@ function backend(state: BackendState): FakePine {
     })
 }
 
+/** The hook's clock (tests move it forward explicitly). */
+let clock = NOW
+const HOUR_MS = 3_600_000
+
 function render() {
   return renderHook(
     () => ({
       composer: useClaimComposer(DRAFT_ID),
-      publish: useApiPublish(DRAFT_ID, { now: () => NOW, sleep: noSleep, pollIntervalMs: 1 }),
+      publish: useApiPublish(DRAFT_ID, { now: () => clock, sleep: noSleep, pollIntervalMs: 1 }),
       wallet: useWallet(),
     }),
     { wrapper },
@@ -158,6 +163,7 @@ beforeAll(() => {
 })
 
 beforeEach(() => {
+  clock = NOW
   localStorage.clear()
   __resetTxRunners()
   demoWalletStore.reset()
@@ -320,5 +326,134 @@ describe('useApiPublish', () => {
     })
     expect(result.current.publish.error?.action).toBe('fix_input')
     expect(result.current.publish.fieldErrors).toEqual([{ field: 'policyParameters.startingStates', composerPath: 'spec.parameters.startingStates', message: 'Required' }])
+  })
+
+  it('drops Pine’s validation issues once the claim they were reported for is edited, so it can be saved again', async () => {
+    const issue = { path: ['policyParameters', 'simulatedAdapters'], message: 'Too big: expected array to have <=1 items' }
+    fake.on('POST', /^\/api\/v1\/drafts$/, (req) => {
+      const adapters = (req.json as DraftInput).policyParameters.simulatedAdapters
+      if (Array.isArray(adapters) && adapters.length > 1) return apiError(400, 'VALIDATION_FAILED', 'Policy parameters are invalid', { issues: [issue] })
+      state.input = req.json as DraftInput
+      state.revision = 1
+      return json(201, { draft: { id: BACKEND_DRAFT, revision: 1, input: state.input, valid: true, issues: [], createdAt: iso(NOW_S), updatedAt: iso(NOW_S) } })
+    })
+    const setAdapters = (result: ReturnType<typeof render>['result'], adapters: string[]) =>
+      act(() => result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, parameters: { ...d.spec.parameters, simulatedAdapters: adapters } } })))
+    const { result } = render()
+    await composeAndConnect(result)
+    setAdapters(result, ['lifi', 'across'])
+    await act(async () => {
+      expect(await result.current.publish.saveDraft()).toBe(false)
+    })
+    const refused = { field: 'policyParameters.simulatedAdapters', composerPath: 'spec.parameters.simulatedAdapters', message: issue.message }
+    expect(result.current.publish.fieldErrors).toEqual([refused])
+    expect(result.current.publish.error?.code).toBe('VALIDATION_FAILED')
+    expect(result.current.publish.status).toBe('invalid')
+
+    // The user fixes the field: Pine's issue and error no longer apply, so nothing blocks saving again.
+    setAdapters(result, ['lifi'])
+    await waitFor(() => expect(result.current.publish.fieldErrors).toEqual([]))
+    expect(result.current.publish.error).toBeNull()
+    expect(result.current.publish.status).toBe('idle')
+    // The exact refused terms again: the refusal holds again.
+    setAdapters(result, ['lifi', 'across'])
+    await waitFor(() => expect(result.current.publish.fieldErrors).toEqual([refused]))
+    setAdapters(result, ['lifi'])
+    await act(async () => {
+      expect(await result.current.publish.saveDraft()).toBe(true)
+    })
+    expect(result.current.publish.fieldErrors).toEqual([])
+    expect(result.current.publish.status).toBe('saved')
+  })
+})
+
+describe('useApiPublish: a preview is published only with the terms it was made from', () => {
+  const EDITED = 'Reporter-deposit principal must never be funded from the gas reserve or from arbitration allocations.'
+
+  async function previewWith(result: ReturnType<typeof render>['result'], deadline: string) {
+    await composeAndConnect(result)
+    act(() => result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, evidence: { mechanism: 'erc1497-arbitrator-proxy', deadline } } })))
+    await act(async () => {
+      expect(await result.current.publish.requestPreview({ liveSystemImpactNone: true })).toBe(true)
+    })
+    await waitFor(() => expect(result.current.publish.status).toBe('reviewable'))
+    expect(result.current.publish.verifyIssues).toEqual([])
+  }
+
+  function editRequirement(result: ReturnType<typeof render>['result']) {
+    act(() => result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, requirement: EDITED } })))
+  }
+
+  it('SEC-CLAIM-04 keeps a preview blocked after an edit made once the 3-day preset’s margin has passed, and publishes nothing', async () => {
+    const { result } = render()
+    await previewWith(result, apiDeadlineForDays(3, NOW))
+    clock = new Date(NOW.getTime() + 3 * HOUR_MS)
+    editRequirement(result)
+    await waitFor(() => expect(result.current.publish.draft?.spec.requirement).toBe(EDITED))
+    // The window drifted under the backend's 3-day minimum, so the edited draft cannot be mapped to an input: the edit
+    // must still make the preview stale.
+    expect(result.current.publish.fieldErrors.map((e) => e.composerPath)).toContain('spec.evidence.deadline')
+    expect(result.current.publish.status).toBe('blocked')
+    expect(result.current.publish.verifyIssues).toEqual([expect.objectContaining({ code: 'stale_preview', message: expect.stringMatching(/edited the claim/) })])
+    await act(async () => {
+      await result.current.publish.publish()
+    })
+    expect(result.current.publish.error?.action).toBe('repreview')
+    expect(fake.of(/^\/api\/v1\/publications/)).toEqual([])
+    // Nothing was saved after the preview either: the backend still holds the previewed revision.
+    expect(fake.of(/^\/api\/v1\/drafts$/, 'POST')).toHaveLength(1)
+    expect(fake.of(/^\/api\/v1\/drafts\//, 'PUT')).toEqual([])
+  })
+
+  it('SEC-CLAIM-04 a stale preview stays blocked when the clock moves on, the stage changes and the page reloads', async () => {
+    const first = render()
+    await previewWith(first.result, apiDeadlineForDays(3, NOW))
+    clock = new Date(NOW.getTime() + 30 * 60_000)
+    editRequirement(first.result)
+    await waitFor(() => expect(first.result.current.publish.status).toBe('blocked'))
+    clock = new Date(NOW.getTime() + 3 * HOUR_MS)
+    act(() => first.result.current.composer.setStage('publish'))
+    await waitFor(() => expect(first.result.current.publish.draft?.stage).toBe('publish'))
+    expect(first.result.current.publish.status).toBe('blocked')
+    await act(async () => first.result.current.composer.saveNow())
+    first.unmount()
+
+    const second = render()
+    await waitFor(() => expect(second.result.current.publish.preview).not.toBeNull())
+    expect(second.result.current.publish.draft?.spec.requirement).toBe(EDITED)
+    expect(second.result.current.publish.status).toBe('blocked')
+    expect(second.result.current.publish.verifyIssues.map((i) => i.code)).toContain('stale_preview')
+  })
+
+  it('SEC-CLAIM-04 moving the evidence deadline after the preview blocks it', async () => {
+    const { result } = render()
+    await previewWith(result, apiDeadlineForDays(7, NOW))
+    const moved = apiDeadlineForDays(14, NOW)
+    act(() => result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, evidence: { mechanism: 'erc1497-arbitrator-proxy', deadline: moved } } })))
+    await waitFor(() => expect(result.current.publish.draft?.spec.evidence?.deadline).toBe(moved))
+    // The draft itself is valid and its other terms are unchanged.
+    expect(result.current.publish.fieldErrors).toEqual([])
+    expect(result.current.publish.status).toBe('blocked')
+    expect(result.current.publish.verifyIssues).toEqual([expect.objectContaining({ code: 'stale_preview', message: expect.stringMatching(/changed the evidence deadline/) })])
+  })
+
+  it('SEC-CLAIM-04 fails closed when the edited claim cannot be sent to Pine at all', async () => {
+    const { result } = render()
+    await previewWith(result, apiDeadlineForDays(7, NOW))
+    act(() => result.current.composer.update((d) => ({ ...d, spec: { ...d.spec, requirement: EDITED, scope: { inScope: [], outOfScope: [] } } })))
+    await waitFor(() => expect(result.current.publish.draft?.spec.requirement).toBe(EDITED))
+    expect(result.current.publish.status).toBe('blocked')
+    expect(result.current.publish.verifyIssues).toEqual([expect.objectContaining({ code: 'stale_preview', message: expect.stringMatching(/cannot be sent to Pine as it is \(List at least one in-scope component\.\)/) })])
+  })
+
+  it('keeps an unchanged preview publishable while only the evidence window drifts with the clock', async () => {
+    const { result } = render()
+    await previewWith(result, apiDeadlineForDays(3, NOW))
+    clock = new Date(NOW.getTime() + 3 * HOUR_MS)
+    act(() => result.current.composer.setStage('publish'))
+    await waitFor(() => expect(result.current.publish.draft?.stage).toBe('publish'))
+    expect(result.current.publish.fieldErrors.map((e) => e.composerPath)).toEqual(['spec.evidence.deadline'])
+    expect(result.current.publish.verifyIssues).toEqual([])
+    expect(result.current.publish.status).toBe('reviewable')
   })
 })

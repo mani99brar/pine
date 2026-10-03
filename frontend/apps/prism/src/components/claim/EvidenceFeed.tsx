@@ -132,6 +132,15 @@ function EvidenceItem({ e, claim }: { e: Evidence; claim: ClaimDetail }) {
         {api && api.manifest !== 'shown' ? (
           // Pine's own explanation of why there is no content to show (not the submitter's text).
           e.summary && <p className="mt-3 max-w-[82ch] text-[0.9375rem] text-lumen-2">{e.summary}</p>
+        ) : api ? (
+          // SEC-EVID-09/10: the submitter's manifest text is shown as plain text only: no Markdown, nothing clickable.
+          e.summary && (
+            <div className="mt-4 max-w-[82ch]">
+              <Expandable collapsedHeight={150} label="Show the full submission">
+                <p className="untrusted whitespace-pre-wrap text-[0.9375rem] leading-[1.6] text-lumen-2 [overflow-wrap:anywhere]">{e.summary}</p>
+              </Expandable>
+            </div>
+          )
         ) : e.summary && (
           <div className="mt-4 max-w-[82ch]">
             <Expandable collapsedHeight={150} label="Show the full submission">

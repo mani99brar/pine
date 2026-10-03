@@ -12,7 +12,6 @@ import { ArrowLeft, Eye, Lock, X } from 'lucide-react'
 import { Button, ButtonLink } from '@/components/ui/Button'
 import { HashChip, Segmented } from '@/components/ui/interactive'
 import { FormField, Notice } from '@/components/ui/primitives'
-import { SafeMarkdown } from '@/components/ui/SafeMarkdown'
 import { ApiClaimNotices } from '@/components/claim/ApiNotices'
 import { ApiSessionGate, PlanControls, PlanProgress, WriteErrorNotice, useSessionReady } from '@/components/claim/ApiActionKit'
 import { API_DEADLINE_RULES, claimLabel, countdown, isoOfUnix } from '@/lib/claims'
@@ -71,7 +70,19 @@ const SEAL_STATE: Record<SealedEvidenceView['state'], string> = {
   revealed: 'Revealed',
 }
 
-function SealRow({ seal, chainId, busy, onReveal }: { seal: SealedEvidenceView; chainId: number; busy: boolean; onReveal: (files: File[], acknowledge: boolean) => void }) {
+interface SealRowProps {
+  seal: SealedEvidenceView
+  chainId: number
+  /** An evidence action is being prepared or sent: no reveal can start. */
+  busy: boolean
+  /** This seal's reveal is being checked, uploaded or sent. */
+  revealing: boolean
+  /** The connected wallet has its own Pine session (the reveal template and the uploads need one). */
+  canReveal: boolean
+  onReveal: (files: File[], acknowledge: boolean) => void
+}
+
+function SealRow({ seal, chainId, busy, revealing, canReveal, onReveal }: SealRowProps) {
   const [files, setFiles] = useState<File[]>([])
   const [acknowledge, setAcknowledge] = useState(false)
   const missing = seal.missingArtifacts
@@ -101,12 +112,15 @@ function SealRow({ seal, chainId, busy, onReveal }: { seal: SealedEvidenceView; 
         )}
       </div>
       {seal.state === 'committed' && !seal.revealOpen && <p className="mt-2 text-[0.84375rem] text-na">The reveal deadline has passed: this commitment can no longer be revealed and does not count.</p>}
-      {seal.state === 'committed' && seal.revealOpen && (
+      {seal.state === 'committed' && seal.revealOpen && !canReveal && (
+        <p className="mt-3 text-[0.84375rem] text-lumen-2">Sign in to Pine with this wallet (above) to reveal it.</p>
+      )}
+      {seal.state === 'committed' && seal.revealOpen && canReveal && (
         <form
           className="mt-3 grid gap-3"
           onSubmit={(e) => {
             e.preventDefault()
-            onReveal(files, acknowledge)
+            if (!busy) onReveal(files, acknowledge)
           }}
         >
           {missing.length > 0 && (
@@ -115,7 +129,8 @@ function SealRow({ seal, chainId, busy, onReveal }: { seal: SealedEvidenceView; 
                 Attach the committed files again
               </label>
               <p className="help -mt-1">
-                This browser no longer holds {missing.map((m) => m.name).join(', ')}. Pick the same files: they are matched by their SHA-256 and uploaded only now, with the reveal.
+                This browser no longer holds {missing.map((m) => m.name).join(', ')}. Pick the same files: they are matched by their SHA-256 and uploaded only now, with the reveal. Pine stores
+                your written report only together with every file it lists.
               </p>
               <input
                 id={inputId}
@@ -127,12 +142,16 @@ function SealRow({ seal, chainId, busy, onReveal }: { seal: SealedEvidenceView; 
               />
               <label className="mt-2 flex items-start gap-3 text-[0.84375rem] text-lumen-2">
                 <input type="checkbox" className="facet-check" checked={acknowledge} onChange={(e) => setAcknowledge(e.target.checked)} />
-                <span>Reveal without the files I cannot attach. Adjudicators will not be able to obtain them.</span>
+                <span>
+                  Reveal without the missing files. This reveal then uploads nothing to Pine: not the files I did attach, and not my written report (title, summary,
+                  reproduction). Only the digest goes on chain. Unless Pine already holds the report from an earlier attempt, adjudicators cannot obtain my evidence,
+                  and under policy C4 an evidence manifest they cannot obtain is inadmissible.
+                </span>
               </label>
             </div>
           )}
           <div>
-            <Button type="submit" size="sm" disabled={busy} loading={busy} icon={<Eye size={14} aria-hidden />}>
+            <Button type="submit" size="sm" disabled={busy} loading={revealing} icon={<Eye size={14} aria-hidden />}>
               Reveal sealed evidence
             </Button>
           </div>
@@ -194,6 +213,10 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
   const action = ev.action
   const done = runState === 'done' && action !== null && action.kind !== 'reveal'
   const stopped = runState === 'failed' || ev.runner.phase === 'error'
+  // Where `ev.error` belongs: the reveal the user last started (it may fail before its plan replaces the stored commit
+  // action), else the submission form. After a reload, the stored action decides.
+  const revealErrors = ev.attempt === 'reveal' || (ev.attempt === null && action?.kind === 'reveal')
+  const revealable = ev.seals.some((s) => s.state === 'committed' && s.revealOpen)
 
   const submit = async () => {
     const composition: EvidenceComposition = {
@@ -343,7 +366,14 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                 />
               </div>
               {preview ? (
-                <div className="cut-md well min-h-[9rem] p-4">{fields.summary.trim() ? <SafeMarkdown>{fields.summary}</SafeMarkdown> : <p className="text-lumen-3">Nothing to preview.</p>}</div>
+                // As the evidence feed shows it (SEC-EVID-10): plain text, line breaks kept, nothing clickable.
+                <div className="cut-md well min-h-[9rem] p-4">
+                  {fields.summary.trim() ? (
+                    <p className="untrusted whitespace-pre-wrap text-[0.9375rem] leading-[1.6] text-lumen-2 [overflow-wrap:anywhere]">{fields.summary}</p>
+                  ) : (
+                    <p className="text-lumen-3">Nothing to preview.</p>
+                  )}
+                </div>
               ) : (
                 <textarea
                   id="ev-summary"
@@ -354,7 +384,7 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                   maxLength={10000}
                   aria-invalid={Boolean(errorOf('summary'))}
                   aria-describedby="ev-summary-help"
-                  placeholder="What you ran, what happened, and why it is the stated violation. Markdown is shown sanitized."
+                  placeholder="What you ran, what happened, and why it is the stated violation. Everyone sees it as plain text: links are not clickable."
                 />
               )}
               <p id="ev-summary-help" className="help mt-1">
@@ -470,12 +500,8 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
               </fieldset>
             )}
 
-            {action?.kind !== 'reveal' && (
-              <>
-                <WriteErrorNotice error={ev.error} />
-                <PlanProgress runner={ev.runner} chainId={claim.chainId} />
-              </>
-            )}
+            {!revealErrors && <WriteErrorNotice error={ev.error} />}
+            {action?.kind !== 'reveal' && <PlanProgress runner={ev.runner} chainId={claim.chainId} />}
             <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-5">
               {ready ? (
                 <>
@@ -512,9 +538,19 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
           <p className="mt-3 text-[0.9rem] text-lumen-2">None for this wallet and claim in this browser.</p>
         ) : (
           <>
+            {/* Revealing needs the wallet's own Pine session, like committing: the template and the uploads require it. */}
+            {revealable && !ready && <ApiSessionGate purpose="reveal your sealed evidence" className="mt-4" />}
             <ul className="mt-4 grid gap-3">
               {ev.seals.map((s) => (
-                <SealRow key={s.contentSha256} seal={s} chainId={claim.chainId} busy={ev.busy} onReveal={(f, ack) => void ev.reveal(s.contentSha256, { files: f, acknowledgeUnavailableContent: ack })} />
+                <SealRow
+                  key={s.contentSha256}
+                  seal={s}
+                  chainId={claim.chainId}
+                  busy={busy}
+                  revealing={ev.revealing === s.contentSha256}
+                  canReveal={ready}
+                  onReveal={(f, ack) => void ev.reveal(s.contentSha256, { files: f, acknowledgeUnavailableContent: ack })}
+                />
               ))}
             </ul>
             {ev.revealWarnings.length > 0 && (
@@ -528,10 +564,10 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                 </ul>
               </Notice>
             )}
-            {action?.kind === 'reveal' && (
+            {(revealErrors || action?.kind === 'reveal') && (
               <div className="mt-4">
-                <WriteErrorNotice error={ev.error} />
-                <PlanProgress runner={ev.runner} chainId={claim.chainId} className="mt-3" />
+                {revealErrors && <WriteErrorNotice error={ev.error} />}
+                {action?.kind === 'reveal' && <PlanProgress runner={ev.runner} chainId={claim.chainId} className="mt-3" />}
               </div>
             )}
           </>

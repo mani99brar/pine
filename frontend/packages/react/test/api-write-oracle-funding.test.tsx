@@ -7,7 +7,7 @@ import { __resetTxRunners } from '../src/tx/use-tx-runner'
 import { setDemoTxDelays } from '../src/tx/demo-executor'
 import { readCurrentQuestionId, verifyWirePlan } from '../src/api/plans'
 import { checkOraclePlan, minimumBondOf, reopenedQuestionIdsOf, useApiOracle } from '../src/api/oracle'
-import { checkLadderPlan, useApiFunding, type LadderPlanCheck } from '../src/api/funding'
+import { checkLadderPlan, ladderQuoteKey, useApiFunding, type LadderPlanCheck, type LadderQuote } from '../src/api/funding'
 import { checkExitPlan } from '../src/api/exits'
 import { getSqrtRatioAtTick, MAX_SQRT_RATIO, MAX_TICK, MIN_SQRT_RATIO, MIN_TICK } from '../src/api/tick-math'
 import { ACCOUNT, chainReopened, fakeReader, INVALID, manifest, MARKET, NO, NOW, NOW_S, OTHER, QUESTION, reads, resetChain, REVEAL_DEADLINE, wirePlan, XDAI, YES } from './api-write-chain'
@@ -266,6 +266,39 @@ describe('checkLadderPlan', () => {
       expect(() => checkLadderPlan(steps1({ init: getSqrtRatioAtTick(6_960) - 1n }), ctx1)).toThrow(/new pool would start/)
       expect(() => checkLadderPlan(steps1({ tokens: [YES1, COLLATERAL] }), ctx1)).toThrow(/YES\/sDAI pool/)
     })
+  })
+})
+
+describe('ladderQuoteKey', () => {
+  const quote: LadderQuote = {
+    market: MARKET,
+    budgetWei: (100n * XDAI).toString(),
+    sets: '99000000000000000000',
+    finalLowerPrice: '0.05',
+    finalUpperPrice: '0.5',
+    maxLossIfYesShares: '60000000000000000000',
+    maxLossIfYesXdaiWei: '61000000000000000000',
+    requestedLowerPrice: '0.05',
+    requestedUpperPrice: '0.5',
+  }
+
+  it('SEC-LEGAL-03 gives other figures another key, so an acknowledgement never carries over to them', () => {
+    const key = ladderQuoteKey(quote)
+    expect(ladderQuoteKey({ ...quote })).toBe(key)
+    // The figures Pine returns when the pool moved between the quote and the plan (409 with a larger loss).
+    for (const changed of [
+      { maxLossIfYesShares: '70000000000000000000' },
+      { maxLossIfYesXdaiWei: '71000000000000000000' },
+      { budgetWei: (200n * XDAI).toString() },
+      { sets: '98000000000000000000' },
+      { finalLowerPrice: '0.04' },
+      { finalUpperPrice: '0.6' },
+      { market: OTHER },
+    ]) {
+      expect(ladderQuoteKey({ ...quote, ...changed })).not.toBe(key)
+    }
+    // What the user typed is not a figure: the same figures for another request keep the key.
+    expect(ladderQuoteKey({ ...quote, requestedLowerPrice: '0.051' })).toBe(key)
   })
 })
 

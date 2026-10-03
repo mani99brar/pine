@@ -91,6 +91,16 @@ describe('verifyPreview', () => {
     expect(verifyPreview({ ...stated, question }, expectations()).issues.map((i) => i.code)).toEqual(['question_mismatch'])
   })
 
+  it('SEC-CLAIM-05 never shows Pine’s stated question when the browser cannot compose one from the document', () => {
+    const stated = preview(goodDoc())
+    // Schema-valid, but no question can be rendered from an all-zero policy digest.
+    const doc = { ...goodDoc(), policy: { ...goodDoc().policy, sha256: `0x${'00'.repeat(32)}` as Hex32 } }
+    const { preview: p, issues } = verifyPreview({ ...stated, document: doc }, expectations())
+    expect(p).not.toBeNull()
+    expect(issues.map((i) => i.code)).toContain('question_mismatch')
+    expect(p?.question).toBeNull()
+  })
+
   it('blocks outcome token names that do not derive from the digest', () => {
     const stated = preview(goodDoc())
     expect(verifyPreview({ ...stated, tokenNames: ['PY_00000000', 'PN_00000000'] }, expectations()).issues.map((i) => i.code)).toEqual(['token_names_mismatch'])

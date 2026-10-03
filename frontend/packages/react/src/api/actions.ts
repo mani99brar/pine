@@ -3,7 +3,17 @@
 // Re-exported by src/index.ts.
 
 // Claim publication: composer draft → backend draft → verified preview → createClaim plan → status.
-export { toDraftInput, composerPathOf, type DraftFieldError, type DraftInputResult, type DraftInputOptions } from './draft-input'
+export {
+  toDraftInput,
+  toDraftTerms,
+  chosenEvidenceDeadline,
+  composerPathOf,
+  type DraftFieldError,
+  type DraftInputResult,
+  type DraftInputOptions,
+  type DraftTerms,
+  type DraftTermsResult,
+} from './draft-input'
 export {
   verifyPreview,
   checkCreateClaimPlan,
@@ -59,6 +69,8 @@ export {
 export {
   useApiFunding,
   checkLadderPlan,
+  ladderQuoteKey,
+  LADDER_CLOSES_BEFORE_DEADLINE_SECONDS,
   FUNDING_MAX_VALUE_WEI,
   FUNDING_MAX_APPROVAL,
   type ApiFunding,

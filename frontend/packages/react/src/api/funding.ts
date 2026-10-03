@@ -402,6 +402,17 @@ export interface LadderQuote extends LadderRiskFigures {
   requestedUpperPrice: string
 }
 
+/**
+ * SEC-LEGAL-03: the identity of the figures a risk acknowledgement is given for. Key the acknowledgement by it, so a
+ * tick never carries over to other figures (a requote, or the larger loss Pine returns when the pool moved).
+ */
+export function ladderQuoteKey(q: LadderQuote): string {
+  return [q.market.toLowerCase(), q.budgetWei, q.sets, q.finalLowerPrice, q.finalUpperPrice, q.maxLossIfYesShares, q.maxLossIfYesXdaiWei].join('|')
+}
+
+/** Pine offers ladders only until this long before the evidence deadline (packages/api funding LADDER_MIN_TIME_BEFORE_DEADLINE). */
+export const LADDER_CLOSES_BEFORE_DEADLINE_SECONDS = 3_600
+
 export interface ApiFunding {
   claim: OnChainClaim | null
   /** The latest figures to acknowledge (also refreshed when the loss grew between quote and plan). */

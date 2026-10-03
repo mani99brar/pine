@@ -2,55 +2,42 @@
 
 import Link from 'next/link'
 import { useMemo } from 'react'
-import type { ActivityItem, AgentClaimBrief, ClaimDetail } from '@pine/core'
+import type { ActivityItem, ClaimDetail } from '@pine/core'
 import { explorerTxUrl, formatDate, shortHash } from '@pine/core'
 import { briefToMarkdown, toAgentBrief } from '@pine/core/agent'
 import { useActivity, usePine } from '@pine/react'
 import { CopyButton, HashChip } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/primitives'
 import { clientSiteUrl } from '@/lib/site-client'
+import { apiAgentBrief } from '@/lib/agent-brief'
 import { apiFactsOf } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 import { ApiTimeline } from './ApiTimeline'
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
-const POLICY_ID = /^[A-Z]{2,8}-\d{3}$/
-const VERSION = /^\d+\.\d+\.\d+$/
 
-/** `api` mode: the claim's market address, which names it in the backend's agent routes. */
-function marketOf(claim: ClaimDetail): string | null {
+/** `api` mode: the backend's agent view of the claim, named by its market (the app's /api/agent routes do not exist). */
+function backendClaimJson(claim: ClaimDetail, site: string): string | null {
   const m = claim.marketAddress ?? claim.id
-  return ADDRESS.test(m) ? m.toLowerCase() : null
-}
-
-/** `api` mode links of a claim: the backend's agent view and policy route (the app's /api/agent routes do not exist). */
-function backendLinks(claim: ClaimDetail, site: string): { claimJson: string | null; policyUrl: string } {
-  const market = marketOf(claim)
-  const { id, version } = claim.policy
-  return {
-    claimJson: market ? `${site}/api/v1/agents/claims/${market}` : null,
-    policyUrl: POLICY_ID.test(id) && VERSION.test(version) ? `${site}/api/v1/policies/${id}/${version}` : `${site}/policies/${encodeURIComponent(id)}`,
-  }
-}
-
-function withBackendLinks(brief: AgentClaimBrief, links: { claimJson: string | null; policyUrl: string }): AgentClaimBrief {
-  return { ...brief, manifest: { ...brief.manifest, jsonUrl: links.claimJson ?? '' }, policy: { ...brief.policy, url: links.policyUrl } }
+  return ADDRESS.test(m) ? `${site}/api/v1/agents/claims/${m.toLowerCase()}` : null
 }
 
 export function AgentBrief({ claim }: { claim: ClaimDetail }) {
   const site = clientSiteUrl()
   const { env } = usePine()
   const api = env.dataSource === 'api'
-  const links = useMemo(() => (api ? backendLinks(claim, site) : null), [api, claim, site])
+  const facts = apiFactsOf(claim)
+  const evidenceRegistry = env.deployment?.evidenceRegistry ?? null
   const md = useMemo(() => {
     try {
-      const brief = toAgentBrief(claim, { siteUrl: site })
-      return briefToMarkdown(links ? withBackendLinks(brief, links) : brief)
+      // api mode: Pine's own facts only (its evidence registry on Gnosis, prices it reported), never the demo brief.
+      if (api) return facts ? apiAgentBrief({ claim, api: facts, site, evidenceRegistry, chainId: env.defaultChainId }) : null
+      return briefToMarkdown(toAgentBrief(claim, { siteUrl: site }))
     } catch {
       return null
     }
-  }, [claim, site, links])
-  if (links) return <BackendAgentBrief claim={claim} md={md} claimJson={links.claimJson} site={site} />
+  }, [api, facts, claim, site, evidenceRegistry, env.defaultChainId])
+  if (api) return <BackendAgentBrief claim={claim} md={md} claimJson={backendClaimJson(claim, site)} site={site} />
   const json = `${site}/api/agent/v1/claims/${claim.id}`
   const curl = `curl -s '${json}?format=md'`
   return (
@@ -129,7 +116,7 @@ function BackendAgentBrief({ claim, md, claimJson, site }: { claim: ClaimDetail;
           {claimJson && (
             <li>
               <a className="link text-lumen-2" href={claimJson}>
-                Claim as JSON
+                Claim as JSON, with the evidence instructions
               </a>
             </li>
           )}
@@ -149,7 +136,7 @@ function BackendAgentBrief({ claim, md, claimJson, site }: { claim: ClaimDetail;
             </a>
           </li>
         </ul>
-        <HashChip value={claim.manifestHash} label="Manifest hash" className="w-fit max-w-full" />
+        <HashChip value={claim.manifestHash} label="Claim document sha256" className="w-fit max-w-full" />
       </div>
     </div>
   )

@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { useEffect, useState } from 'react'
-import { useClaim, useClaims } from '@pine/react'
+import { useClaim, useClaims, usePine } from '@pine/react'
 import { formatPrice } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { Plus } from 'lucide-react'
@@ -11,7 +11,7 @@ import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { AnimatedNumber } from '@/components/ui/interactive'
 import { pricesFrom, type BeamPrices } from '@/components/prism/PrismBeam'
 import { FAMILY_HEX, OUTCOME_HEX } from '@/lib/crystal'
-import { claimLabel, countdown } from '@/lib/claims'
+import { apiOutcomePrices, claimLabel, countdown, type OutcomePrices } from '@/lib/claims'
 import { hasWebGL, useInViewport, useMounted, useNowMs, usePageVisible, usePrefersReducedMotion } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 
@@ -82,7 +82,8 @@ function HeroPoster({ prices, hue, seed, mode }: { prices: BeamPrices; hue: stri
   )
 }
 
-function Readout({ prices, live }: { prices: BeamPrices; live: { id: string; number: number; title: string; deadline: string } | null }) {
+/** The figures under the hero: prices where known ("—" otherwise) and what they mean. */
+function Readout({ figures, note, live }: { figures: OutcomePrices; note: string; live: { id: string; number: number; title: string; deadline: string } | null }) {
   const now = useNowMs()
   if (!live) return <div className="cut-lg glass-quiet h-[12.5rem] w-full max-w-[34rem]" aria-hidden />
   return (
@@ -110,25 +111,48 @@ function Readout({ prices, live }: { prices: BeamPrices; live: { id: string; num
           <div key={k} className="min-w-0 border-l-2 pl-2.5" style={{ borderColor: OUTCOME_HEX[k] }}>
             <dt className="min-h-[2.5em] text-[0.75rem] leading-[1.25] text-lumen-2">{label}</dt>
             <dd className="t-figure text-[1.6rem] leading-tight text-lumen">
-              <AnimatedNumber value={prices[k]} format={formatPrice} />
+              {figures[k] === undefined ? (
+                <span className="text-lumen-3">
+                  —<span className="sr-only"> not priced</span>
+                </span>
+              ) : (
+                <AnimatedNumber value={figures[k]} format={formatPrice} />
+              )}
             </dd>
           </div>
         ))}
       </dl>
-      <p className="mt-2 text-[0.78rem] leading-[1.45] text-lumen-3">
-        The three beams leaving the crystal are these outcomes, and each beam&apos;s width is its price. Yes is the {COPY.priceLabel.toLowerCase()}.
-      </p>
+      <p className="mt-2 text-[0.78rem] leading-[1.45] text-lumen-3">{note}</p>
     </div>
   )
 }
 
+const PRICED_NOTE = `The three beams leaving the crystal are these outcomes, and each beam's width is its price. Yes is the ${COPY.priceLabel.toLowerCase()}.`
+
+/**
+ * `api` mode: the figures are only the pool prices Pine reports for the claim shown (Invalid result has no pool), never
+ * the decorative beam widths, and the caption says which.
+ */
+function apiNote(prices: OutcomePrices, loading: boolean): string {
+  if (loading) return 'Reading the pool prices Pine reports for this market.'
+  if (prices.yes === undefined && prices.no === undefined) return 'Not priced yet: Pine reports no pool price for this market. The beams are an illustration, not prices.'
+  return `Figures are the marginal pool prices Pine reports; an outcome without a pool is not priced.${prices.yes !== undefined ? ` Yes is the ${COPY.priceLabel.toLowerCase()}.` : ''} The beams are an illustration, not prices.`
+}
+
 export function Hero() {
   const reduce = usePrefersReducedMotion()
-  const flagship = useClaim(FLAGSHIP, { live: true })
+  const apiMode = usePine().env.dataSource === 'api'
+  // Demo: the flagship claim. api mode has no flagship: the first open claim, with the prices Pine reports for it.
+  const flagship = useClaim(apiMode ? undefined : FLAGSHIP, { live: true })
   const fallback = useClaims({ status: 'open', sort: 'liquidity', limit: 1 })
   const claim = flagship.data ?? undefined
   const alt = fallback.data?.items[0]
-  const prices = (claim ? pricesFrom(claim) : alt ? pricesFrom(alt) : undefined) ?? FALLBACK_PRICES
+  const altDetail = useClaim(apiMode ? alt?.id : undefined, { live: true })
+  const apiPrices: OutcomePrices = apiMode && altDetail.data ? apiOutcomePrices(altDetail.data) : {}
+  // Beam widths: real prices in the demo; decorative in api mode (never labelled as a claim's prices there).
+  const prices = (claim ? pricesFrom(claim) : alt && !apiMode ? pricesFrom(alt) : undefined) ?? FALLBACK_PRICES
+  const figures: OutcomePrices = apiMode ? apiPrices : prices
+  const note = apiMode ? apiNote(apiPrices, Boolean(alt) && altDetail.isLoading) : PRICED_NOTE
   const hue = FAMILY_HEX[claim?.policy.family ?? alt?.policy.family ?? 'BOT']
   const seed = claim ? `${claim.id}:${claim.source.commitSha}` : 'pine-hero'
   const live = claim
@@ -190,7 +214,9 @@ export function Hero() {
               </div>
             )}
             <p className="sr-only">
-              Illustration: a white beam enters a crystal and splits into a Yes beam, a No beam and a thin Invalid-result beam whose widths follow the live market price.
+              {apiMode
+                ? 'Illustration: a white beam enters a crystal and splits into a Yes beam, a No beam and a thin Invalid-result beam.'
+                : 'Illustration: a white beam enters a crystal and splits into a Yes beam, a No beam and a thin Invalid-result beam whose widths follow the live market price.'}
             </p>
           </div>
 
@@ -207,7 +233,7 @@ export function Hero() {
               </Link>
             </div>
             <div className="mt-10">
-              <Readout prices={prices} live={live} />
+              <Readout figures={figures} note={note} live={live} />
             </div>
           </div>
         </div>

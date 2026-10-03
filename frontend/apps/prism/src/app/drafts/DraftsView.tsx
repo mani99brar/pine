@@ -11,7 +11,7 @@ import { Plus, Trash2 } from 'lucide-react'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { Button, ButtonLink } from '@/components/ui/Button'
 import { Dialog } from '@/components/ui/interactive'
-import { EmptyState, ErrorState, LoadingBlock } from '@/components/ui/primitives'
+import { EmptyState, ErrorState, LoadingBlock, Notice } from '@/components/ui/primitives'
 import { FAMILY_HEX, type FacetId } from '@/lib/crystal'
 import { useNowMs } from '@/lib/hooks'
 import { UI_STEPS } from '@/components/composer/shared'
@@ -113,8 +113,9 @@ function DraftRow({ d, now, onDelete, apiMode, publication }: { d: ClaimDraft; n
   const stageLabel = UI_STEPS.find((s) => s.stage === d.stage)?.label ?? d.stage
   const frozen = steps.some((s) => s.id === 'create_market' && s.status === 'confirmed')
   const inFlight = apiMode ? Boolean(d.publication?.backend?.publicationId) && !d.publication?.marketAddress && publication?.state !== 'failed' && publication?.state !== 'expired' : steps.length > 0
-  // A publication may still land while Pine has not reported it final: keep the draft (and its recovery data) until then.
-  const deletable = !frozen && !(apiMode && inFlight)
+  // A published draft (its market exists, even when the create_market step was never recorded) and a publication that
+  // may still land, while Pine has not reported it final, keep the draft and its recovery data.
+  const deletable = apiMode ? !frozen && !d.publication?.marketAddress && !inFlight : !frozen
   const policyLabel = apiMode ? (d.spec.policyId ? `${d.spec.policyId}${d.spec.policyVersion ? `@${d.spec.policyVersion}` : ''}` : undefined) : policy ? `${policy.id}@${policy.version}` : undefined
   return (
     <li className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-center gap-x-4 gap-y-3 px-4 py-4 sm:grid-cols-[3.5rem_minmax(0,1fr)_auto]">
@@ -167,6 +168,7 @@ export function DraftsView() {
   const now = useNowMs()
   const publications = usePublications(apiMode ? drafts : [])
   const [pending, setPending] = useState<ClaimDraft | null>(null)
+  const [removeError, setRemoveError] = useState<string | null>(null)
   const publicationOf = (d: ClaimDraft) => {
     const id = d.publication?.backend?.publicationId
     return id ? publications.get(id) : undefined
@@ -204,6 +206,11 @@ export function DraftsView() {
     )
   return (
     <div className="grid gap-10">
+      {removeError && (
+        <Notice tone="caution" role="alert" title="The draft was kept">
+          {removeError}
+        </Notice>
+      )}
       {section('unfinished-title', 'Unfinished publications', unfinished)}
       {section('drafts-title', 'Drafts', plain)}
       {section('published-title', 'Published', published)}
@@ -232,7 +239,11 @@ export function DraftsView() {
           <Button
             variant="danger"
             onClick={() => {
-              if (pending) void remove(pending.id)
+              // The hook checks the draft as stored now and refuses a published one, or one whose publication may still land.
+              if (pending) {
+                setRemoveError(null)
+                remove(pending.id).catch((e: unknown) => setRemoveError(e instanceof Error ? e.message : 'The draft could not be deleted.'))
+              }
               setPending(null)
             }}
           >
