@@ -232,6 +232,32 @@ markets:
   identical concurrent first uploads may consume twice (accepted).
 Both: public routes that fan out to RPC (`/funding/positions/:wallet`, `/markets/:market/oracle`) use a 10 s per-key server cache.
 
+## 4b. markets-003 review fixes (carried by markets-004)
+funding:
+- SEC-OPS-07 (security P1): record redacted audit entries through `ctx.audit.record` for every plan insert (actor, plan id, route,
+  kind, market, step count, client IP), every tx-hash hint append, and every CAS state transition in reconcile (confirmed, failed,
+  expired, with the redacted revert reason), mirroring markets/plans.ts and markets/reconcile.ts. Negative/positive tests: each of
+  these writes exactly one audit entry; a replayed same-key request and a lost CAS race write none.
+- Reconcile decides `expired`/`failed` from a missing receipt only while the read model is fresh and `finalizedBlock()` succeeded
+  in this attempt (as markets does); otherwise the plan stays in its state and is retried. Test with a lagging read model and a
+  failing finalizedBlock().
+markets:
+- loadOracle: use the RPC `reopened_questions(original)` id only when the read model's record for it has
+  `reopens === claim.questionId` (or equals the original's `reopenedBy`); otherwise refuse with NOT_READY. Test with an RPC that
+  returns another indexed Pine question id.
+- Evidence upload: check and consume the byte quota and the upload quota so that a refusal of either consumes neither (check
+  bytes first, or one atomic consume if the gateway allows it; document the remaining race). Extend the SEC-EVID-01 test to
+  assert the upload unit is not consumed when the byte quota refuses.
+- storeOnce answers a re-upload from the existing row only when `contentStore.has(sha256)`; otherwise it stores again (consuming
+  quota as a first upload). Test it.
+- createOrReplayPlan looks up (user, route, key) BEFORE the readiness check and consumes `plans_per_day` BEFORE building (PRD-04
+  section 1 order, like funding). Tests: same-key replay succeeds while the read model is halted; an exhausted quota makes no RPC call.
+- Registration guard: tests that registration throws for a mismatching questionCategory/questionLanguage, a Seer/Kleros address
+  different from the manifest, and maxUploadBytes outside 1..262144.
+- GET /markets/:market/evidence uses a 10 s per-(market, cursor, status) server cache (bounded, like the oracle route's).
+Both: the public RPC fan-out routes (`/funding/positions/:wallet`, `/markets/:market/oracle`) cap concurrent RPC fan-out per route
+(at most 4 in flight per process; excess requests wait or get 503 RATE_LIMITED) in addition to the 10 s cache. Test the cap.
+
 ## 5. Checks (per lane)
 `pnpm --filter @pine/api typecheck`, `pnpm exec eslint packages/api/src` (typecheck), `node scripts/check-forbidden.mjs` (unit),
 `pnpm --filter @pine/api exec vitest run src/modules/<lane-dir>` (unit).
