@@ -1,9 +1,9 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSignMessage } from 'wagmi'
-import { parseSiweMessage } from 'viem/siwe'
+import { createSiweMessage, parseSiweMessage } from 'viem/siwe'
 import type { Address } from '@pine/core'
 import {
   anyBodySchema,
@@ -38,11 +38,16 @@ export class SiweChallengeError extends Error {
   }
 }
 
+/** A parsed date-time that is a real instant (viem parses a malformed one to an Invalid Date, which fails no comparison). */
+const validTime = (value: Date | undefined): value is Date => value instanceof Date && Number.isFinite(value.getTime())
+
 /**
  * Checks the server-issued EIP-4361 message before the wallet signs it: it must sign this site in (domain and URI are
  * the page's own origin), for the connected address, on the expected chain, with Pine's terms statement, and expire
- * soon. A compromised or misrouted API therefore cannot obtain a signature usable on another site.
- * Returns the terms digest the user accepts by signing.
+ * soon. It must also be exactly the canonical message of those fields (SEC-AUTH-01): viem's parser ignores text it does
+ * not expect (extra lines before `URI:` or after the last field), so the text is rebuilt from the parsed fields and
+ * compared byte for byte. A compromised or misrouted API therefore cannot obtain a signature usable on another site,
+ * nor over text the user was not shown as Pine's sign-in. Returns the terms digest the user accepts by signing.
  */
 export function checkSiweChallenge(
   message: string,
@@ -66,10 +71,33 @@ export function checkSiweChallenge(
   const statement = parsed.statement ? SIWE_TERMS_STATEMENT.exec(parsed.statement) : null
   if (!statement?.[1]) throw new SiweChallengeError('The sign-in message does not carry Pine’s terms statement.')
   if (!parsed.nonce || !/^[0-9a-f]{32}$/.test(parsed.nonce)) throw new SiweChallengeError('The sign-in message has an invalid nonce.')
-  if (!parsed.expirationTime || parsed.expirationTime.getTime() <= now.getTime() || parsed.expirationTime.getTime() - now.getTime() > 15 * 60_000) {
+  const issuedAt = parsed.issuedAt
+  const expiry = parsed.expirationTime
+  if (!validTime(issuedAt)) throw new SiweChallengeError('The sign-in message has an invalid issue time.')
+  if (!validTime(expiry) || expiry.getTime() <= now.getTime() || expiry.getTime() - now.getTime() > 15 * 60_000 || expiry.getTime() <= issuedAt.getTime()) {
     throw new SiweChallengeError('The sign-in message has an invalid expiry.')
   }
   if (parsed.resources && parsed.resources.length > 0) throw new SiweChallengeError('The sign-in message requests extra resources.')
+  let canonical: string
+  try {
+    canonical = createSiweMessage({
+      domain: parsed.domain,
+      address: parsed.address,
+      statement: parsed.statement,
+      uri: parsed.uri,
+      version: parsed.version,
+      chainId: parsed.chainId,
+      nonce: parsed.nonce,
+      issuedAt,
+      expirationTime: expiry,
+      notBefore: parsed.notBefore,
+      requestId: parsed.requestId,
+      scheme: parsed.scheme,
+    })
+  } catch {
+    throw new SiweChallengeError('The sign-in message is malformed.')
+  }
+  if (canonical !== message) throw new SiweChallengeError('The sign-in message is not exactly Pine’s sign-in message (it carries extra or altered text).')
   return { termsDigest: statement[1] }
 }
 
@@ -180,18 +208,51 @@ export function useSiweSignIn(): { signIn(): Promise<PineSession>; step: SiweSte
   return { signIn, step, error, reset }
 }
 
-/** POST /api/v1/auth/logout (`everywhere` ends every session of the account). */
-export function useSignOut(): (opts?: { everywhere?: boolean }) => Promise<void> {
+export interface SignOutOptions {
+  /** End every session of the account, not only this browser's. */
+  everywhere?: boolean
+  /**
+   * Drop the session in this browser even when Pine did not confirm the sign-out (the error is still thrown). For the
+   * wallet-switch sign-out (SEC-AUTH-13), where the session must not stay in use with another wallet.
+   */
+  force?: boolean
+}
+
+/**
+ * POST /api/v1/auth/logout (`everywhere` ends every session of the account). The session is dropped in this browser
+ * only once Pine confirmed it ended (2xx, or 401: it had already ended). When the request fails the session cookie is
+ * still valid, so the user stays signed in here and the error is thrown: showing "signed out" would be false (the
+ * HttpOnly cookie cannot be cleared by script). With `force`, or when the wallet has switched to another account than
+ * the session's, the session is dropped here anyway and the error still thrown.
+ */
+export function useSignOut(): (opts?: SignOutOptions) => Promise<void> {
   const { api } = usePine()
   const qc = useQueryClient()
+  const wallet = useWallet()
+  const selected = wallet.isConnected && !wallet.isReconnecting ? wallet.address?.toLowerCase() : undefined
+  const selectedRef = useRef(selected)
+  useEffect(() => {
+    selectedRef.current = selected
+  })
   return useCallback(
-    async (opts?: { everywhere?: boolean }) => {
-      try {
-        await requireApi(api).request('POST', '/api/v1/auth/logout', emptySchema, { body: opts?.everywhere ? { everywhere: true } : {} })
-      } finally {
+    async (opts?: SignOutOptions) => {
+      const dropLocal = () => {
         qc.removeQueries({ predicate: (query) => query.queryKey[0] === 'pine' && USER_KEYS.has(String(query.queryKey[1])) })
         qc.setQueryData(pineKeys.session(), null)
       }
+      try {
+        await requireApi(api).request('POST', '/api/v1/auth/logout', emptySchema, { body: opts?.everywhere ? { everywhere: true } : {} })
+      } catch (e) {
+        const bound = qc.getQueryData<PineSession | null>(pineKeys.session())?.wallet.toLowerCase()
+        const switched = Boolean(bound && selectedRef.current && bound !== selectedRef.current)
+        const gone = e instanceof PineBackendError && e.status === 401
+        if (gone || opts?.force === true || switched) dropLocal()
+        if (!gone) throw e
+        // This session had already ended, so Pine could not tell which other sessions to end.
+        if (opts?.everywhere) throw new Error('This browser’s Pine session had already ended, so your other sessions were not signed out. Sign in again, then sign out everywhere.')
+        return
+      }
+      dropLocal()
     },
     [api, qc],
   )

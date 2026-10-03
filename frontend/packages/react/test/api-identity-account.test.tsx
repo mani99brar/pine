@@ -11,6 +11,7 @@ import { pineKeys } from '../src/queries/keys'
 import { useAccount, useAccountData, useLinkWallet, useUpdatePreferences } from '../src/account'
 import { LOCAL_DRAFT_OWNER, useDraftOwner } from '../src/composer/drafts'
 import { siweTermsDigest, usePendingSiweTerms } from '../src/api/identity'
+import { useSignOut } from '../src/api/session'
 
 const WALLET = '0x70997970c51812dc3a010c7d01b50e0d17dc79c8'
 const TERMS = `0x${'ab'.repeat(32)}`
@@ -40,8 +41,8 @@ interface Call {
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 const signedOut = () => json(401, { error: { code: 'UNAUTHENTICATED', message: 'Sign in required', requestId: 'req-1' } })
 
-/** Stubs the backend behind the same-origin client; unknown routes answer 404 like the API. */
-function backend(route: (call: Call) => Response | undefined): Call[] {
+/** Stubs the backend behind the same-origin client; unknown routes answer 404 like the API (an Error: network failure). */
+function backend(route: (call: Call) => Response | Error | undefined): Call[] {
   const calls: Call[] = []
   vi.stubGlobal(
     'fetch',
@@ -55,7 +56,9 @@ function backend(route: (call: Call) => Response | undefined): Call[] {
         body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : null,
       }
       calls.push(call)
-      return route(call) ?? json(404, { error: { code: 'NOT_FOUND', message: 'Not found', requestId: 'req-2' } })
+      const res = route(call)
+      if (res instanceof Error) throw res
+      return res ?? json(404, { error: { code: 'NOT_FOUND', message: 'Not found', requestId: 'req-2' } })
     }),
   )
   return calls
@@ -166,6 +169,74 @@ describe('useAccount in api mode', () => {
     expect(result.current.a.status).toBe('signed_out')
     expect(result.current.a.account).toBeNull()
     expect(result.current.owner).toBe(LOCAL_DRAFT_OWNER)
+  })
+
+  /** Signed in as WALLET; POST /auth/logout answers with `logout()` (the session ends only on 2xx). */
+  function signedInWithLogout(logout: () => Response | Error) {
+    let session: PineSession | null = sessionView()
+    const calls = backend((c) => {
+      if (c.path === '/api/v1/auth/session') return session ? json(200, session) : signedOut()
+      if (c.path === '/api/v1/auth/logout' && c.method === 'POST') {
+        const res = logout()
+        if (res instanceof Response && res.ok) session = null
+        return res
+      }
+      return undefined
+    })
+    return calls
+  }
+
+  it.each([
+    ['503', () => json(503, { error: { code: 'UPSTREAM_UNAVAILABLE', message: 'Database unavailable', requestId: 'req-4' } })],
+    ['429 (another session filled the rate limit)', () => json(429, { error: { code: 'RATE_LIMITED', message: 'Too many requests', requestId: 'req-5' } })],
+    ['a network failure', () => new TypeError('Failed to fetch')],
+  ])('SEC-AUTH-13 stays signed in and throws when Pine does not confirm the sign-out (%s)', async (_name, logout) => {
+    signedInWithLogout(logout)
+    const { result } = render(() => ({ a: useAccount(), owner: useDraftOwner() }))
+    await waitFor(() => expect(result.current.a.status).toBe('signed_in'))
+    let error: unknown
+    await act(async () => {
+      error = await result.current.a.signOut({ everywhere: true }).catch((e: unknown) => e)
+    })
+    expect(error).toBeInstanceOf(Error)
+    // The HttpOnly cookie is still valid: showing "signed out" here would be false.
+    expect(result.current.a.status).toBe('signed_in')
+    expect(result.current.a.account).not.toBeNull()
+    expect(result.current.owner).toBe(WALLET)
+  })
+
+  it('treats 401 as already signed out', async () => {
+    signedInWithLogout(() => signedOut())
+    const { result } = render(() => useAccount())
+    await waitFor(() => expect(result.current.status).toBe('signed_in'))
+    await act(async () => {
+      await result.current.signOut()
+    })
+    expect(result.current.status).toBe('signed_out')
+  })
+
+  it('SEC-AUTH-13 says other sessions were not ended when this one had already expired', async () => {
+    signedInWithLogout(() => signedOut())
+    const { result } = render(() => useAccount())
+    await waitFor(() => expect(result.current.status).toBe('signed_in'))
+    let error: unknown
+    await act(async () => {
+      error = await result.current.signOut({ everywhere: true }).catch((e: unknown) => e)
+    })
+    expect((error as Error).message).toMatch(/other sessions were not signed out/)
+    expect(result.current.status).toBe('signed_out')
+  })
+
+  it('drops the session here anyway with `force`, still throwing the failure', async () => {
+    signedInWithLogout(() => json(500, { error: { code: 'INTERNAL', message: 'Internal error', requestId: 'req-6' } }))
+    const { result } = renderHook(() => ({ a: useAccount(), signOut: useSignOut() }), { wrapper: wrapperFor(createPineQueryClient()) })
+    await waitFor(() => expect(result.current.a.status).toBe('signed_in'))
+    let error: unknown
+    await act(async () => {
+      error = await result.current.signOut({ force: true }).catch((e: unknown) => e)
+    })
+    expect(error).toBeInstanceOf(Error)
+    expect(result.current.a.status).toBe('signed_out')
   })
 
   it('asks for a wallet before requesting any sign-in message', async () => {

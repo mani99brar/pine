@@ -220,6 +220,8 @@ describe('useWalletSessionGuard (SEC-AUTH-13)', () => {
     rerender()
     expect(calls.filter((c) => c.path === '/api/v1/auth/logout')).toHaveLength(1)
     expect(result.current.guard).toMatchObject({ from: A.toLowerCase(), to: B.toLowerCase() })
+    // Fail-closed: the session of the other wallet is not used here any longer, although Pine did not confirm.
+    expect(result.current.a.status).toBe('signed_out')
   })
 
   it('exposes the mismatch on the account even without the guard mounted', async () => {

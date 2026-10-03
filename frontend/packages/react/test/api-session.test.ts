@@ -55,6 +55,33 @@ describe('checkSiweChallenge', () => {
   it('refuses malformed text', () => {
     expect(() => checkSiweChallenge('not a siwe message', expected)).toThrow(SiweChallengeError)
   })
+
+  it('SEC-AUTH-01 refuses a message with lines appended after the last field', () => {
+    expect(() => checkSiweChallenge(`${message()}\nResources:\n- https://evil.example/grant`, expected)).toThrow(/extra resources/)
+    expect(() => checkSiweChallenge(`${message()}\nI also approve every transfer.`, expected)).toThrow(/not exactly Pine’s sign-in message/)
+    expect(() => checkSiweChallenge(`${message()}\n`, expected)).toThrow(/not exactly Pine’s sign-in message/)
+  })
+
+  it('SEC-AUTH-01 refuses a message with lines injected before the URI', () => {
+    const injected = message().replace('\nURI: ', '\nI transfer my claim market to the bearer.\nURI: ')
+    expect(() => checkSiweChallenge(injected, expected)).toThrow(/not exactly Pine’s sign-in message/)
+  })
+
+  it('SEC-AUTH-04 refuses an expiration or issue time that is not a real instant', () => {
+    const iso = new Date(NOW.getTime() + 10 * 60_000).toISOString()
+    // viem parses a date-only value to an Invalid Date, which every comparison lets through.
+    expect(() => checkSiweChallenge(message().replace(`Expiration Time: ${iso}`, 'Expiration Time: 2999-01-01'), expected)).toThrow(/invalid expiry/)
+    expect(() => checkSiweChallenge(message().replace(`Issued At: ${NOW.toISOString()}`, 'Issued At: yesterday'), expected)).toThrow(/invalid issue time/)
+    expect(() => checkSiweChallenge(message({ expirationTime: undefined }), expected)).toThrow(/invalid expiry/)
+  })
+
+  it('refuses a message whose fields are not in canonical form', () => {
+    // Same instant, written without milliseconds: not the text createSiweMessage (the backend) produces.
+    const iso = new Date(NOW.getTime() + 10 * 60_000).toISOString()
+    expect(() => checkSiweChallenge(message().replace(`Expiration Time: ${iso}`, `Expiration Time: ${iso.replace('.000Z', 'Z')}`), expected)).toThrow(/not exactly Pine’s sign-in message/)
+    // A lowercase address is the same wallet but not the canonical (EIP-55) text.
+    expect(() => checkSiweChallenge(message().replace(ADDRESS, ADDRESS.toLowerCase()), expected)).toThrow(/not exactly Pine’s sign-in message/)
+  })
 })
 
 describe('checkGitHubAuthorizationUrl', () => {
