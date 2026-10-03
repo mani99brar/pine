@@ -135,11 +135,15 @@ Contracts are immutable once deployed, so every contract change here lands befor
   reconcile.test.ts the reopen tests now assert a finalized `mined` publication is never reopened. Every rewritten test is
   listed in the completion with its reason; no other existing test may change.
 - Audit atomicity (SEC-OPS-07): claims audit writes (publication created, hint reported, transitions, integrity verdicts) use a
-  `claims_audit_outbox` with the same design as section 3 (same-statement CTE insert, single-flight record-then-delete flush
-  at the start of every claims job run and after each audited write, at-least-once, details unchanged). Tests as in section 3.
+  `claims_audit_outbox` with the flush design of section 3 (single-flight record-then-delete flush at the start of every claims
+  job run and after each audited write, at-least-once, details unchanged). Rule for claims: the audited write and its outbox
+  INSERT commit in the same transaction. Writes already inside `ctx.db.transaction` (publication insert, hint + mined,
+  integrity writeResult) add the outbox INSERT as a second statement in that transaction, so statement shapes and the lock-order
+  trace test stay unchanged; bare single-statement writes (tx_reported insert, a transition outside a transaction) use a CTE.
+  Tests as in section 3.
   The claims test harness's per-test table truncation list includes `claims_audit_outbox` (and every new table of this lane).
-- Tests: the two 8d recovery assertions (`publication.test.ts` recovery after the UPSTREAM outage, `reconcile.test.ts` retry
-  after reopen) assert the status code 200 and a non-null plan; the existing-row order test (publish, make the repository
+- Tests: the 8d recovery assertion in `publication.test.ts` (recovery after the UPSTREAM outage) asserts the status code 200 and
+  a non-null plan (the reconcile "retry after reopen" case no longer exists: reopen is removed); the existing-row order test (publish, make the repository
   private or GitHub rate-limited, advance past planExpiresAt, retry → 200, plan null, planExpired true, no GitHub call).
 
 ## 4. Checks
