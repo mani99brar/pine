@@ -6,8 +6,9 @@ import { ArrowRight, Bell, CircleDot, Coins, FileUp, Hammer, Wallet } from 'luci
 import type { ClaimSummary, OutcomePosition } from '@pine/core'
 import { formatAmount, formatClaimNumber, formatPrice, shortSha, timeRemaining } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { useAccount, useClaims, useDrafts, usePortfolio, useWallet } from '@pine/react'
+import { useClaims, useDrafts, usePortfolio, useWallet } from '@pine/react'
 import { cn } from '@/lib/cn'
+import { useAccountSafe } from '@/lib/hooks'
 import { useNowTick } from '@/lib/use-now'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -30,7 +31,7 @@ const OUTCOME_NAME = { yes: 'Yes', no: 'No', invalid: 'Invalid result' } as cons
 
 export function Dashboard() {
   const wallet = useWallet()
-  const { account, status } = useAccount()
+  const { account, status } = useAccountSafe()
   const now = useNowTick(30_000)
   const portfolio = usePortfolio(wallet.address)
   const claims = useClaims({ limit: 200 })
@@ -58,7 +59,7 @@ export function Dashboard() {
   }
   for (const pos of p?.positions ?? [])
     if (pos.redeemable)
-      alerts.push({ id: `rd-${pos.claimId}-${pos.outcome}`, tone: 'needle', icon: <Coins size={14} />, text: <>{formatAmount(pos.redeemableAmount ?? pos.value, { symbol: sym })} redeemable on {formatClaimNumber(pos.claimNumber)}.</>, href: `/claims/${pos.claimId}`, action: 'Redeem' })
+      alerts.push({ id: `rd-${pos.claimId}-${pos.outcome}`, tone: 'needle', icon: <Coins size={14} />, text: <>{formatAmount(pos.redeemableAmount ?? pos.value, { symbol: sym })} redeemable on {formatClaimNumber(pos.claimNumber)}.</>, href: `/claims/${pos.claimId}#position`, action: 'Redeem' })
   for (const d of unfinished)
     alerts.push({ id: `dr-${d.id}`, tone: 'resin', icon: <FileUp size={14} />, text: <>Publication of “{d.spec.title || 'untitled draft'}” is incomplete.</>, href: `/new?draft=${d.id}`, action: 'Resume' })
 
@@ -121,7 +122,7 @@ export function Dashboard() {
             ) : (p?.positions.length ?? 0) === 0 ? (
               <EmptyState title="No outcome tokens">Buying Yes or No tokens on Seer adds a position here.</EmptyState>
             ) : (
-              <PositionsTable positions={p!.positions} sym={sym} />
+              <PositionsTable positions={p!.positions} sym={sym} outcomes={Object.fromEntries((claims.data?.items ?? []).map((c) => [c.id, c.outcome]))} />
             )}
           </Pane>
           <Pane title="Liquidity positions" className="border-0" description={COPY.liquidityIsNotBounty}>
@@ -147,7 +148,7 @@ export function Dashboard() {
                       <tr key={l.tokenId} className="border-b border-line last:border-0">
                         <td className="py-2 pl-4">
                           <Link href={`/claims/${l.claimId}`} className="hover:text-needle">
-                            <span className="mono-cond mr-2 text-[11.5px] text-muted">{formatClaimNumber(l.claimNumber)}</span>
+                            <span className="mono-cond mr-2 whitespace-nowrap text-[11.5px] text-muted">{formatClaimNumber(l.claimNumber)}</span>
                             <span className="line-clamp-1">{l.claimTitle}</span>
                           </Link>
                         </td>
@@ -245,7 +246,7 @@ function ClaimRows({ claims, now }: { claims: ClaimSummary[]; now: Date }) {
   )
 }
 
-function PositionsTable({ positions, sym }: { positions: OutcomePosition[]; sym: string }) {
+function PositionsTable({ positions, sym, outcomes }: { positions: OutcomePosition[]; sym: string; outcomes: Record<string, ClaimSummary['outcome']> }) {
   return (
     <div className="scrollbar-thin relative overflow-x-auto">
       <table className="w-full min-w-[640px] text-[13px]">
@@ -263,8 +264,8 @@ function PositionsTable({ positions, sym }: { positions: OutcomePosition[]; sym:
             <tr key={`${pos.claimId}-${pos.outcome}`} className="border-b border-line last:border-0">
               <td className="py-2 pl-4">
                 <Link href={`/claims/${pos.claimId}`} className="flex items-center gap-2 hover:text-needle">
-                  <StatusDot status={pos.status} />
-                  <span className="mono-cond text-[11.5px] text-muted">{formatClaimNumber(pos.claimNumber)}</span>
+                  <StatusDot status={pos.status} outcome={outcomes[pos.claimId]} />
+                  <span className="mono-cond whitespace-nowrap text-[11.5px] text-muted">{formatClaimNumber(pos.claimNumber)}</span>
                   <span className="line-clamp-1">{pos.claimTitle}</span>
                 </Link>
               </td>
@@ -273,7 +274,7 @@ function PositionsTable({ positions, sym }: { positions: OutcomePosition[]; sym:
               <td className="tnum py-2 pl-4 text-right">{formatPrice(pos.markPrice)}</td>
               <td className="tnum py-2 pl-4 pr-4 text-right">
                 {pos.redeemable ? (
-                  <span className="font-medium text-needle">{formatAmount(pos.redeemableAmount ?? pos.value, { symbol: sym, maxDecimals: 2 })} redeemable</span>
+                  <span className="whitespace-nowrap font-medium text-needle">{formatAmount(pos.redeemableAmount ?? pos.value, { symbol: sym, maxDecimals: 2 })} redeemable</span>
                 ) : (
                   formatAmount(pos.value, { symbol: sym, maxDecimals: 2 })
                 )}

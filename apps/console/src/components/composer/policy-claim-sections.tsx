@@ -173,7 +173,7 @@ function ParamInput({ p }: { p: PolicyParameterSpec }) {
       break
     }
     case 'list':
-      control = <ListEditor id={id} value={Array.isArray(v) ? v : []} disabled={disabled} onBlur={() => touch(path)} onChange={set} placeholder={placeholder} />
+      control = <ListEditor id={id} value={Array.isArray(v) ? v : []} disabled={disabled} onBlur={() => touch(path)} onChange={set} placeholder={placeholder} addLabel={`Add to ${p.label.charAt(0).toLowerCase()}${p.label.slice(1)}`} />
       break
     case 'boolean':
       control = <Checkbox id={id} checked={v === true} disabled={disabled} onChange={set} label={p.label} />
@@ -198,6 +198,44 @@ function ParamInput({ p }: { p: PolicyParameterSpec }) {
     <Field label={p.label} htmlFor={id} required={p.required} hint={p.help} error={err(path)}>
       {control}
     </Field>
+  )
+}
+
+function isBlank(v: unknown) {
+  return v === undefined || v === '' || (Array.isArray(v) && v.every((x) => typeof x === 'string' && !x.trim()))
+}
+
+/**
+ * Policy parameters are long and policy-specific. Each one ships a worked example; this fills only the
+ * blank ones so a first claim has a concrete starting point to edit, and never overwrites typed text.
+ */
+function ExampleFill() {
+  const { c, disabled, updateSpec, touch } = useComposerCtx()
+  const policy = c.policy
+  if (!policy || disabled) return null
+  const params = c.draft.spec.parameters ?? {}
+  const fillable = policy.parameters.filter((p) => p.example !== undefined && isBlank(params[p.key]))
+  if (!fillable.length) return null
+  return (
+    <div className="-mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-ctl bg-sunken px-3 py-2 text-[12.5px] text-muted">
+      <span className="min-w-0 flex-1">
+        {fillable.length} of {policy.parameters.length} blank. {policy.id} ships a worked example for each; start from it and edit it to match your code.
+      </span>
+      <button
+        type="button"
+        onClick={() => {
+          updateSpec((s) => {
+            const next = { ...(s.parameters ?? {}) }
+            for (const p of fillable) if (isBlank(next[p.key])) next[p.key] = Array.isArray(p.example) ? [...p.example] : (p.example as string | boolean)
+            return { ...s, parameters: next }
+          })
+          for (const p of fillable) touch(`spec.parameters.${p.key}`)
+        }}
+        className="h-7 shrink-0 rounded-ctl border border-line-strong bg-surface px-2.5 text-[12.5px] font-medium text-bark hover:border-needle hover:text-needle"
+      >
+        Fill blanks with the example
+      </button>
+    </div>
   )
 }
 
@@ -234,6 +272,7 @@ export function ClaimSection() {
           <legend className="stretch-cond px-1 text-[13px] font-semibold">
             {policy.id} parameters
           </legend>
+          <ExampleFill />
           {policy.parameters.map((p) => (
             <ParamInput key={p.key} p={p} />
           ))}

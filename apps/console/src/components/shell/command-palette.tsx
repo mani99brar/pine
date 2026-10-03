@@ -1,7 +1,7 @@
 'use client'
 
 import * as React from 'react'
-import { Command } from 'cmdk'
+import { Command, defaultFilter } from 'cmdk'
 import { useRouter } from 'next/navigation'
 import {
   BookOpen,
@@ -60,8 +60,26 @@ function Item({
   )
 }
 
+/**
+ * Substring-first filter. cmdk's default fuzzy score matches scattered letters ("keeper" matched
+ * "webhooK rElay dElivers… Per subscribER"), which buries the claim you meant. Every word of the query
+ * must appear in the item's text or keywords; items whose title contains the whole phrase rank first.
+ * Only when nothing matches that way does a fuzzy score apply, and then at a low weight.
+ */
+function paletteFilter(value: string, search: string, keywords?: string[]) {
+  const q = search.trim().toLowerCase()
+  if (!q) return 1
+  const hay = `${value} ${(keywords ?? []).join(' ')}`.toLowerCase()
+  const words = q.split(/\s+/)
+  if (words.every((w) => hay.includes(w))) return value.toLowerCase().includes(q) ? 1 : 0.8
+  const fuzzy = defaultFilter ? defaultFilter(value, search, keywords) : 0
+  return fuzzy > 0.5 ? fuzzy * 0.1 : 0
+}
+
 const groupCls =
   'px-1.5 pb-1 [&_[cmdk-group-heading]]:stretch-cond [&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:text-[12px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted'
+
+const POLICY_TITLE: Record<string, string> = Object.fromEntries(POLICIES.map((p) => [p.id, p.title]))
 
 export function CommandPalette() {
   const router = useRouter()
@@ -110,6 +128,7 @@ export function CommandPalette() {
       onOpenChange={setPaletteOpen}
       label="Command palette"
       loop
+      filter={paletteFilter}
       overlayClassName="fixed inset-0 z-50 bg-scrim animate-fade-in"
       contentClassName="fixed left-1/2 top-[10vh] z-50 w-[min(640px,calc(100vw-20px))] -translate-x-1/2 overflow-hidden rounded-float border border-line bg-raised shadow-float animate-fade-in"
     >
@@ -280,7 +299,15 @@ export function CommandPalette() {
               <Item
                 key={c.id}
                 value={`claim ${formatClaimNumber(c.number)} ${c.title}`}
-                keywords={[c.source.owner, c.source.repo, c.policy.id, STATUS_META[c.status].label, c.source.commitSha.slice(0, 7)]}
+                keywords={[
+                  c.source.owner,
+                  c.source.repo,
+                  c.policy.id,
+                  POLICY_TITLE[c.policy.id] ?? '',
+                  STATUS_META[c.status].label,
+                  c.source.commitSha.slice(0, 7),
+                  c.source.prNumber ? `#${c.source.prNumber} ${c.source.prTitle ?? ''}` : '',
+                ]}
                 icon={<StatusDot status={c.status} outcome={c.outcome} />}
                 onSelect={() => go(`/claims/${c.id}`)}
                 hint={<span className="mono-cond text-[11px]">{c.source.repo}@{shortSha(c.source.commitSha)}</span>}
@@ -303,7 +330,7 @@ export function CommandPalette() {
 
         {repos.data?.items.length ? (
           <Command.Group heading="Repositories" className={groupCls}>
-            {repos.data.items.map((rp) => (
+            {repos.data.items.filter((rp) => !rp.private).map((rp) => (
               <Item
                 key={rp.id}
                 value={`repo ${rp.fullName}`}

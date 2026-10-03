@@ -61,6 +61,51 @@ function LimitMeter({ spend, limit, symbol }: { spend: number; limit: number; sy
   )
 }
 
+/**
+ * Percent input over a 0–1 value. Keeps the typed text while editing (so clearing the field or typing
+ * "25" over "15" works) and commits only in-range numbers; on blur it clamps or restores the value.
+ */
+function PercentInput({
+  value,
+  onCommit,
+  min,
+  max,
+  className,
+  ...rest
+}: {
+  value: number
+  onCommit: (percent: number) => void
+  min: number
+  max: number
+  className?: string
+} & Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'min' | 'max'>) {
+  const shown = String(Math.round(value * 1000) / 10)
+  const [text, setText] = React.useState<string | null>(null)
+  const parsed = text === null ? null : Number(text.replace(',', '.'))
+  const invalid = text !== null && (text.trim() === '' || !Number.isFinite(parsed) || parsed! < min || parsed! > max)
+  return (
+    <Input
+      {...rest}
+      inputMode="decimal"
+      className={cn('tnum', className)}
+      value={text ?? shown}
+      aria-invalid={invalid || undefined}
+      title={`Between ${min} and ${max}`}
+      onChange={(e) => {
+        const t = e.target.value
+        setText(t)
+        const n = Number(t.replace(',', '.'))
+        if (t.trim() !== '' && Number.isFinite(n) && n >= min && n <= max) onCommit(n)
+      }}
+      onBlur={(e) => {
+        if (text !== null && invalid && parsed !== null && Number.isFinite(parsed) && text.trim() !== '') onCommit(Math.min(max, Math.max(min, parsed)))
+        setText(null)
+        rest.onBlur?.(e)
+      }}
+    />
+  )
+}
+
 export function FundingSection() {
   const { c, err, touch } = useComposerCtx()
   const f = c.fundingInput
@@ -69,7 +114,6 @@ export function FundingSection() {
   const sym = plan?.collateral.symbol ?? chain.collateral.symbol
   const frozen = c.fundingFrozen
   const setF = (patch: Partial<typeof f>) => c.update((d) => ({ ...d, funding: { ...d.funding, ...patch } }))
-  const pct = (n: number) => String(Math.round(n * 1000) / 10)
   return (
     <Section
       id="funding"
@@ -86,45 +130,39 @@ export function FundingSection() {
         </Field>
         <Field label="Initial YES price (%)" htmlFor={fieldId('funding.initialYesPrice')} error={err('funding.initialYesPrice')} hint="Where liquidity is centered. It is your starting estimate, not a claim about the code.">
           <div className="flex items-center gap-3">
-            <Input
+            <PercentInput
               id={fieldId('funding.initialYesPrice')}
-              inputMode="decimal"
-              className="tnum w-24"
-              value={pct(f.initialYesPrice)}
+              className="w-20"
+              value={f.initialYesPrice}
+              min={1}
+              max={99}
               disabled={frozen}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) setF({ initialYesPrice: Math.min(99, Math.max(1, n)) / 100 })
-              }}
+              onCommit={(n) => setF({ initialYesPrice: n / 100 })}
             />
-            <PriceGauge value={f.initialYesPrice} width={180} showScale />
+            <PriceGauge value={f.initialYesPrice} width={108} showScale />
           </div>
         </Field>
         <Field label="Price range (%)" htmlFor={fieldId('funding.priceRange')} error={err('funding.priceRange')} hint="Concentrated liquidity band. Narrow bands deepen the book but can leave you holding one outcome.">
           <div className="flex items-center gap-2">
-            <Input
+            <PercentInput
               id={fieldId('funding.priceRange')}
               aria-label="Lower bound percent"
-              inputMode="decimal"
-              className="tnum w-20"
-              value={pct(f.priceRange[0])}
+              className="w-20"
+              value={f.priceRange[0]}
+              min={0.1}
+              max={99.8}
               disabled={frozen}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) setF({ priceRange: [Math.max(0.1, n) / 100, f.priceRange[1]] })
-              }}
+              onCommit={(n) => setF({ priceRange: [n / 100, f.priceRange[1]] })}
             />
             <span className="text-muted">to</span>
-            <Input
+            <PercentInput
               aria-label="Upper bound percent"
-              inputMode="decimal"
-              className="tnum w-20"
-              value={pct(f.priceRange[1])}
+              className="w-20"
+              value={f.priceRange[1]}
+              min={0.2}
+              max={99.9}
               disabled={frozen}
-              onChange={(e) => {
-                const n = Number(e.target.value)
-                if (Number.isFinite(n)) setF({ priceRange: [f.priceRange[0], Math.min(99.9, n) / 100] })
-              }}
+              onCommit={(n) => setF({ priceRange: [f.priceRange[0], n / 100] })}
             />
           </div>
         </Field>
@@ -133,7 +171,7 @@ export function FundingSection() {
       {plan ? (
         <>
           <LimitMeter spend={Number(plan.totals.maxSpend)} limit={Number(plan.input.spendingLimit) || 0} symbol={sym} />
-          <ul className="divide-y divide-line rounded-ctl border border-line sm:hidden" aria-label="Cost breakdown">
+          <ul className="divide-y divide-line rounded-ctl border border-line" aria-label="Cost breakdown">
             {plan.costs.map((cl) => (
               <li key={cl.key} className="px-3 py-2.5 text-[13px]">
                 <div className="flex items-baseline justify-between gap-3">
@@ -146,44 +184,12 @@ export function FundingSection() {
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-[12px] text-muted">
                   <span className={cn('rounded-chip border px-1.5 text-[11.5px]', KIND[cl.kind].cls)}>{KIND[cl.kind].label}</span>
                   <span>paid by {cl.payer === 'you' ? 'you' : cl.payer}</span>
-                  {!cl.countsTowardLimit ? <span>outside limit</span> : null}
+                  {!cl.countsTowardLimit ? <span>outside your spending limit</span> : null}
                 </div>
                 <p className="mt-1 text-[12px] text-muted">{cl.note}</p>
               </li>
             ))}
           </ul>
-          <div className="scrollbar-thin relative hidden overflow-x-auto rounded-ctl border border-line sm:block">
-            <table className="w-full min-w-[640px] text-[13px]">
-              <caption className="sr-only">Cost breakdown</caption>
-              <thead>
-                <tr className="stretch-cond border-b border-line bg-sunken text-left text-[12px] text-muted">
-                  <th className="px-3 py-1.5 font-medium">Cost</th>
-                  <th className="px-3 py-1.5 font-medium">Kind</th>
-                  <th className="px-3 py-1.5 font-medium">Paid by</th>
-                  <th className="px-3 py-1.5 text-right font-medium">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {plan.costs.map((cl) => (
-                  <tr key={cl.key} className="border-b border-line align-top last:border-0">
-                    <td className="px-3 py-2">
-                      <span className="font-medium">{cl.label}</span>
-                      <p className="text-[12px] text-muted">{cl.note}</p>
-                    </td>
-                    <td className="px-3 py-2">
-                      <span className={cn('whitespace-nowrap rounded-chip border px-1.5 text-[11.5px]', KIND[cl.kind].cls)}>{KIND[cl.kind].label}</span>
-                    </td>
-                    <td className="px-3 py-2 text-muted">{cl.payer === 'you' ? 'You' : cl.payer}</td>
-                    <td className="tnum whitespace-nowrap px-3 py-2 text-right">
-                      {cl.estimate ? <span className="text-muted">~</span> : null}
-                      {formatAmount(cl.amount, { symbol: cl.currency, maxDecimals: 5 })}
-                      {!cl.countsTowardLimit ? <span className="block text-[11px] text-muted">outside limit</span> : null}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
           <DataList
             className="rounded-ctl border border-line"
             labelWidth="13rem"
@@ -307,7 +313,15 @@ export function ReviewSection({ publish, onFocusProblem }: { publish: PublishCla
             <Wallet size={14} aria-hidden /> Connect wallet to publish
           </Button>
         ) : null}
-        {!started ? (
+        {!started && c.frozen ? (
+          <Callout tone="frozen" title="This claim already has a market">
+            Its terms froze when the market was created, so publishing again would create a second market. Finish the remaining steps from the publish log, or from{' '}
+            <Link href="/drafts" className="text-needle hover:underline">
+              Drafts and publications
+            </Link>
+            .
+          </Callout>
+        ) : !started ? (
           <Button
             variant="primary"
             size="lg"

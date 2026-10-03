@@ -59,6 +59,28 @@ function ManualStep({ step, runner }: { step: TxRunnerStep; runner: TxRunner }) 
   )
 }
 
+/** Two-step reset: the first click asks, the second forgets local progress. */
+function ResetButton({ onReset }: { onReset: () => void }) {
+  const [asking, setAsking] = React.useState(false)
+  if (!asking)
+    return (
+      <Button variant="quiet" size="sm" onClick={() => setAsking(true)} title="Forget local progress. Confirmed transactions stay on-chain.">
+        Reset log
+      </Button>
+    )
+  return (
+    <span className="flex items-center gap-1.5 text-[12px] text-muted">
+      Forget local progress? Confirmed transactions stay on-chain.
+      <Button variant="danger" size="xs" onClick={onReset}>
+        Reset
+      </Button>
+      <Button variant="quiet" size="xs" onClick={() => setAsking(false)}>
+        Keep
+      </Button>
+    </span>
+  )
+}
+
 /**
  * Terminal-like transaction log. One line per step with status glyph, cost estimate, tx hash and
  * inline retry. Shows a frozen-terms marker once a `freezesTerms` step confirms.
@@ -147,6 +169,11 @@ export function TxLog({
         })}
       </ol>
       {runner.error ? <p className="border-t border-line bg-flare-soft px-3 py-2 text-[12.5px] text-flare">{runner.error}</p> : null}
+      {runner.state === 'failed' && frozenAt ? (
+        <p className="border-t border-line bg-surface px-3 py-2 font-sans text-[12px] text-muted">
+          The market already exists on-chain, so this run cannot start over. Retry the failed step now, or come back later: Drafts and publications keeps this run and resumes it from the same step.
+        </p>
+      ) : null}
       {controls ? (
         <div className="flex flex-wrap items-center gap-2 border-t border-line bg-surface px-3 py-2">
           {runner.limit ? (
@@ -158,9 +185,9 @@ export function TxLog({
           <span className="ml-auto" />
           {runner.state === 'failed' ? (
             <>
-              <Button variant="quiet" size="sm" onClick={() => runner.reset()} title="Forget local progress. Confirmed transactions stay on-chain.">
-                Reset log
-              </Button>
+              {/* Once a terms-freezing step (create_market) has confirmed, forgetting progress would let the
+                  same claim publish a second market, so only retry is offered from then on. */}
+              {frozenAt ? null : <ResetButton onReset={() => runner.reset()} />}
               <Button variant="primary" size="sm" onClick={() => void runner.retry()}>
                 <RotateCcw size={13} aria-hidden /> Retry step
               </Button>

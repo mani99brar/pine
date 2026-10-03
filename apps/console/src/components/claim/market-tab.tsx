@@ -206,7 +206,7 @@ function ImpactCalculator({ depth, symbol, outcome }: { depth: NonNullable<Retur
         />
         <div className="min-w-[140px] flex-1">
           <label htmlFor={id} className="stretch-cond mb-1 block text-[12.5px] text-muted">
-            Amount ({symbol})
+            {side === 'buy' ? `Spend (${symbol})` : `Receive (${symbol})`}
           </label>
           <Input id={id} inputMode="decimal" value={amount} onChange={(e) => setAmount(e.target.value)} aria-invalid={!valid && amount !== ''} className="tnum" />
         </div>
@@ -219,9 +219,11 @@ function ImpactCalculator({ depth, symbol, outcome }: { depth: NonNullable<Retur
           <dd className="tnum text-right font-semibold">{formatPrice(r.avgPrice)}</dd>
           <dt className="text-muted">Worst level touched</dt>
           <dd className="tnum text-right">{formatPrice(r.worstPrice)}</dd>
-          <dt className="text-muted">Price impact</dt>
-          <dd className={cn('tnum text-right font-semibold', r.impact > 0.05 && 'text-resin')}>{(r.impact * 100).toFixed(2)}%</dd>
-          <dt className="text-muted">Tokens received</dt>
+          <dt className="text-muted" title="How far the average fill is from the mid price, relative to the mid price">
+            Price impact, relative to mid
+          </dt>
+          <dd className={cn('tnum text-right font-semibold', r.impact > 0.05 && 'text-resin')}>{(r.impact * 100).toFixed(1)}%</dd>
+          <dt className="text-muted">{side === 'buy' ? 'Tokens received' : 'Tokens sold'}</dt>
           <dd className="tnum text-right">{r.tokens.toLocaleString('en-US', { maximumFractionDigits: 2 })}</dd>
           <dt className="text-muted">Executable now</dt>
           <dd className="text-right">

@@ -26,13 +26,13 @@ export function Callout({
 }) {
   const t = tones[tone]
   return (
-    <div className={cn('flex gap-2.5 rounded-ctl border px-3 py-2.5 text-[13px] leading-[1.5]', t.box, className)} role={tone === 'critical' ? 'alert' : undefined}>
+    <div className={cn('flex flex-wrap gap-x-2.5 gap-y-2 rounded-ctl border px-3 py-2.5 text-[13px] leading-[1.5]', t.box, className)} role={tone === 'critical' ? 'alert' : undefined}>
       <span className="mt-0.5 shrink-0">{t.icon}</span>
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-[200px]">
         {title ? <p className="font-semibold">{title}</p> : null}
         {children ? <div className={cn(title && 'mt-0.5', 'text-muted [&_strong]:text-bark')}>{children}</div> : null}
       </div>
-      {action ? <div className="shrink-0 self-center">{action}</div> : null}
+      {action ? <div className="ml-auto shrink-0 self-center">{action}</div> : null}
     </div>
   )
 }

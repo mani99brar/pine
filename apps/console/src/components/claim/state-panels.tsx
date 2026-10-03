@@ -8,12 +8,26 @@ import type { ClaimDetail, FundingInput, TxStep } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { OUTCOME_META, buildPublishSteps, formatAmount, formatDate, nextStep, timeRemaining } from '@pine/core'
 import { prepareStepWithMarket } from '@pine/core'
-import { pineKeys, usePine, usePortfolio, useRedeem, useTxRunner, useWallet } from '@pine/react'
+import { pineKeys, useDrafts, usePine, usePortfolio, useRedeem, useTxRunner, useWallet } from '@pine/react'
 import { cn } from '@/lib/cn'
+import { useAccountSafe } from '@/lib/hooks'
+import { Input } from '@/components/ui/field'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { TxLog } from '@/components/ui/tx-log'
 import { StatusDot } from './status'
+
+/** Plain names for publication steps (the ids are shown alongside, as the bytes the indexer reports). */
+const STEP_NAME: Partial<Record<string, string>> = {
+  upload_manifest: 'Pin the claim manifest',
+  create_market: 'Create the Seer market',
+  approve_collateral: 'Approve the exact collateral',
+  split_position: 'Split collateral into outcome tokens',
+  add_liquidity_yes: 'Add Yes liquidity',
+  add_liquidity_no: 'Add No liquidity',
+  register_claim: 'Register the claim',
+}
+const stepName = (id: string) => STEP_NAME[id] ?? id
 
 /** The outcome, reported plainly. YES is alarm (flare), NO is held (slate), invalid is violet. */
 export function OutcomePanel({ claim }: { claim: ClaimDetail }) {
@@ -36,10 +50,14 @@ export function OutcomePanel({ claim }: { claim: ClaimDetail }) {
           <p className="text-[13px] text-muted">Final outcome</p>
           <p className="stretch-wide text-xl font-[650] leading-tight">{meta.label}</p>
           <p className="mt-1 max-w-[80ch] text-[13.5px] text-bark">{meta.long}</p>
-          {tone === 'no' ? <p className="mt-1 max-w-[80ch] text-[13px] text-muted">{COPY.noIsNotSafety}</p> : null}
+          {tone === 'no' ? (
+            <p className="mt-1 max-w-[80ch] text-[13px] text-muted">
+              It means no qualifying counterexample arrived before the deadline under the published rules, not that the code is fit for production. {COPY.lateEvidence}
+            </p>
+          ) : null}
           {tone === 'invalid' ? (
             <p className="mt-1 max-w-[80ch] text-[13px] text-muted">
-              Only the Invalid result token redeems; Yes and No tokens pay nothing. {COPY.invalidIsNotRefund}
+              Holders of Invalid-result tokens can redeem them under My position on this page. Yes and No tokens are worth nothing.
             </p>
           ) : null}
           {tone === 'yes' ? (
@@ -68,7 +86,10 @@ export function NextStepCard({ claim, now }: { claim: ClaimDetail; now: Date }) 
     <div className="px-4 py-4">
       <p className="stretch-cond text-[12.5px] text-muted">Next step</p>
       <p className="mt-1 text-[14.5px] font-semibold leading-snug">{s.title}</p>
-      <p className="mt-1 text-[13px] text-muted">{s.detail}</p>
+      <p className="mt-1 text-[13px] text-muted">
+        {/* The failed banner already explains what happened; the rail says what is left to do. */}
+        {claim.status === 'failed' ? 'Nothing else happens on this claim. To verify the same commit, start a new verification with a new deadline.' : s.detail}
+      </p>
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
         <span className="rounded-chip border border-line px-1.5 text-muted">{ACTOR[s.actor]}</span>
         {s.at && rem ? (
@@ -91,7 +112,7 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
   const sym = claim.collateralSymbol
   if (!wallet.isConnected) {
     return (
-      <div className="px-4 py-4">
+      <div id="position" className="scroll-mt-16 px-4 py-4">
         <p className="stretch-cond text-[12.5px] text-muted">My position</p>
         <p className="mt-1 text-[13px] text-muted">Connect a wallet to see your outcome tokens and liquidity on this claim.</p>
         <Button variant="secondary" size="sm" className="mt-2" onClick={() => wallet.connect()}>
@@ -101,7 +122,7 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
     )
   }
   return (
-    <div className="px-4 py-4">
+    <div id="position" className="scroll-mt-16 px-4 py-4">
       <p className="stretch-cond text-[12.5px] text-muted">My position</p>
       {portfolio.isLoading ? (
         <p className="mt-1 text-[13px] text-muted">Loading…</p>
@@ -134,7 +155,7 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
           ))}
         </ul>
       )}
-      {redeemable ? <RedeemControl claim={claim} /> : null}
+      {redeemable ? <RedeemControl claim={claim} /> : <RedeemReceipt claim={claim} />}
       {lps.length ? <p className="mt-2 text-[11.5px] text-muted">LP positions stay withdrawable on the DEX. Withdrawing returns their current value, which can be below what was deposited.</p> : null}
     </div>
   )
@@ -142,16 +163,37 @@ export function PositionPanel({ claim }: { claim: ClaimDetail }) {
 
 function RedeemControl({ claim }: { claim: ClaimDetail }) {
   const { runner, redeemable } = useRedeem(claim.id)
-  const [open, setOpen] = React.useState(false)
+  const started = runner.steps.some((s) => s.status !== 'idle')
+  const gas = runner.steps[0]?.estimatedCost
   return (
     <div className="mt-3">
-      {!open ? (
-        <Button variant="primary" size="sm" onClick={() => setOpen(true)}>
-          Redeem {formatAmount(redeemable, { symbol: claim.collateralSymbol })}
-        </Button>
+      {!started ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          {/* One click opens the wallet prompt; the cost is shown before it. */}
+          <Button variant="primary" size="sm" onClick={() => void runner.start()} disabled={!runner.hydrated}>
+            Redeem {formatAmount(redeemable, { symbol: claim.collateralSymbol })}
+          </Button>
+          {gas ? (
+            <span className="tnum text-[11.5px] text-muted">
+              one transaction, about {formatAmount(gas.amount, { symbol: gas.currency, maxDecimals: 5 })} gas
+            </span>
+          ) : null}
+        </div>
       ) : (
         <TxLog runner={runner} title="Redeem" startLabel="Redeem" compact />
       )}
+    </div>
+  )
+}
+
+/** After a redemption confirms the position disappears, so keep the receipt visible as confirmation. */
+function RedeemReceipt({ claim }: { claim: ClaimDetail }) {
+  const { runner } = useRedeem(claim.id)
+  if (runner.state !== 'done') return null
+  return (
+    <div className="mt-3 space-y-2">
+      <p className="text-[13px] font-medium text-needle">Redeemed. The collateral is back in your wallet.</p>
+      {runner.steps.length ? <TxLog runner={runner} title="Redeem" compact controls={false} /> : null}
     </div>
   )
 }
@@ -190,14 +232,40 @@ function useRecoverySteps(claim: ClaimDetail): TxStep[] {
   }, [claim])
 }
 
+const LIMIT_RE = /^\d+(\.\d+)?$/
+const validLimit = (v: string | undefined): v is string => !!v && LIMIT_RE.test(v.trim()) && Number(v) > 0
+
+/**
+ * The spending limit for finishing a publication. The tx runner turns limit enforcement off when it gets
+ * undefined, so this never returns undefined: claim funding first, then the account default, then a local
+ * draft for the same claim. With none of those the caller must ask for one before any wallet prompt.
+ */
+function useRecoveryLimit(claim: ClaimDetail): { limit: string | undefined; source: string } {
+  const { account } = useAccountSafe()
+  const { drafts } = useDrafts()
+  const fromClaim = claim.funding?.spendingLimit
+  if (validLimit(fromClaim)) return { limit: fromClaim, source: 'the limit set when this claim was published' }
+  const fromAccount = account?.preferences?.defaultSpendingLimit
+  if (validLimit(fromAccount)) return { limit: fromAccount, source: 'your default spending limit in Settings' }
+  const draft = drafts.find((d) => d.publication?.claimId === claim.id)
+  const fromDraft = draft?.funding?.spendingLimit
+  if (validLimit(fromDraft)) return { limit: fromDraft, source: 'the limit on your draft' }
+  return { limit: undefined, source: '' }
+}
+
 /** "Finish publishing": resumes a partially published claim from the first incomplete step. */
 export function RecoveryPanel({ claim }: { claim: ClaimDetail }) {
   const { data } = usePine()
   const qc = useQueryClient()
   const wallet = useWallet()
   const steps = useRecoverySteps(claim)
+  const resolved = useRecoveryLimit(claim)
+  const [typed, setTyped] = React.useState('')
+  const [chosen, setChosen] = React.useState<string | undefined>(undefined)
+  const limit = resolved.limit ?? chosen
   const runner = useTxRunner(`recover:${claim.id}`, steps, {
-    spendingLimit: claim.funding?.spendingLimit,
+    // Never undefined: "0" blocks every step until a real limit exists (the log is not shown without one).
+    spendingLimit: limit ?? '0',
     onDone: async () => {
       const writer = data as unknown as { updateClaim?: (id: string, patch: Partial<ClaimDetail>) => void }
       writer.updateClaim?.(claim.id, { status: 'open', publication: undefined })
@@ -224,8 +292,9 @@ export function RecoveryPanel({ claim }: { claim: ClaimDetail }) {
                 <span className={cn('mono-cond w-3 text-center', s.status === 'confirmed' ? 'text-needle' : s.status === 'failed' ? 'text-flare' : 'text-faint')} aria-hidden>
                   {s.status === 'confirmed' ? '✓' : s.status === 'failed' ? '✕' : '·'}
                 </span>
-                <span className="mono-cond text-[11.5px]">{s.id}</span>
-                <span className="text-muted">{s.status}</span>
+                <span>{stepName(s.id)}</span>
+                <span className="mono-cond text-[10.5px] text-faint">{s.id}</span>
+                <span className={cn(s.status === 'failed' ? 'text-flare' : 'text-muted')}>{s.status}</span>
                 {s.error ? <span className="wrap-anywhere text-flare">{s.error}</span> : null}
               </li>
             ))}
@@ -242,8 +311,48 @@ export function RecoveryPanel({ claim }: { claim: ClaimDetail }) {
                 Connect wallet
               </Button>
             </div>
+          ) : steps.length && !limit ? (
+            <form
+              className="rounded-ctl border border-line bg-surface p-3 text-[13px]"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (validLimit(typed)) setChosen(typed.trim())
+              }}
+            >
+              <p className="font-medium">Set a spending limit to resume</p>
+              <p className="mt-0.5 text-[12.5px] text-muted">
+                No spending limit is recorded for this claim or your account. Every remaining step is checked against it before your wallet is asked to sign.
+              </p>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <label htmlFor="recover-limit" className="sr-only">
+                  Spending limit ({claim.collateralSymbol})
+                </label>
+                <Input
+                  id="recover-limit"
+                  inputMode="decimal"
+                  className="tnum w-32"
+                  value={typed}
+                  placeholder={`e.g. ${claim.funding?.liquidity ?? claim.liquidity}`}
+                  aria-invalid={(typed !== '' && !validLimit(typed)) || undefined}
+                  onChange={(e) => setTyped(e.target.value)}
+                />
+                <span className="text-[12px] text-muted">{claim.collateralSymbol}</span>
+                <Button type="submit" variant="primary" size="sm" disabled={!validLimit(typed)}>
+                  Use this limit
+                </Button>
+                <Link href="/settings#preferences" className="text-[12px] text-needle hover:underline">
+                  Or set a default in Settings
+                </Link>
+              </div>
+            </form>
           ) : steps.length ? (
-            <TxLog runner={runner} title="Remaining steps" startLabel="Resume publishing" compact />
+            <div className="space-y-1.5">
+              <TxLog runner={runner} title="Remaining steps" startLabel="Resume publishing" compact />
+              <p className="text-[11.5px] text-muted">
+                Checked against a {formatAmount(limit!, { symbol: claim.collateralSymbol })} spending limit
+                {resolved.limit ? `, ${resolved.source}` : ', set above'}.
+              </p>
+            </div>
           ) : (
             <p className="text-[13px] text-muted">No remaining steps could be rebuilt for this claim.</p>
           )}
@@ -267,7 +376,7 @@ export function FailedPanel({ claim }: { claim: ClaimDetail }) {
       <p className="mt-1 max-w-[80ch] text-[13.5px]">
         {claim.publication?.note ?? 'A required step failed in a way that cannot be retried.'}{' '}
         {confirmed.length
-          ? `Completed before the failure: ${confirmed.map((s) => s.id).join(', ')}.`
+          ? `Completed before the failure: ${confirmed.map((s) => stepName(s.id).toLowerCase()).join(', ')}.`
           : 'No step completed, so nothing was spent beyond any failed transaction gas.'}
       </p>
       <div className="mt-3 flex flex-wrap gap-2">

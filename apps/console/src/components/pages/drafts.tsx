@@ -6,8 +6,9 @@ import { Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ClaimDraft } from '@pine/core'
 import { formatClaimNumber, formatRelative, shortSha } from '@pine/core'
-import { useAccount, useClaims, useDrafts, useWallet } from '@pine/react'
+import { useClaims, useDrafts, useWallet } from '@pine/react'
 import { cn } from '@/lib/cn'
+import { useAccountSafe } from '@/lib/hooks'
 import { Button } from '@/components/ui/button'
 import { EmptyState } from '@/components/ui/empty-state'
 import { PageHeader } from '@/components/ui/page-header'
@@ -44,7 +45,7 @@ function PublicationTicks({ d }: { d: ClaimDraft }) {
 export function Drafts() {
   const { drafts, remove, isLoading } = useDrafts()
   const wallet = useWallet()
-  const { account } = useAccount()
+  const { account } = useAccountSafe()
   const claims = useClaims({ status: ['publishing', 'failed'], limit: 50 })
   const sorted = [...drafts].sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
   const inProgress = sorted.filter((d) => d.publication?.steps?.some((s) => s.status !== 'idle'))

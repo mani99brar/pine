@@ -23,6 +23,7 @@ const GROUPS: { id: string; label: string; types?: ActivityType[] }[] = [
 export function Activity() {
   const wallet = useWallet()
   const [group, setGroup] = React.useState('all')
+  const [shown, setShown] = React.useState(50)
   const g = GROUPS.find((x) => x.id === group)!
   const q = useActivity({ account: wallet.address, types: g.types, limit: 200 })
   const portfolio = usePortfolio(wallet.address)
@@ -73,7 +74,10 @@ export function Activity() {
               key={x.id}
               type="button"
               aria-pressed={group === x.id}
-              onClick={() => setGroup(x.id)}
+              onClick={() => {
+                setGroup(x.id)
+                setShown(50)
+              }}
               className={cn('h-7 shrink-0 rounded-ctl px-2.5 text-[13px] text-muted hover:bg-sunken hover:text-bark', group === x.id && 'bg-sunken font-medium text-bark')}
             >
               {x.label}
@@ -91,7 +95,19 @@ export function Activity() {
             Publishing, trading, evidence and redemptions are recorded here with explorer links as soon as they are indexed.
           </EmptyState>
         ) : (
-          <ActivityTable items={q.data!.items} showClaim />
+          <>
+            <ActivityTable items={q.data!.items.slice(0, shown)} showClaim />
+            <div className="flex flex-wrap items-center gap-3 border-t border-line px-4 py-3 text-[12.5px] text-muted sm:px-6">
+              <span className="tnum">
+                Showing {Math.min(shown, q.data!.items.length)} of {q.data!.items.length}
+              </span>
+              {q.data!.items.length > shown ? (
+                <Button variant="secondary" size="sm" onClick={() => setShown((n) => n + 50)}>
+                  Show {Math.min(50, q.data!.items.length - shown)} more
+                </Button>
+              ) : null}
+            </div>
+          </>
         )}
       </div>
     </div>

@@ -72,7 +72,7 @@ export function EvidenceItem({ e, defaultOpen }: { e: Evidence; defaultOpen?: bo
           <p className="mt-0.5 text-[12px] text-muted">
             <span className="mono-cond text-[11px]">{shortHash(e.submitter)}</span>
             <span className="mx-1.5 text-faint">/</span>
-            block {e.blockNumber.toLocaleString('en-US')}
+            {e.blockNumber > 0 ? `block ${e.blockNumber.toLocaleString('en-US')}` : 'block pending'}
             <span className="mx-1.5 text-faint">/</span>
             <span className="tnum">{formatDate(e.submittedAt, 'utc')}</span>
           </p>

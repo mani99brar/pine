@@ -12,9 +12,10 @@ import { ExternalLink } from '@/components/ui/external-link'
 import { HashChip } from '@/components/ui/hash-chip'
 
 const ANSWER: Record<RealityAnswer, { label: string; cls: string }> = {
-  yes: { label: 'Yes (counterexample demonstrated)', cls: 'text-flare' },
-  no: { label: 'No (no qualifying counterexample)', cls: 'text-slate' },
-  invalid: { label: 'Invalid', cls: 'text-violet' },
+  // Outcome words come from the canonical copy so the oracle tab says exactly what the outcome banner says.
+  yes: { label: `Yes: ${COPY.outcome.yes}`, cls: 'text-flare' },
+  no: { label: `No: ${COPY.outcome.no}`, cls: 'text-slate' },
+  invalid: { label: 'Invalid result', cls: 'text-violet' },
   too_soon: { label: 'Answered too soon', cls: 'text-resin' },
 }
 

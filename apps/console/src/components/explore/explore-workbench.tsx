@@ -8,11 +8,11 @@ import { ArrowDown, ArrowUp, Bookmark, PanelRightClose, PanelRightOpen, Search, 
 import type { ClaimSummary } from '@pine/core'
 import { POLICIES, formatAmount, formatClaimNumber, formatDate, formatPrice, shortSha, timeRemaining } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { useAccount, useClaims, useWallet } from '@pine/react'
+import { useClaims, useWallet } from '@pine/react'
 import { cn } from '@/lib/cn'
 import { useKeys } from '@/lib/use-keys'
 import { useNowTick } from '@/lib/use-now'
-import { useLocalStorageState } from '@/lib/hooks'
+import { useAccountSafe, useLocalStorageState } from '@/lib/hooks'
 import { BUILT_IN_VIEWS, sortClaims, type ExploreFilters, type SortKey } from '@/lib/views'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/field'
@@ -43,7 +43,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
   const tableRef = React.useRef<HTMLTableSectionElement>(null)
   const now = useNowTick(30_000)
   const wallet = useWallet()
-  const { account } = useAccount()
+  const { account } = useAccountSafe()
 
   // Keep the URL shareable without a navigation.
   React.useEffect(() => {
@@ -223,7 +223,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
               aria-label="Filter claims"
               className="pl-8 pr-8"
             />
-            <Kbd className="absolute right-2 top-1/2 -translate-y-1/2">/</Kbd>
+            <Kbd className="absolute right-2 top-1/2 hidden -translate-y-1/2 sm:inline-flex">/</Kbd>
           </div>
           <Select value={f.policy} onChange={(e) => set({ policy: e.target.value })} aria-label="Policy" className="w-auto min-w-[120px]">
             <option value="">All policies</option>
@@ -277,6 +277,22 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
             </EmptyState>
           ) : all.isLoading ? (
             <SkeletonRows rows={9} />
+          ) : rows.length === 0 && baseView.id === 'mine' && !filtersActive && !wallet.address && !account ? (
+            <EmptyState
+              title="Mine shows the claims you created"
+              action={
+                <>
+                  <Button variant="primary" onClick={() => wallet.connect()}>
+                    Connect wallet
+                  </Button>
+                  <Button asChild variant="ghost">
+                    <Link href="/settings">Sign in with GitHub</Link>
+                  </Button>
+                </>
+              }
+            >
+              Claims created by your connected wallet or your GitHub account appear here. Connect a wallet or sign in to see yours.
+            </EmptyState>
           ) : rows.length === 0 ? (
             <EmptyState
               title={items.length === 0 ? 'No claims published yet' : 'No claims match this view'}
@@ -303,6 +319,7 @@ export function ExploreWorkbench({ initial }: { initial: ExploreFilters }) {
             </EmptyState>
           ) : (
             <>
+            <p className="border-b border-line bg-frost px-4 py-1.5 text-[11.5px] text-muted md:hidden">YES = {COPY.priceLabel.toLowerCase()}. Not a probability that bugs exist.</p>
             <ul className="divide-y divide-line md:hidden" aria-label="Claims">
               {rows.map((c, i) => (
                 <MobileClaimRow key={c.id} c={c} now={now} selected={i === selected} />
@@ -442,7 +459,16 @@ function MobileClaimRow({ c, now, selected }: { c: ClaimSummary; now: Date; sele
           </span>
         </span>
         <span className="flex flex-col items-end gap-1">
-          <span className="tnum text-[15px] font-semibold">{typeof c.yesPrice === 'number' ? formatPrice(c.yesPrice) : ''}</span>
+          <span className="tnum text-[15px] font-semibold">
+            {typeof c.yesPrice === 'number' ? (
+              <>
+                <span className="mr-1 text-[10.5px] font-medium text-muted">YES</span>
+                {formatPrice(c.yesPrice)}
+              </>
+            ) : (
+              ''
+            )}
+          </span>
           {typeof c.yesPrice === 'number' ? <RowSparkline id={c.id} width={56} height={16} /> : <span className="text-[11.5px] text-faint">No market</span>}
           <span className="tnum text-[11px] text-muted">{Number(c.liquidity) > 0 ? formatAmount(c.liquidity, { symbol: c.collateralSymbol, compact: true }) : ''}</span>
         </span>

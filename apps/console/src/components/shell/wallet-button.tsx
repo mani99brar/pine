@@ -16,7 +16,7 @@ export function WalletButton({ compact }: { compact?: boolean }) {
     return (
       <Button variant="secondary" size="sm" onClick={() => w.connect()} aria-label="Connect wallet">
         <Wallet size={14} aria-hidden />
-        {!compact ? <span>{w.isDemo || demo.enabled ? 'Connect demo wallet' : 'Connect wallet'}</span> : null}
+        <span className={compact ? 'hidden xl:inline' : undefined}>{w.isDemo || demo.enabled ? 'Connect demo wallet' : 'Connect wallet'}</span>
       </Button>
     )
   }

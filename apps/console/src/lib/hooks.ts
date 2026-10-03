@@ -1,6 +1,7 @@
 'use client'
 
 import * as React from 'react'
+import { useAccount } from '@pine/react'
 
 const noopSubscribe = () => () => {}
 
@@ -104,4 +105,17 @@ export function useSecondClock(): number | null {
     () => Math.floor(Date.now() / 1000) * 1000,
     () => null,
   )
+}
+
+// --- account ---------------------------------------------------------------
+
+/**
+ * `useAccount` from @pine/react, made hydration-safe. The package seeds the account query with a
+ * localStorage mirror as placeholder data, so the first client render can say "signed in" while the
+ * server rendered "loading". Until hydration completes this reports loading, exactly like the server.
+ */
+export function useAccountSafe(): ReturnType<typeof useAccount> {
+  const acc = useAccount()
+  const isClient = useIsClient()
+  return isClient ? acc : { ...acc, status: 'loading', account: null }
 }

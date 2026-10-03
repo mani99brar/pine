@@ -2,9 +2,9 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Menu, Plus, Search, Table2 } from 'lucide-react'
+import { LayoutDashboard, Menu, Plus, Search, Table2, X } from 'lucide-react'
 import { cn } from '@/lib/cn'
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogClose, DialogContent } from '@/components/ui/dialog'
 import { useWorkbench } from './workbench'
 import { NavList, Brand } from './sidebar'
 import { AccountChip } from './account'
@@ -57,7 +57,12 @@ export function MobileNav() {
           <div className="flex h-full flex-col">
             <div className="flex h-12 items-center justify-between border-b border-line px-4">
               <Brand />
-              <ThemeToggle />
+              <span className="flex items-center gap-1">
+                <ThemeToggle />
+                <DialogClose className="flex size-7 items-center justify-center rounded-ctl text-muted hover:bg-sunken hover:text-bark" aria-label="Close navigation">
+                  <X size={16} aria-hidden />
+                </DialogClose>
+              </span>
             </div>
             <div className="flex-1 overflow-y-auto p-3">
               <NavList onNavigate={() => setMobileNavOpen(false)} showKeys={false} />

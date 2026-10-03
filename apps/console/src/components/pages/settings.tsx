@@ -7,8 +7,9 @@ import type { AccountPreferences } from '@pine/core'
 import { formatDate, shortHash } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { CHAINS, SUPPORTED_CHAIN_IDS } from '@pine/core/chains'
-import { useAccount, useAccountData, useDemoWallet, useLinkWallet, useUpdatePreferences, useWallet } from '@pine/react'
+import { useAccountData, useDemoWallet, useLinkWallet, useUpdatePreferences, useWallet } from '@pine/react'
 import { cn } from '@/lib/cn'
+import { useAccountSafe } from '@/lib/hooks'
 import { Button } from '@/components/ui/button'
 import { Callout } from '@/components/ui/callout'
 import { Field, Input, Segmented, Select, Switch } from '@/components/ui/field'
@@ -39,7 +40,7 @@ function Block({ id, title, description, children }: { id: string; title: string
 }
 
 export function Settings() {
-  const acc = useAccount()
+  const acc = useAccountSafe()
   const wallet = useWallet()
   const demo = useDemoWallet()
   const link = useLinkWallet()
@@ -201,13 +202,14 @@ export function Settings() {
                     ))}
                   </Select>
                 </Field>
-                <Field label={`Default spending limit (${CHAINS[p.defaultChainId]?.collateral.symbol ?? 'collateral'})`} htmlFor="pref-limit" hint={COPY.spendingLimit}>
-                  <LimitInput key={p.defaultSpendingLimit} value={p.defaultSpendingLimit} onSave={(v) => save({ defaultSpendingLimit: v })} />
-                </Field>
-                <Field label="Notification email" htmlFor="pref-email" hint="Optional. Used only for the alerts below.">
-                  <EmailInput key={p.notificationEmail ?? ''} value={p.notificationEmail ?? ''} onSave={(v) => save({ notificationEmail: v || undefined })} />
-                </Field>
-                <Field label="Display amounts in" htmlFor="pref-cur">
+                <LimitField
+                  key={p.defaultSpendingLimit}
+                  label={`Default spending limit (${CHAINS[p.defaultChainId]?.collateral.symbol ?? 'collateral'})`}
+                  value={p.defaultSpendingLimit}
+                  onSave={(v) => save({ defaultSpendingLimit: v })}
+                />
+                <EmailField key={p.notificationEmail ?? ''} value={p.notificationEmail ?? ''} onSave={(v) => save({ notificationEmail: v || undefined })} />
+                <Field label="Display amounts in" group>
                   <Segmented
                     label="Display currency"
                     value={p.displayCurrency}
@@ -243,7 +245,7 @@ export function Settings() {
 
           <Block id="appearance" title="Appearance and demo controls">
             <div className="flex max-w-[720px] flex-col gap-4">
-              <Field label="Theme" htmlFor="theme" hint="Press t anywhere to cycle.">
+              <Field label="Theme" group hint="Press t anywhere to cycle.">
                 <Segmented
                   label="Theme"
                   value={theme}
@@ -304,23 +306,74 @@ export function Settings() {
   )
 }
 
-function LimitInput({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+function LimitField({ label, value, onSave }: { label: string; value: string; onSave: (v: string) => void }) {
   const [v, setV] = React.useState(value)
-  const valid = /^\d+(\.\d+)?$/.test(v) && Number(v) > 0
+  const [touched, setTouched] = React.useState(false)
+  const trimmed = v.trim()
+  const valid = /^\d+(\.\d+)?$/.test(trimmed) && Number(trimmed) > 0
+  const commit = () => {
+    setTouched(true)
+    if (valid && trimmed !== value) onSave(trimmed)
+  }
   return (
-    <Input
-      id="pref-limit"
-      inputMode="decimal"
-      className={cn('tnum')}
-      value={v}
-      aria-invalid={!valid || undefined}
-      onChange={(e) => setV(e.target.value)}
-      onBlur={() => valid && v !== value && onSave(v)}
-    />
+    <Field
+      label={label}
+      htmlFor="pref-limit"
+      hint={`${COPY.spendingLimit} Press Enter or leave the field to save.`}
+      error={touched && !valid ? 'Enter a positive amount, for example 50. Not saved.' : undefined}
+    >
+      <Input
+        id="pref-limit"
+        inputMode="decimal"
+        className={cn('tnum')}
+        value={v}
+        aria-invalid={(touched && !valid) || undefined}
+        aria-describedby={touched && !valid ? 'pref-limit-error' : undefined}
+        onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit()
+          }
+        }}
+        onBlur={commit}
+      />
+    </Field>
   )
 }
 
-function EmailInput({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+function EmailField({ value, onSave }: { value: string; onSave: (v: string) => void }) {
   const [v, setV] = React.useState(value)
-  return <Input id="pref-email" type="email" value={v} onChange={(e) => setV(e.target.value)} onBlur={() => v !== value && onSave(v.trim())} placeholder="you@example.com" />
+  const [touched, setTouched] = React.useState(false)
+  const trimmed = v.trim()
+  const valid = trimmed === '' || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(trimmed)
+  const commit = () => {
+    setTouched(true)
+    if (valid && trimmed !== value) onSave(trimmed)
+  }
+  return (
+    <Field
+      label="Notification email"
+      htmlFor="pref-email"
+      hint="Optional. Used only for the alerts below."
+      error={touched && !valid ? 'That does not look like an email address. Not saved.' : undefined}
+    >
+      <Input
+        id="pref-email"
+        type="email"
+        value={v}
+        aria-invalid={(touched && !valid) || undefined}
+        aria-describedby={touched && !valid ? 'pref-email-error' : undefined}
+        onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            commit()
+          }
+        }}
+        onBlur={commit}
+        placeholder="you@example.com"
+      />
+    </Field>
+  )
 }

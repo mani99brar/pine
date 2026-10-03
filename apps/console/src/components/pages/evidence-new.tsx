@@ -15,11 +15,29 @@ import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Checkbox, Field, Input, Segmented, Textarea } from '@/components/ui/field'
 import { PageHeader } from '@/components/ui/page-header'
-import { SafeMarkdown } from '@/components/ui/safe-markdown'
 import { Skeleton } from '@/components/ui/skeleton'
 import { TxLog } from '@/components/ui/tx-log'
 import { ListEditor } from '@/components/composer/editors'
 import { StatusBadge } from '@/components/claim/status'
+
+const FIELD_ID: Record<string, string> = {
+  title: 'ev-title',
+  summary: 'ev-summary',
+  'reproduction.command': 'ev-cmd',
+  'reproduction.environment': 'ev-env',
+  'reproduction.expected': 'ev-exp',
+  'reproduction.actual': 'ev-act',
+  reproduction: 'ev-cmd',
+}
+const FIELD_LABEL: Record<string, string> = {
+  title: 'Title',
+  summary: 'Summary',
+  'reproduction.command': 'Command',
+  'reproduction.environment': 'Environment',
+  'reproduction.expected': 'Expected behavior',
+  'reproduction.actual': 'Actual behavior',
+  reproduction: 'Reproduction',
+}
 
 const KINDS: { value: EvidenceKind; label: string; help: string }[] = [
   { value: 'counterexample', label: 'Counterexample', help: 'Demonstrates the stated violation against the pinned commit.' },
@@ -91,7 +109,9 @@ export function EvidenceNew({ claimId }: { claimId: string }) {
       : {}),
   }
   const parsed = evidenceDraftSchema.safeParse(draft)
-  const issues = parsed.success ? [] : parsed.error.issues.map((i) => `${i.path.join('.') || 'evidence'}: ${i.message}`)
+  const issueList = parsed.success ? [] : parsed.error.issues.map((i) => ({ path: i.path.join('.') || 'evidence', message: i.message }))
+  // Field-level messages appear once the user has tried to submit.
+  const fieldErr = (path: string) => (tried ? issueList.find((i) => i.path === path || i.path.startsWith(`${path}.`))?.message : undefined)
   const started = ev.runner.steps.some((s) => s.status !== 'idle')
   const canSubmit = parsed.success && allChecked && ev.blockers.length === 0 && !started
 
@@ -133,7 +153,7 @@ export function EvidenceNew({ claimId }: { claimId: string }) {
             </Callout>
           ) : null}
 
-          <Field label="Submission mode" htmlFor="mode" hint={mode === 'commit' ? 'Records only the package hash now; you reveal the package later. Commit-reveal is a launch gate and its reveal flow is not final.' : 'Uploads the evidence package publicly and submits its URI.'}>
+          <Field label="Submission mode" group hint={mode === 'commit' ? 'Records only the package hash now; you reveal the package later. Commit-reveal is a launch gate and its reveal flow is not final.' : 'Uploads the evidence package publicly and submits its URI.'}>
             <Segmented
               label="Submission mode"
               value={mode}
@@ -160,8 +180,8 @@ export function EvidenceNew({ claimId }: { claimId: string }) {
             </div>
           </fieldset>
 
-          <Field label="Title" htmlFor="ev-title" required aside={<span className="tnum">{title.length}/140</span>}>
-            <Input id="ev-title" value={title} maxLength={140} onChange={(e) => setTitle(e.target.value)} placeholder="Reporter top-up draws principal from the arbitration allocation" />
+          <Field label="Title" htmlFor="ev-title" required error={fieldErr('title')} aside={<span className="tnum">{title.length}/140</span>}>
+            <Input id="ev-title" aria-invalid={!!fieldErr('title') || undefined} aria-describedby={fieldErr('title') ? 'ev-title-error' : undefined} value={title} maxLength={140} onChange={(e) => setTitle(e.target.value)} placeholder="Reporter top-up draws principal from the arbitration allocation" />
           </Field>
 
           <Field
@@ -173,31 +193,37 @@ export function EvidenceNew({ claimId }: { claimId: string }) {
                 {preview ? 'Edit' : 'Preview as published'}
               </button>
             }
-            hint="Markdown. Explain how the reproduction demonstrates the exact violation. It becomes public, untrusted content."
+            error={fieldErr('summary')}
+            hint="Plain text. Explain how the reproduction demonstrates the exact violation. It is published as-is and shown to everyone as untrusted plain text."
           >
             {preview ? (
-              <div className="min-h-[140px] rounded-ctl border border-dashed border-line-strong px-3 py-2">
-                {summary ? <SafeMarkdown compact>{summary}</SafeMarkdown> : <p className="text-[13px] text-muted">Nothing to preview.</p>}
+              <div className="min-h-[140px] overflow-hidden rounded-ctl border border-dashed border-line-strong">
+                <p className="border-b border-dashed border-line-strong bg-sunken px-3 py-1 text-[11.5px] text-muted">Submitted text, shown as plain text</p>
+                {summary ? (
+                  <p className="wrap-anywhere whitespace-pre-wrap px-3 py-2 text-[13.5px] leading-[1.6]">{summary}</p>
+                ) : (
+                  <p className="px-3 py-2 text-[13px] text-muted">Nothing to preview.</p>
+                )}
               </div>
             ) : (
-              <Textarea id="ev-summary" rows={7} value={summary} onChange={(e) => setSummary(e.target.value)} />
+              <Textarea id="ev-summary" rows={7} aria-invalid={!!fieldErr('summary') || undefined} aria-describedby={fieldErr('summary') ? 'ev-summary-error' : undefined} value={summary} onChange={(e) => setSummary(e.target.value)} />
             )}
           </Field>
 
           <fieldset className="space-y-4 rounded-ctl border border-line p-4">
             <legend className="stretch-cond px-1 text-[13px] font-semibold">Reproduction</legend>
-            <Field label="Command" htmlFor="ev-cmd" required={kind === 'counterexample'} hint="Prefilled with the claim’s reproduction command. Change it only if your test lives elsewhere.">
+            <Field label="Command" htmlFor="ev-cmd" required={kind === 'counterexample'} error={fieldErr('reproduction.command')} hint="Prefilled with the claim’s reproduction command. Change it only if your test lives elsewhere.">
               <Input id="ev-cmd" mono value={command} onChange={(e) => setCommand(e.target.value)} />
             </Field>
             <Field label="Environment" htmlFor="ev-env" hint="Must match the pinned environment. Any deviation is grounds for rejection.">
               <Input id="ev-env" mono value={environment} onChange={(e) => setEnvironment(e.target.value)} />
             </Field>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              <Field label="Expected behavior" htmlFor="ev-exp" required={kind === 'counterexample'}>
-                <Textarea id="ev-exp" rows={3} mono value={expected} onChange={(e) => setExpected(e.target.value)} />
+              <Field label="Expected behavior" htmlFor="ev-exp" required={kind === 'counterexample'} error={fieldErr('reproduction.expected')}>
+                <Textarea id="ev-exp" rows={3} mono aria-invalid={!!fieldErr('reproduction.expected') || undefined} value={expected} onChange={(e) => setExpected(e.target.value)} />
               </Field>
-              <Field label="Actual behavior" htmlFor="ev-act" required={kind === 'counterexample'}>
-                <Textarea id="ev-act" rows={3} mono value={actual} onChange={(e) => setActual(e.target.value)} />
+              <Field label="Actual behavior" htmlFor="ev-act" required={kind === 'counterexample'} error={fieldErr('reproduction.actual')}>
+                <Textarea id="ev-act" rows={3} mono aria-invalid={!!fieldErr('reproduction.actual') || undefined} value={actual} onChange={(e) => setActual(e.target.value)} />
               </Field>
             </div>
             <Field label="Steps" htmlFor="ev-steps">
@@ -233,19 +259,32 @@ export function EvidenceNew({ claimId }: { claimId: string }) {
             <legend className="stretch-cond mb-1.5 text-[13px] font-semibold">Admissibility checklist ({claim.policy.id})</legend>
             <p className="mb-2 text-[12.5px] text-muted">Confirm each requirement. Jurors and answerers judge admissibility; this list helps you avoid an obvious rejection.</p>
             <div className="space-y-2 rounded-ctl border border-line p-3">
-              {requirements.map((r) => (
-                <Checkbox key={r} id={`chk-${r}`} checked={!!checks[r]} onChange={(v) => setChecks((c) => ({ ...c, [r]: v }))} label={r} />
+              {requirements.map((r, i) => (
+                <Checkbox key={r} id={`chk-${i}`} checked={!!checks[r]} onChange={(v) => setChecks((c) => ({ ...c, [r]: v }))} label={r} />
               ))}
             </div>
-            {tried && !allChecked ? <p className="mt-1 text-xs text-flare">Confirm every requirement before submitting.</p> : null}
+            {tried && !allChecked ? (
+              <p className="mt-1 text-xs text-flare">
+                Confirm every requirement before submitting ({requirements.filter((r) => !checks[r]).length} left).
+              </p>
+            ) : null}
           </fieldset>
 
-          {tried && issues.length ? (
+          {tried && (issueList.length || !allChecked) ? (
             <Callout tone="critical" title="Fix these before submitting">
-              <ul className="list-disc pl-4">
-                {issues.map((i) => (
-                  <li key={i}>{i}</li>
+              <ul className="space-y-0.5">
+                {issueList.map((i) => (
+                  <li key={i.path + i.message}>
+                    <button
+                      type="button"
+                      className="text-left text-bark underline decoration-flare/50 underline-offset-2 hover:decoration-flare"
+                      onClick={() => document.getElementById(FIELD_ID[i.path] ?? 'ev-title')?.focus()}
+                    >
+                      {FIELD_LABEL[i.path] ?? 'Evidence'}: {i.message}
+                    </button>
+                  </li>
                 ))}
+                {!allChecked ? <li>Admissibility checklist: confirm every requirement.</li> : null}
               </ul>
             </Callout>
           ) : null}
@@ -281,7 +320,8 @@ export function EvidenceNew({ claimId }: { claimId: string }) {
                     </Button>
                   }
                 >
-                  Its block timestamp is the timeliness proof. {ev.evidenceUri ? <span className="mono-cond text-[11.5px]">{ev.evidenceUri}</span> : null}
+                  Its block timestamp is the timeliness proof.
+                  {ev.evidenceUri ? <span className="mono-cond mt-0.5 block break-all text-[11.5px]">{ev.evidenceUri}</span> : null}
                 </Callout>
               ) : null}
               {ev.runner.state === 'done' || ev.runner.state === 'failed' ? (

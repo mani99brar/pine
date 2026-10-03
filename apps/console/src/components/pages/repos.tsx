@@ -2,7 +2,7 @@
 
 import * as React from 'react'
 import Link from 'next/link'
-import { GitCommitHorizontal, GitPullRequest, Search, Star } from 'lucide-react'
+import { GitCommitHorizontal, GitPullRequest, Lock, Search, Star } from 'lucide-react'
 import type { CommitSummary, PullSummary, RepoSummary } from '@pine/core'
 import { formatClaimNumber, formatRelative, shortSha } from '@pine/core'
 import {
@@ -17,6 +17,7 @@ import {
 } from '@pine/react'
 import { cn } from '@/lib/cn'
 import { Button } from '@/components/ui/button'
+import { Callout } from '@/components/ui/callout'
 import { EmptyState } from '@/components/ui/empty-state'
 import { ExternalLink } from '@/components/ui/external-link'
 import { Input, Segmented } from '@/components/ui/field'
@@ -41,6 +42,20 @@ function ghError(e: unknown) {
 }
 
 function RepoRow({ r }: { r: RepoSummary }) {
+  if (r.private)
+    return (
+      <li className="flex items-start gap-3 px-4 py-3 sm:px-6">
+        <span className="min-w-0 flex-1">
+          <span className="flex items-center gap-2">
+            <span className="mono-cond truncate text-[13px] font-medium text-muted">{r.fullName}</span>
+            <span className="flex shrink-0 items-center gap-1 rounded-chip border border-line-strong px-1.5 text-[11px] text-muted">
+              <Lock size={10} aria-hidden /> private
+            </span>
+          </span>
+          <span className="mt-0.5 block text-[13px] text-muted">Pine verifies public repositories only, so commits here cannot be pinned.</span>
+        </span>
+      </li>
+    )
   return (
     <li>
       <Link href={`/repos/${r.owner}/${r.name}`} className="flex items-start gap-3 px-4 py-3 hover:bg-frost sm:px-6">
@@ -113,7 +128,7 @@ export function ReposIndex() {
   )
 }
 
-function CommitRow({ c, owner, repo, pr, head }: { c: CommitSummary; owner: string; repo: string; pr?: number; head?: boolean }) {
+function CommitRow({ c, owner, repo, pr, head, locked }: { c: CommitSummary; owner: string; repo: string; pr?: number; head?: boolean; locked?: boolean }) {
   return (
     <li className="flex flex-wrap items-center gap-3 px-4 py-2.5 sm:px-6">
       <GitCommitHorizontal size={14} aria-hidden className="shrink-0 text-faint" />
@@ -134,9 +149,11 @@ function CommitRow({ c, owner, repo, pr, head }: { c: CommitSummary; owner: stri
           ) : null}
         </span>
       </span>
-      <Button asChild size="sm" variant={head ? 'primary' : 'secondary'}>
-        <Link href={verifyHref(owner, repo, c.sha, pr)}>Verify this commit</Link>
-      </Button>
+      {locked ? null : (
+        <Button asChild size="sm" variant={head ? 'primary' : 'secondary'}>
+          <Link href={verifyHref(owner, repo, c.sha, pr)}>Verify this commit</Link>
+        </Button>
+      )}
     </li>
   )
 }
@@ -212,6 +229,13 @@ export function RepoDetail({ owner, repo }: { owner: string; repo: string }) {
         description={r.data?.description ?? (r.isLoading ? 'Loading…' : undefined)}
         actions={<ExternalLink href={`https://github.com/${owner}/${repo}`}>Open on GitHub</ExternalLink>}
       />
+      {r.data?.private ? (
+        <div className="border-b border-line bg-surface px-4 py-3 sm:px-8">
+          <Callout tone="gate" title="Private repository">
+            Pine verifies public repositories only: investigators must be able to read and reproduce the pinned commit. Commits here cannot be pinned.
+          </Callout>
+        </div>
+      ) : null}
       <div className="grid grid-cols-1 bg-surface xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] xl:divide-x xl:divide-line">
         <Pane
           title="Pull requests"
@@ -249,7 +273,7 @@ export function RepoDetail({ owner, repo }: { owner: string; repo: string }) {
             ) : (
               <ul className="divide-y divide-line">
                 {[...(commits.data ?? [])].slice(0, 12).map((c, i) => (
-                  <CommitRow key={c.sha} c={c} owner={owner} repo={repo} head={i === 0} />
+                  <CommitRow key={c.sha} c={c} owner={owner} repo={repo} head={i === 0} locked={r.data?.private} />
                 ))}
               </ul>
             )}

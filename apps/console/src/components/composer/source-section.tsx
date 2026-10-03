@@ -338,12 +338,19 @@ function BrowseDialog({ open, onOpenChange, onPin }: { open: boolean; onOpenChan
                 ))}
               </div>
             ) : (
-              (repos.data?.items ?? []).map((rp) => (
-                <button key={rp.id} type="button" className={item(repo?.id === rp.id)} onClick={() => { setRepo(rp); setPull(null) }}>
-                  <span className="mono-cond text-[12px]">{rp.fullName}</span>
-                  <span className="line-clamp-1 text-[12px] text-muted">{rp.description ?? 'No description'}</span>
-                </button>
-              ))
+              (repos.data?.items ?? []).map((rp) =>
+                rp.private ? (
+                  <div key={rp.id} className="flex flex-col items-start gap-0.5 border-b border-line px-3 py-2 opacity-70">
+                    <span className="mono-cond text-[12px] text-muted">{rp.fullName}</span>
+                    <span className="text-[12px] text-muted">Private. Pine verifies public repositories only.</span>
+                  </div>
+                ) : (
+                  <button key={rp.id} type="button" className={item(repo?.id === rp.id)} onClick={() => { setRepo(rp); setPull(null) }}>
+                    <span className="mono-cond text-[12px]">{rp.fullName}</span>
+                    <span className="line-clamp-1 text-[12px] text-muted">{rp.description ?? 'No description'}</span>
+                  </button>
+                ),
+              )
             )}
           </div>
           <div className={cn(col, (!repo || pull) && 'hidden md:block')}>

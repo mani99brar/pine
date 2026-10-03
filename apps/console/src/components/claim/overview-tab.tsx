@@ -5,6 +5,7 @@ import type { ClaimDetail } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { EVIDENCE_MECHANISMS, explorerAddressUrl, formatDate, getPolicy } from '@pine/core'
 import { cn } from '@/lib/cn'
+import { StatusDot } from './status'
 import { CopyButton } from '@/components/ui/copy-button'
 import { CodeBlock } from '@/components/ui/code-block'
 import { ExternalLink } from '@/components/ui/external-link'
@@ -14,6 +15,7 @@ import { LifecycleRuler } from './lifecycle-ruler'
 
 export function QuestionBlock({ claim }: { claim: ClaimDetail }) {
   const q = claim.manifest.question
+  const final = claim.status === 'resolved' || claim.status === 'settled' ? claim.outcome : undefined
   return (
     <div className="rounded-ctl border border-line bg-frost">
       <div className="flex items-center gap-2 border-b border-line px-3 py-1.5">
@@ -25,28 +27,30 @@ export function QuestionBlock({ claim }: { claim: ClaimDetail }) {
       </div>
       <p className="mono-cond wrap-anywhere px-4 py-3 text-[12.5px] leading-[1.7] text-bark">{q.text}</p>
       <div className="grid gap-px border-t border-line bg-line sm:grid-cols-3">
-        <OutcomeKey glyph="yes" label="Yes" meaning={COPY.outcome.yes} />
-        <OutcomeKey glyph="no" label="No" meaning={COPY.outcome.no} />
-        <OutcomeKey glyph="invalid" label="Invalid result" meaning="Only the Invalid result token redeems; Yes and No pay nothing. Not a refund." />
+        <OutcomeKey glyph="yes" label="Yes" meaning={COPY.outcome.yes} final={final === 'yes'} />
+        <OutcomeKey glyph="no" label="No" meaning={COPY.outcome.no} final={final === 'no'} />
+        <OutcomeKey glyph="invalid" label="Invalid result" meaning="Only the Invalid result token redeems; Yes and No pay nothing. Not a refund." final={final === 'invalid'} />
       </div>
     </div>
   )
 }
 
-function OutcomeKey({ glyph, label, meaning }: { glyph: 'yes' | 'no' | 'invalid'; label: string; meaning: string }) {
+/** One outcome and what it means, drawn with the same glyph the outcome uses everywhere else. */
+function OutcomeKey({ glyph, label, meaning, final }: { glyph: 'yes' | 'no' | 'invalid'; label: string; meaning: string; final?: boolean }) {
   return (
-    <div className="flex items-start gap-2 bg-frost px-3 py-2">
-      <span
-        aria-hidden
-        className={cn(
-          'mt-[3px] size-2.5 shrink-0 rounded-[2px]',
-          glyph === 'yes' && 'bg-flare',
-          glyph === 'no' && 'border-[1.6px] border-slate',
-          glyph === 'invalid' && 'border-[1.6px] border-violet',
-        )}
-      />
+    <div
+      className={cn(
+        'flex items-start gap-2 px-3 py-2',
+        !final && 'bg-frost',
+        final && glyph === 'yes' && 'bg-flare-soft',
+        final && glyph === 'no' && 'bg-slate-soft',
+        final && glyph === 'invalid' && 'bg-violet-soft',
+      )}
+    >
+      <StatusDot status="resolved" outcome={glyph} size={11} className="mt-[3px]" />
       <p className="text-[12px] leading-[1.45]">
         <span className="font-semibold">{label}</span> <span className="text-muted">{meaning}</span>
+        {final ? <span className="ml-1.5 whitespace-nowrap font-semibold text-bark">Final outcome</span> : null}
       </p>
     </div>
   )

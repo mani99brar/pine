@@ -112,6 +112,11 @@ function Loaded({
     return () => window.removeEventListener('pine:copy-brief', h)
   }, [copyBrief])
 
+  // Links such as the dashboard's "Redeem" point at #position; the rail renders after data loads, so scroll here.
+  React.useEffect(() => {
+    if (window.location.hash === '#position') document.getElementById('position')?.scrollIntoView({ block: 'start' })
+  }, [])
+
   const keys: Record<string, () => void> = { b: copyBrief }
   CLAIM_TABS.forEach((t, i) => (keys[String(i + 1)] = () => setTab(t)))
   if (claim.status === 'open') keys.e = () => router.push(`/claims/${claim.id}/evidence/new`)

@@ -54,8 +54,11 @@ export function Field({
   className,
   aside,
   id,
+  group,
 }: {
   label: React.ReactNode
+  /** The control is a group (radiogroup, segmented) that names itself; render the label as text, not <label for>. */
+  group?: boolean
   htmlFor?: string
   hint?: React.ReactNode
   error?: string
@@ -68,10 +71,14 @@ export function Field({
   return (
     <div className={cn('flex min-w-0 flex-col gap-1', className)} id={id}>
       <div className="flex items-baseline gap-2">
-        <label htmlFor={htmlFor} className="stretch-cond text-[13px] font-medium text-bark">
-          {label}
-          {required ? <span className="ml-0.5 text-muted" aria-hidden>*</span> : null}
-        </label>
+        {group ? (
+          <span className="stretch-cond text-[13px] font-medium text-bark">{label}</span>
+        ) : (
+          <label htmlFor={htmlFor} className="stretch-cond text-[13px] font-medium text-bark">
+            {label}
+            {required ? <span className="ml-0.5 text-muted" aria-hidden>*</span> : null}
+          </label>
+        )}
         {aside ? <span className="ml-auto text-xs text-muted">{aside}</span> : null}
       </div>
       {children}
@@ -157,15 +164,30 @@ export function Segmented<T extends string>({
   label: string
   size?: 'xs' | 'sm'
 }) {
+  const refs = React.useRef<(HTMLButtonElement | null)[]>([])
+  const onKeyDown = (e: React.KeyboardEvent, i: number) => {
+    const d = e.key === 'ArrowRight' || e.key === 'ArrowDown' ? 1 : e.key === 'ArrowLeft' || e.key === 'ArrowUp' ? -1 : 0
+    if (!d) return
+    e.preventDefault()
+    const next = (i + d + options.length) % options.length
+    onChange(options[next]!.value)
+    refs.current[next]?.focus()
+  }
+  const selectedIndex = Math.max(0, options.findIndex((o) => o.value === value))
   return (
     <div role="radiogroup" aria-label={label} className="inline-flex w-fit self-start rounded-ctl border border-line-strong bg-sunken p-0.5">
-      {options.map((o) => (
+      {options.map((o, i) => (
         <button
           key={o.value}
+          ref={(el) => {
+            refs.current[i] = el
+          }}
           type="button"
           role="radio"
           aria-checked={value === o.value}
+          tabIndex={i === selectedIndex ? 0 : -1}
           title={o.title}
+          onKeyDown={(e) => onKeyDown(e, i)}
           onClick={() => onChange(o.value)}
           className={cn(
             'rounded-[4px] px-2 font-medium text-muted transition-colors hover:text-bark',

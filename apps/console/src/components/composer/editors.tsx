@@ -34,8 +34,11 @@ export function ListEditor({
     }
   })
   const rows = value.length ? value : []
+  // "Add in-scope item" names each row "In-scope item 1", "In-scope item 2"… for screen readers.
+  const noun = addLabel.replace(/^Add (to |an? )?/i, '')
+  const itemLabel = noun.charAt(0).toUpperCase() + noun.slice(1)
   return (
-    <div className="flex flex-col gap-1.5" id={id}>
+    <div className="flex flex-col gap-1.5" id={id} role="group" aria-label={itemLabel}>
       {rows.map((v, i) => (
         <div key={i} className="flex items-center gap-1.5">
           <span aria-hidden className="h-px w-2.5 shrink-0 bg-faint" />
@@ -46,7 +49,7 @@ export function ListEditor({
             value={v}
             mono={mono}
             disabled={disabled}
-            aria-label={`${placeholder ?? 'Item'} ${i + 1}`}
+            aria-label={`${itemLabel} ${i + 1}`}
             placeholder={placeholder}
             onBlur={onBlur}
             onChange={(e) => onChange(rows.map((x, j) => (j === i ? e.target.value : x)))}
@@ -69,7 +72,7 @@ export function ListEditor({
             disabled={disabled}
             onClick={() => onChange(rows.filter((_, j) => j !== i))}
             className="rounded-chip p-1 text-faint hover:bg-sunken hover:text-flare"
-            aria-label={`Remove item ${i + 1}`}
+            aria-label={`Remove ${itemLabel.toLowerCase()} ${i + 1}`}
           >
             <X size={13} aria-hidden />
           </button>
@@ -196,7 +199,7 @@ export function UtcDateTimeInput({
   }, [value])
   return (
     <div className="flex flex-col gap-1">
-      <div className={cn('flex items-stretch overflow-hidden rounded-ctl border bg-surface focus-within:border-needle', invalid ? 'border-flare' : 'border-line-strong')}>
+      <div className={cn('flex items-stretch overflow-hidden rounded-ctl border bg-surface focus-within:border-needle focus-within:shadow-[0_0_0_1px_var(--needle)]', invalid ? 'border-flare' : 'border-line-strong')}>
         <input
           id={id}
           type="datetime-local"

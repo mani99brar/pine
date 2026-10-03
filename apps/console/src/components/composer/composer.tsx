@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { PanelBottomOpen, Snowflake } from 'lucide-react'
 import { COPY } from '@pine/core/copy'
 import { getPolicy } from '@pine/core'
-import { useClaimComposer, usePublishClaim } from '@pine/react'
+import { useQueryClient } from '@tanstack/react-query'
+import { pineKeys, useAccount, useClaimComposer, usePublishClaim } from '@pine/react'
 import { cn } from '@/lib/cn'
 import { useKeys } from '@/lib/use-keys'
 import { useIsClient } from '@/lib/hooks'
@@ -24,8 +25,28 @@ import { ArtifactsPane } from './artifacts-pane'
 /** Drafts carry generated ids and time-based defaults, so the composer renders on the client only. */
 export function Composer(props: { draftId?: string; source?: string; policy?: string }) {
   const isClient = useIsClient()
-  if (!isClient) return <ComposerSkeleton />
+  const prefsReady = useAccountPrefsReady(!props.draftId)
+  if (!isClient || !prefsReady) return <ComposerSkeleton />
   return <ComposerLoaded {...props} />
+}
+
+/**
+ * A new draft takes its default chain and spending limit from the account preferences in the query
+ * cache at the moment it is created. On a cold load that query has not resolved yet, so wait for it
+ * (briefly, never indefinitely) before creating the draft.
+ */
+function useAccountPrefsReady(needed: boolean) {
+  const acc = useAccount()
+  const qc = useQueryClient()
+  const [timedOut, setTimedOut] = React.useState(false)
+  React.useEffect(() => {
+    if (!needed) return
+    const t = window.setTimeout(() => setTimedOut(true), 2500)
+    return () => window.clearTimeout(t)
+  }, [needed])
+  if (!needed || timedOut || acc.status === 'signed_out') return true
+  const state = qc.getQueryState(pineKeys.account())
+  return state?.status === 'success' || state?.status === 'error'
 }
 
 function ComposerLoaded({ draftId, source, policy }: { draftId?: string; source?: string; policy?: string }) {
@@ -39,7 +60,7 @@ function ComposerLoaded({ draftId, source, policy }: { draftId?: string; source?
 }
 
 function ComposerBody({ urlDraftId, initialSource, initialPolicy }: { urlDraftId?: string; initialSource?: string; initialPolicy?: string }) {
-  const { c, touch, updateSpec } = useComposerCtx()
+  const { c, touch, updateSpec, touched, showAll } = useComposerCtx()
 
   // ?policy=BOT-001 (from a policy page) preselects an enabled policy once.
   const policyApplied = React.useRef(false)
@@ -144,7 +165,9 @@ function ComposerBody({ urlDraftId, initialSource, initialPolicy }: { urlDraftId
             <span className="tnum">
               {doneCount}/{all.length} fields
             </span>
-            <span className={cn('tnum', issues ? 'text-flare' : 'text-needle')}>{issues ? `${issues} problems` : 'no problems'}</span>
+            <span className={cn('tnum', issues ? (touched.size || showAll ? 'text-flare' : 'text-muted') : 'text-needle')}>
+              {issues ? `${issues} ${issues === 1 ? 'problem' : 'problems'}` : 'no problems'}
+            </span>
             <span className="hidden items-center gap-1 sm:flex">
               <Kbd>[</Kbd>
               <Kbd>]</Kbd> sections
@@ -209,14 +232,14 @@ function ComposerBody({ urlDraftId, initialSource, initialPolicy }: { urlDraftId
           <span className="font-medium">Artifacts</span>
           <span className="mono-cond truncate text-[11px] text-muted">{c.manifestHash ? `manifest ${c.manifestHash.slice(0, 8)}…` : 'manifest pending'}</span>
           <span className={cn('tnum ml-auto shrink-0 rounded-full px-2 text-[11.5px]', issues ? 'bg-flare-soft text-flare' : 'bg-needle-soft text-needle')}>
-            {issues} problems
+            {issues ? `${issues} ${issues === 1 ? 'problem' : 'problems'}` : 'no problems'}
           </span>
           {c.frozen ? <Snowflake size={14} aria-label="frozen" className="text-slate" /> : null}
         </button>
       </div>
       <Dialog open={sheet} onOpenChange={setSheet}>
         <DialogContent title="Live artifacts" side="bottom" className="h-[85vh]">
-          <ArtifactsPane publish={publish} onFocusProblem={focusProblem} className="h-full" />
+          <ArtifactsPane publish={publish} onFocusProblem={focusProblem} className="h-full" inSheet />
         </DialogContent>
       </Dialog>
     </div>

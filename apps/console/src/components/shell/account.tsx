@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import Image from 'next/image'
 import { LogIn } from 'lucide-react'
-import { useAccount } from '@pine/react'
+import { useAccountSafe } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 import { Skeleton } from '@/components/ui/skeleton'
 
@@ -23,7 +23,7 @@ export function Avatar({ src, login, size = 24, className }: { src?: string; log
 }
 
 export function AccountChip() {
-  const { status, account } = useAccount()
+  const { status, account } = useAccountSafe()
   if (status === 'loading') return <Skeleton className="h-8 w-full" />
   if (!account)
     return (

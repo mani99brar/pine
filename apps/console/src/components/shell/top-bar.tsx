@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Monitor, Moon, Search, Sun } from 'lucide-react'
+import { formatClaimNumber } from '@pine/core'
 import { cn } from '@/lib/cn'
 import { Kbd } from '@/components/ui/kbd'
 import { Tooltip } from '@/components/ui/tooltip'
@@ -24,7 +25,7 @@ const LABELS: Record<string, string> = {
   evidence: 'Evidence',
 }
 
-export function crumbsFor(pathname: string): { href: string; label: string }[] {
+export function crumbsFor(pathname: string, claim?: { id: string; number: number } | null): { href: string; label: string }[] {
   const parts = pathname.split('/').filter(Boolean)
   const out: { href: string; label: string }[] = []
   let href = ''
@@ -35,7 +36,8 @@ export function crumbsFor(pathname: string): { href: string; label: string }[] {
     if (p === 'pull' || p === 'evidence') return
     if (parts[0] === 'repos' && i === 1) return
     let label = LABELS[p] ?? decodeURIComponent(p)
-    if (prev === 'claims' && /^pine-\d+/i.test(p)) label = p.toUpperCase()
+    if (prev === 'claims' && claim && claim.id === p) label = formatClaimNumber(claim.number)
+    else if (prev === 'claims' && /^pine-\d+$/i.test(p)) label = p.toUpperCase()
     if (parts[0] === 'repos' && i === 2) label = `${decodeURIComponent(parts[1] ?? '')}/${decodeURIComponent(p)}`
     if (prev === 'pull') label = `#${p}`
     if (prev === 'evidence' && p === 'new') label = 'Submit evidence'
@@ -65,8 +67,8 @@ export function ThemeToggle({ className }: { className?: string }) {
 
 export function TopBar() {
   const pathname = usePathname() ?? '/'
-  const { openPalette } = useWorkbench()
-  const crumbs = crumbsFor(pathname)
+  const { openPalette, claim } = useWorkbench()
+  const crumbs = crumbsFor(pathname, claim)
   return (
     <header className="sticky top-0 z-30 flex h-12 items-center gap-3 border-b border-line bg-frost/92 px-3 backdrop-blur supports-[backdrop-filter]:bg-frost/80 sm:px-4">
       <Link href="/" className="text-needle lg:hidden" aria-label="Pine Console home">

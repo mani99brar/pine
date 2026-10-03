@@ -18,7 +18,12 @@ export function TabsList({
 }) {
   return (
     <RTabs.List
-      className={cn('scrollbar-thin relative flex items-stretch gap-0 overflow-x-auto border-b border-line', className)}
+      className={cn(
+        'scrollbar-thin relative flex items-stretch gap-0 overflow-x-auto border-b border-line',
+        // On narrow screens the tab strip scrolls; fade its right edge so the overflow reads as "more tabs".
+        'max-md:[mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)] max-md:pr-8',
+        className,
+      )}
       aria-label="Sections"
     >
       {tabs.map((t) => (
@@ -26,7 +31,7 @@ export function TabsList({
           key={t.value}
           value={t.value}
           className={cn(
-            'group relative flex h-10 shrink-0 items-center gap-2 px-3.5 text-sm text-muted transition-colors hover:text-bark',
+            'group relative flex h-10 shrink-0 items-center gap-2 px-2.5 text-sm text-muted transition-colors hover:text-bark sm:px-3.5',
             'data-[state=active]:text-bark data-[state=active]:after:absolute data-[state=active]:after:inset-x-2 data-[state=active]:after:-bottom-px data-[state=active]:after:h-[2px] data-[state=active]:after:bg-needle',
           )}
         >

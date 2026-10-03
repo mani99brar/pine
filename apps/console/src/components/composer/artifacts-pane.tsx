@@ -135,10 +135,13 @@ export function ArtifactsPane({
   publish,
   onFocusProblem,
   className,
+  inSheet,
 }: {
   publish: PublishClaim
   onFocusProblem: (path: string) => void
   className?: string
+  /** Rendered inside the mobile sheet, whose dialog already carries the "Live artifacts" title. */
+  inSheet?: boolean
 }) {
   const { c } = useComposerCtx()
   const hashes = {
@@ -164,7 +167,7 @@ export function ArtifactsPane({
   return (
     <div className={cn('flex min-h-0 flex-col bg-frost', className)}>
       <div className="flex items-center gap-2 border-b border-line px-4 py-2">
-        <h2 className="stretch-cond text-[13px] font-semibold">Live artifacts</h2>
+        {inSheet ? null : <h2 className="stretch-cond text-[13px] font-semibold">Live artifacts</h2>}
         {frozen ? <span className="rounded-chip bg-slate-soft px-1.5 text-[11px] text-slate">frozen</span> : null}
         <span className="ml-auto text-[11.5px] text-muted" aria-live="polite">
           {c.saving ? 'Saving draft…' : c.lastSavedAt ? `Draft saved ${c.lastSavedAt.slice(11, 19)} UTC` : 'Autosaves as you type'}
@@ -182,7 +185,9 @@ export function ArtifactsPane({
           </div>
           <ol className="mono-cond mt-2 space-y-0.5 text-[10.5px] text-muted" aria-label="Recent recomputations">
             {log.length === 0 ? (
-              <li className="text-faint">keccak256(canonical JSON). Edit any field to watch the hashes recompute.</li>
+              <li className="text-faint">
+                {frozen ? 'keccak256(canonical JSON). These hashes froze when the market was created.' : 'keccak256(canonical JSON). Edit any field to watch the hashes recompute.'}
+              </li>
             ) : (
               log.map((e) => (
                 <li key={e.t} className="flex gap-2">
@@ -277,8 +282,8 @@ export function ArtifactsPane({
                       <TriangleAlert size={12} aria-hidden className="mt-[3px] shrink-0 text-flare" />
                       <span className="min-w-0 flex-1">
                         <span className="text-bark">{i.message}</span>{' '}
-                        <span className="mono-cond whitespace-nowrap text-[10.5px] text-faint">
-                          {SECTIONS.find((s) => s.id === sectionForPath(i.path))?.label.toLowerCase()} {i.path}
+                        <span className="mono-cond whitespace-nowrap text-[10.5px] text-faint" title={`${SECTIONS.find((s) => s.id === sectionForPath(i.path))?.label} section`}>
+                          {i.path}
                         </span>
                       </span>
                       <ChevronRight size={12} aria-hidden className="mt-[3px] shrink-0 text-faint" />
