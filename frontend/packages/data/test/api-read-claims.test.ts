@@ -368,8 +368,8 @@ describe('getClaim', () => {
     expect(c?.api.oracle.dueActions).toEqual([])
     expect(c?.yesPrice).toBeUndefined()
     expect(c?.market?.outcomes.map((o) => o.price)).toEqual([0, 0, 0])
-    // Without the catalog the policy comes from the indexed id and the verified document.
-    expect(c?.policy).toEqual({ id: 'BOT-001', version: '0.1.0', family: 'BOT', title: '' })
+    // Without the catalog, a verified claim's policy comes from the indexed id and the verified document.
+    expect(c?.policy).toEqual({ id: 'BOT-001', version: '0.1.0', family: 'BOT', title: '', hash: BOT_SHA, uri: `ipfs://${rawCidFromSha256(BOT_SHA)}` })
   })
 
   it('SEC-AGENT-03 SEC-EVID-11 shows a moderated claim as a tombstone: platform facts only, no user text', async () => {
@@ -438,6 +438,87 @@ describe('getClaim', () => {
     const c = await p.getClaim(MARKET)
     expect(c?.evidence.flatMap((e) => e.attachments.map((a) => a.uri))).toEqual([`ipfs://${ARTIFACT_CID}`])
     expect(JSON.stringify(c)).not.toContain('169.254.169.254')
+  })
+
+  describe('policy label (SEC-AGENT-03: an integrity-failed claim never borrows a catalog label)', () => {
+    const ATTACKER_SHA = `0x${'a7'.repeat(32)}` as const
+    const attackerPolicy = { sha256: ATTACKER_SHA, cid: rawCidFromSha256(ATTACKER_SHA) }
+    const mismatch = { status: 'mismatch', mismatchFields: ['policy'], final: true }
+    const unknownPolicy = { id: 'UNKNOWN', version: '', family: 'FUNC', title: 'Unknown policy', unknown: true, hash: ATTACKER_SHA, uri: `ipfs://${rawCidFromSha256(ATTACKER_SHA)}` }
+
+    it('SEC-AGENT-03 does not label a mismatch claim whose policy digest is not in the catalog with the indexed catalog id', async () => {
+      // A direct ClaimRegistry.createClaim citing the attacker's own policy text; its document claims BOT-001.
+      const { p } = provider(
+        claimRoutes({
+          [`/api/v1/claims/${MARKET}`]: claimDetail({ policyDocument: attackerPolicy, claim: { policyId: 'BOT-001', integrity: mismatch, listable: false, listed: false } }),
+          [`/api/v1/agents/claims/${MARKET}`]: agentClaim({ userSupplied: null }),
+        }),
+      )
+      const c = await p.getClaim(MARKET)
+      if (!c) throw new Error('claim expected')
+      expect(c.policy).toEqual(unknownPolicy)
+      expect(c.tags).toEqual([])
+      expect(c.manifest.policy).toEqual({ id: 'UNKNOWN', version: '', hash: ATTACKER_SHA, uri: `ipfs://${rawCidFromSha256(ATTACKER_SHA)}` })
+      expect(c.manifest.claim).toMatchObject({ policyId: 'UNKNOWN', policyVersion: '' })
+      expect(c.api.integrity).toEqual({ status: 'mismatch', mismatchFields: ['policy'], final: true })
+      expect(c.api.policyDocument).toEqual(attackerPolicy)
+      expect(JSON.stringify([c.policy, c.manifest.policy, c.manifest.claim.policyId])).not.toContain('BOT-001')
+    })
+
+    it('SEC-AGENT-03 labels a claim that is not verified only from the catalog entry of its on-chain digest', async () => {
+      // The digest is BOT-001's catalog file, but the document (and the backend's copy) says FUNC-001: the digest wins.
+      const { p } = provider(
+        claimRoutes({
+          [`/api/v1/claims/${MARKET}`]: claimDetail({ claim: { policyId: 'FUNC-001', integrity: { status: 'mismatch', mismatchFields: ['title'], final: true } } }),
+          [`/api/v1/agents/claims/${MARKET}`]: agentClaim({ userSupplied: null }),
+        }),
+      )
+      expect((await p.getClaim(MARKET))?.policy).toMatchObject({ id: 'BOT-001', version: '0.1.0', title: 'Automation and Keeper Reliability', hash: BOT_SHA })
+      expect((await p.getClaim(MARKET))?.policy.unknown).toBeUndefined()
+    })
+
+    it('SEC-AGENT-03 shows the unknown policy for a claim that is pending, unavailable or failed while the catalog cannot be read', async () => {
+      for (const status of ['pending', 'document_unavailable', 'mismatch'] as const) {
+        const { p } = provider(
+          claimRoutes({
+            [`/api/v1/claims/${MARKET}`]: claimDetail({ claim: { integrity: { status, mismatchFields: status === 'mismatch' ? ['title'] : [], final: false }, listable: false, listed: false } }),
+            [`/api/v1/agents/claims/${MARKET}`]: agentClaim({ userSupplied: null }),
+            '/api/v1/policies': apiError(502, 'UPSTREAM_UNAVAILABLE'),
+          }),
+        )
+        const c = await p.getClaim(MARKET)
+        expect(c?.policy, status).toMatchObject({ id: 'UNKNOWN', unknown: true, hash: BOT_SHA })
+        expect(c?.api.integrity.status).toBe(status)
+      }
+    })
+
+    it('SEC-AGENT-03 never shows the terms of a claim that is not integrity-verified, even when a document is served', async () => {
+      // The served document hashes to the on-chain digest, but the backend found it inconsistent with the chain.
+      const { p } = provider(
+        claimRoutes({
+          [`/api/v1/claims/${MARKET}`]: claimDetail({ claim: { integrity: { status: 'mismatch', mismatchFields: ['repositoryId'], final: true }, listable: false, listed: false } }),
+        }),
+      )
+      const c = await p.getClaim(MARKET)
+      expect(c?.api.documentVerified).toBe(false)
+      expect(c?.violation).toBe('')
+      expect(c?.manifest.claim.requirement).toBe('')
+      expect(c?.source).toMatchObject({ owner: '', repo: '' })
+      expect(JSON.stringify(c)).not.toContain(claimDocument.claim.requirement)
+    })
+
+    it('an unknown policy matches no policy or family filter', async () => {
+      const odd = { ...listedClaim({ market: '0x0000000000000000000000000000000000000e01', policyDocument: attackerPolicy }), integrity: mismatch }
+      const { p } = provider({ '/api/v1/claims': claimList([odd, listedClaim()]), '/api/v1/policies': policyList, [`/api/v1/agents/claims/${MARKET}`]: agentClaim() })
+      const all = (await p.listClaims()).items
+      expect(all.map((c) => [c.id, c.policy.id, c.policy.unknown])).toEqual([
+        ['0x0000000000000000000000000000000000000e01', 'UNKNOWN', true],
+        [MARKET, 'BOT-001', undefined],
+      ])
+      expect((await p.listClaims({ family: 'FUNC' })).items).toEqual([])
+      expect((await p.listClaims({ policyId: 'UNKNOWN' })).items).toEqual([])
+      expect((await p.listClaims({ family: 'BOT' })).items.map((c) => c.id)).toEqual([MARKET])
+    })
   })
 
   it('rejects a malformed claim view with BAD_RESPONSE', async () => {

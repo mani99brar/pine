@@ -204,6 +204,8 @@ export function planClaimQuery(q: ClaimQuery, knownRepositoryIds: ReadonlyMap<st
 function matchesQuery(c: ApiClaimSummary, q: ClaimQuery, plan: ClaimQueryPlan): boolean {
   if (plan.statuses && !plan.statuses.has(c.status)) return false
   if (plan.outcome && c.outcome !== plan.outcome) return false
+  // An unknown policy matches no policy or family filter (its family is a placeholder).
+  if ((q.policyId || q.family) && c.policy.unknown) return false
   if (q.policyId && c.policy.id !== q.policyId.trim().toUpperCase()) return false
   if (q.family && c.policy.family !== q.family) return false
   // A claim whose document is unknown never matches a repository filter.
@@ -328,6 +330,7 @@ export class ApiDataProvider implements PineDataProvider {
    * request and violation. Documents are immutable: a digest read once is not read again. Failures leave it unknown.
    */
   private async listingDocument(client: PineApiClient, item: WireListedClaim): Promise<ClaimDocument | null> {
+    if (item.integrity.status !== 'verified') return null
     const sha = item.claimDocument.sha256
     const known = this.documents.get(sha)
     if (known) return known
@@ -356,7 +359,7 @@ export class ApiDataProvider implements PineDataProvider {
         document,
         hidden: false,
         listed: item.listable,
-        policy: policyRefOf(item.policyDocument.sha256, item.policyId, catalog, document),
+        policy: policyRefOf(item.policyDocument, item.policyId, catalog, { verified: item.integrity.status === 'verified', document }),
         indexer: page.indexer,
       })
     })
@@ -401,10 +404,12 @@ export class ApiDataProvider implements PineDataProvider {
     ])
     if (!detail || detail.claim.market !== market) return null
     const view = detail.claim
+    const verified = view.integrity.status === 'verified'
     const sameClaim = agent !== null && agent.item.platform.market === market && agent.item.platform.claimDocument.sha256 === view.claimDocument.sha256
     // Moderation from either response withholds every user text (a race between the two reads errs on hiding).
     const hidden = hiddenView(view) || (sameClaim && hiddenAgent(agent))
-    const raw = !hidden && sameClaim ? agent.item.userSupplied?.document : undefined
+    // The terms of a claim that failed (or has not passed) the integrity check are never shown, like on the backend.
+    const raw = !hidden && verified && sameClaim ? agent.item.userSupplied?.document : undefined
     const document = verifiedClaimDocument(raw, view.claimDocument.sha256)
     if (document) this.rememberDocument(view.claimDocument.sha256, document)
     const evidenceItems: ApiEvidence[] = evidence.map((e) => evidenceFromApi(e, { claimHidden: hidden }))
@@ -413,7 +418,7 @@ export class ApiDataProvider implements PineDataProvider {
       document,
       hidden,
       listed: view.listed,
-      policy: policyRefOf(view.policyDocument.sha256, view.policyId, catalog, document),
+      policy: policyRefOf(view.policyDocument, view.policyId, catalog, { verified, document }),
       indexer: detail.indexer,
       evidence: evidenceItems,
       oracle: oracle && oracle.market === market ? oracle : null,

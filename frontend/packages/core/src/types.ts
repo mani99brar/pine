@@ -463,7 +463,22 @@ export interface ClaimSummary {
   number: number // 42 → displayed "PINE-0042"
   title: string
   violation: string
-  policy: { id: string; version: string; family: PolicyFamilyId; title: string }
+  policy: {
+    id: string
+    version: string
+    family: PolicyFamilyId
+    title: string
+    /**
+     * Additive (api mode): the policy the claim pins on chain cannot be named (its digest is no catalog policy and the
+     * claim is not integrity-verified). `id` is 'UNKNOWN' and `family` a placeholder: show `hash`/`uri`, never a
+     * /policies/<id> link or a family label.
+     */
+    unknown?: boolean
+    /** Additive (api mode): SHA-256 of the policy document the claim pins on chain. */
+    hash?: Hex
+    /** Additive (api mode): content address of that policy document (ipfs://<raw CID>). */
+    uri?: string
+  }
   source: { owner: string; repo: string; commitSha: string; prNumber?: number; prTitle?: string }
   status: ClaimStatus
   outcome?: Outcome
