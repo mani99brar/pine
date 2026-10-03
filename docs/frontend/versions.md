@@ -1,6 +1,6 @@
-# The three Pine frontends compared
+# The four Pine frontends compared
 
-All three versions implement the same customer journey (SPEC §3, steps 1–9) on the same tested core. The core covers policies, hashing, validation, lifecycle, funding, transaction plans and agent data. The three versions differ in who they optimize for, how you move through them, and how they look.
+All four versions implement the same customer journey (SPEC §3, steps 1–9) on the same tested core. The core covers policies, hashing, validation, lifecycle, funding, transaction plans and agent data. The four versions differ in who they optimize for, how you move through them, and how they look.
 
 | | v1 Pine Console | v2 Pine Docket | v3 Pine Field |
 |---|---|---|---|
@@ -38,3 +38,20 @@ All three versions implement the same customer journey (SPEC §3, steps 1–9) o
 - **Field** if the bottleneck is attracting investigators. The board makes open claims, their odds, depth and deadlines legible at a glance.
 
 The versions share every package, so features can move between them. Docket's investigator-reading review step, for example, could be added to Console's composer as a review tab.
+
+## v4 Pine Prism (`apps/prism` · 3004)
+
+v4 was added on request as a deliberately different, style-forward direction. Where v1–v3 are light-first and mostly flat, Prism is dark-first, multicolored and built around motion and 3D.
+
+- **Metaphor.** A claim is a crystal, and the market is light passing through it.
+  - YES (counterexample demonstrated) fractures the crystal.
+  - NO leaves it whole but dimmed, never celebratory.
+  - Invalid clouds it.
+- **Signature moments.**
+  - **WebGL hero.** A beam draws in, a crystal seeded from the claim's hash assembles, light disperses and resolves into Yes/No/Invalid beams sized from the live price.
+  - **Scroll story.** A sticky optical diagram walks through the seven steps from commit to outcome.
+  - **Facet-cutting composer.** Each pinned input (commit, policy, question, environment, deadline, oracle, funding, manifest, market) cuts a facet shaded by its real hash, and publishing seals the crystal once the terms freeze.
+  - **Light table.** Crystals sit around a "now" slit. Height is the Yes price, size is liquidity, hue is the policy family, and the glow pulses faster as the deadline nears.
+- **Identity.** A smoky-quartz umber ground with accents named after spectral emission lines (H-alpha rose, sodium, H-beta, calcium), moonstone and frost. Smoked glass with bevel-cut corners, grain and light leaks. Geologica for display, Instrument Sans for body, Azeret Mono for hashes.
+- **Robustness.** three.js is lazy-loaded and kept out of the first load. Each scene falls back to an SVG poster without WebGL, under reduced motion, without JS, or on timeout. Rendering pauses when offscreen and DPR is capped. Text sits on surfaces with AA contrast.
+- **Choose it** when first impressions matter most (launch, demos, investor or partner previews). Every feature, state, agent endpoint and language rule of v1–v3 is still there.

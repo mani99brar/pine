@@ -4,13 +4,14 @@ Pine lets a team connect GitHub, pin an exact commit, publish **one bounded, pol
 
 > A NO outcome means *no qualifying counterexample was submitted*. It is not a safety certification. See [SPEC.md](SPEC.md).
 
-This repository contains **three alternative, production-grade frontends**. They are built on one shared, tested domain and data core:
+This repository contains **four alternative, production-grade frontends**. They are built on one shared, tested domain and data core:
 
 | Version | App | Port | Direction | Best for |
 |---|---|---|---|---|
 | v1 **Pine Console** | [`apps/console`](apps/console) | 3001 | Keyboard-first verification workbench. Command palette, split-pane composer with live immutable artifacts and hashes, dense tables | Engineers and agent operators |
 | v2 **Pine Docket** | [`apps/docket`](apps/docket) | 3002 | Procedural clarity. Claims as case files, evidence as exhibits, a procedural timeline, a guided filing wizard, a print-ready filing | Team leads and newcomers to prediction markets |
 | v3 **Pine Field** | [`apps/field`](apps/field) | 3003 | The open challenge board. Live data glyphs (tension bar, time ring, depth bars), a price-impact simulator and a sentence-template claim builder | Investigators, traders, and live tracking |
+| v4 **Pine Prism** | [`apps/prism`](apps/prism) | 3004 | Luminous and motion-rich. A claim is a crystal and the market is light passing through it: WebGL hero, a facet-cutting composer that seals on publish, prism beams for price, and a light table for discovery. Dark-first and multicolored | Anyone who should feel the product at first glance; demos and launches |
 
 Each app's README covers its concept, routes and signature interactions; [`docs/frontend/versions.md`](docs/frontend/versions.md) compares them side by side.
 
@@ -21,6 +22,7 @@ pnpm install
 pnpm dev:console   # http://localhost:3001
 pnpm dev:docket    # http://localhost:3002
 pnpm dev:field     # http://localhost:3003
+pnpm dev:prism     # http://localhost:3004
 ```
 
 With no environment variables, every app runs in **demo mode**:
@@ -42,7 +44,7 @@ packages/
   react/   @pine/react   headless hooks/providers: queries, wallet (real + demo), resumable tx runner, claim composer
   server/  @pine/server  Next.js route handlers: Auth.js (GitHub read:user + demo), GitHub proxy, SIWE wallet linking,
                          agent API, llms.txt, well-known, IPFS upload
-apps/      console · docket · field
+apps/      console · docket · field · prism
 docs/
   indexer/    REST OpenAPI contract + Envio HyperIndex schema/config contract (indexer not implemented here)
   agents/     agent API guide + claim manifest JSON Schema
@@ -90,7 +92,7 @@ node scripts/smoke.mjs   # crawl all running apps + agent endpoints, check statu
 
 - `pnpm test`: 420 tests passing (core 204, data 104, react 57, server 55), including security regression suites.
 - `pnpm typecheck` and `pnpm lint`: clean for every package and app.
-- `pnpm build`: all three apps build for production.
+- `pnpm build`: all four apps build for production.
 - `node scripts/smoke.mjs` against the three production servers: 80 pages crawled plus every agent endpoint, all 200, no forbidden outcome wording.
 - Each app was QA'd by its builder with Playwright screenshots at 1440px and 390px. A fresh reviewer then walked every journey (account, compose and publish with failure, reload and resume, evidence, redeem, all claim states, keyboard) and fixed what it found. Docket reports 0 axe violations.
 
