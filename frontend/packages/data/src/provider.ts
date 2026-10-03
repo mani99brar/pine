@@ -20,6 +20,13 @@ export interface CreateDataProviderOptions {
   /** `api` mode: where the provider runs. Defaults to `server` when there is no `window`. */
   runtime?: 'browser' | 'server'
   fetch?: typeof fetch
+  /**
+   * `api` mode, server runtime only: the visitor's IP address, forwarded to pine-api as `X-Forwarded-For` so its
+   * per-IP limits count server-rendered reads per visitor. Pass only the value the trusted edge proxy set (nginx
+   * replaces X-Forwarded-For with `$remote_addr` for the web app), never a client-supplied chain: anything but a single
+   * IPv4/IPv6 literal is not forwarded (the read then counts against the web server's own address, as before).
+   */
+  forwardedFor?: string | null
 }
 
 /** PINE_API_INTERNAL_URL when it is a plain http(s) URL (no credentials, query or fragment), else null. */
@@ -43,7 +50,8 @@ function createApiDataProvider(env: PineEnv, opts: CreateDataProviderOptions): A
   const runtime = opts.runtime ?? (typeof window === 'undefined' ? 'server' : 'browser')
   if (runtime === 'browser') return new ApiDataProvider({ baseUrl: '', fetch: opts.fetch })
   const base = internalApiBase(env.apiInternalUrl)
-  return base ? new ApiDataProvider({ baseUrl: base, fetch: opts.fetch, resolveRepositories: false }) : new ApiDataProvider({ offline: true })
+  if (!base) return new ApiDataProvider({ offline: true })
+  return new ApiDataProvider({ baseUrl: base, fetch: opts.fetch, resolveRepositories: false, forwardedFor: opts.forwardedFor })
 }
 
 /**

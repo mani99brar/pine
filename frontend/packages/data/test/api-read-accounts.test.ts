@@ -1,7 +1,7 @@
 /** api read side: activity, portfolio, stats, policies and the api-mode provider factory. */
 import { describe, expect, it } from 'vitest'
 import { rawCidFromSha256 } from '@pine/core/pine-shared'
-import { ApiDataProvider, createDataProvider, HIDDEN_CLAIM_TITLE, MockDataProvider, readPineEnv, RestDataProvider } from '../src'
+import { ApiDataProvider, createDataProvider, HIDDEN_CLAIM_TITLE, ipAddressLiteral, MockDataProvider, readPineEnv, RestDataProvider } from '../src'
 import {
   activityView,
   apiError,
@@ -12,6 +12,7 @@ import {
   CREATOR,
   claimDetail,
   claimList,
+  claimRoutes,
   EVIDENCE_REGISTRY,
   fakeBackend,
   funcParametersSchema,
@@ -300,6 +301,71 @@ describe('createDataProvider in api mode', () => {
       expect((await p.getStats()).openClaims).toBe(0)
       expect(backend.calls).toEqual([])
     }
+  })
+
+  describe('visitor address of server-rendered reads (SEC-OPS-04: per-IP limits key on the visitor, never a spoofed value)', () => {
+    const env = readPineEnv({ dataSource: 'api', apiInternalUrl: 'http://127.0.0.1:3000' })
+
+    function recording() {
+      const seen: Record<string, string>[] = []
+      const backend = fakeBackend({ ...claimRoutes(), '/api/v1/claims': claimList([]) })
+      const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        seen.push({ ...((init?.headers ?? {}) as Record<string, string>) })
+        return backend.fetch(input, init)
+      }) as typeof fetch
+      return { seen, fetcher, calls: backend.calls }
+    }
+
+    it('SEC-OPS-04 forwards the visitor IP to pine-api as one X-Forwarded-For literal on every server read', async () => {
+      for (const ip of ['203.0.113.7', '2001:db8::1', '::ffff:203.0.113.7', '2001:DB8:0:0:8:800:200C:417A']) {
+        const { seen, fetcher } = recording()
+        const p = createDataProvider(env, { runtime: 'server', fetch: fetcher, forwardedFor: ip })
+        await p.listClaims()
+        await p.getClaim(MARKET)
+        expect(seen.length).toBeGreaterThan(5)
+        for (const headers of seen) expect(headers).toEqual({ accept: 'application/json', 'x-forwarded-for': ip })
+      }
+    })
+
+    it('SEC-OPS-04 never forwards a chain, a port, a hostname, a zone or anything but a single IP literal', async () => {
+      const bad = [
+        '203.0.113.7, 10.0.0.1',
+        '203.0.113.7,10.0.0.1',
+        '203.0.113.7:443',
+        '[2001:db8::1]',
+        '[2001:db8::1]:443',
+        'fe80::1%eth0',
+        'localhost',
+        'pine-api.internal',
+        ' 203.0.113.7',
+        '203.0.113.7 ',
+        '203.0.113.07',
+        '256.1.1.1',
+        '1.2.3',
+        '1.2.3.4::',
+        '1::2::3',
+        '1:2:3:4:5:6:7:8:9',
+        '::ffff:1.2.3',
+        '2001:db8::1\r\nx-pine-country: US',
+        'unknown',
+        '',
+        null,
+      ]
+      for (const forwardedFor of bad) {
+        expect(ipAddressLiteral(forwardedFor), String(forwardedFor)).toBeNull()
+        const { seen, fetcher } = recording()
+        await createDataProvider(env, { runtime: 'server', fetch: fetcher, forwardedFor }).listClaims()
+        expect(seen.length).toBeGreaterThan(0)
+        for (const headers of seen) expect(headers, String(forwardedFor)).toEqual({ accept: 'application/json' })
+      }
+    })
+
+    it('the browser provider never sets X-Forwarded-For (the edge proxy does)', async () => {
+      const { seen, fetcher } = recording()
+      await createDataProvider(env, { runtime: 'browser', fetch: fetcher, forwardedFor: '203.0.113.7' }).listClaims()
+      expect(seen.length).toBeGreaterThan(0)
+      for (const headers of seen) expect(headers).toEqual({ accept: 'application/json' })
+    })
   })
 
   it('leaves the other modes unchanged', () => {

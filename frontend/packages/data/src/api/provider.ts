@@ -69,8 +69,40 @@ export interface ApiDataProviderOptions {
    * browser's session cookie and a linked GitHub account. Default true; server providers set false (no cookie there).
    */
   resolveRepositories?: boolean
+  /**
+   * Server providers only: the visitor's IP address as the trusted edge proxy set it (nginx `X-Forwarded-For
+   * $remote_addr`), sent to pine-api as `X-Forwarded-For` so its per-IP limits count server-rendered reads per visitor
+   * instead of in one bucket shared by every visitor. Forwarded only when it is exactly one IPv4/IPv6 literal
+   * (ipAddressLiteral); no other client header is ever forwarded. Ignored when `client` is given.
+   */
+  forwardedFor?: string | null
   /** Clock in milliseconds (tests inject one). */
   now?: () => number
+}
+
+const IPV4 = /^(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(?:\.(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/
+
+/**
+ * `value` when it is exactly one IPv4 address in dotted decimal (no leading zeros) or one IPv6 address (RFC 4291 text,
+ * IPv4 suffix allowed), else null: no list, port, brackets, zone, hostname, whitespace or other characters.
+ */
+export function ipAddressLiteral(value: string | null | undefined): string | null {
+  if (typeof value !== 'string' || value.length < 2 || value.length > 45) return null
+  if (IPV4.test(value)) return value
+  if (!value.includes(':') || !/^[0-9A-Fa-f:.]+$/.test(value)) return null
+  try {
+    // The WHATWG URL parser implements the IPv6 address grammar exactly (one "::", 8 pieces, a strict IPv4 tail).
+    void new URL(`http://[${value}]/`)
+    return value
+  } catch {
+    return null
+  }
+}
+
+/** `fetch` that adds `X-Forwarded-For: <ip>` (a validated literal) to every request. */
+function forwardingFetch(fetcher: typeof fetch | undefined, ip: string): typeof fetch {
+  const base: typeof fetch = fetcher ?? ((...args) => fetch(...args))
+  return (input, init) => base(input, { ...init, headers: { ...Object.fromEntries(new Headers(init?.headers).entries()), 'x-forwarded-for': ip } })
 }
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/
@@ -286,7 +318,9 @@ export class ApiDataProvider implements PineDataProvider {
   private readonly resolveRepositories: boolean
 
   constructor(opts: ApiDataProviderOptions = {}) {
-    this.client = opts.offline ? null : (opts.client ?? new PineApiClient({ baseUrl: opts.baseUrl ?? '', fetch: opts.fetch }))
+    const ip = ipAddressLiteral(opts.forwardedFor)
+    const fetcher = ip ? forwardingFetch(opts.fetch, ip) : opts.fetch
+    this.client = opts.offline ? null : (opts.client ?? new PineApiClient({ baseUrl: opts.baseUrl ?? '', fetch: fetcher }))
     this.now = opts.now ?? (() => Date.now())
     this.resolveRepositories = opts.resolveRepositories ?? true
   }
