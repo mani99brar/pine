@@ -164,7 +164,8 @@ function finalOutcome(oracle: WireOracleStatus | null | undefined): Outcome | un
  *
  * | phase | oracle | status |
  * |---|---|---|
- * | evidence_open, reveal_open | any | open |
+ * | evidence_open | any | open |
+ * | reveal_open | any | awaiting_answer (evidence closed on chain; reveals run until Reality opens at the reveal deadline) |
  * | oracle_open | null, not_open, open_unanswered | awaiting_answer |
  * | oracle_open | answered | answer_proposed |
  * | oracle_open, pending_arbitration | pending_arbitration | arbitration |
@@ -180,8 +181,9 @@ export function claimStatusOf(input: {
   const { phase, oracle, resolution } = input
   switch (phase) {
     case 'evidence_open':
-    case 'reveal_open':
       return { status: 'open' }
+    case 'reveal_open':
+      return { status: 'awaiting_answer' }
     case 'pending_arbitration':
       return { status: 'arbitration' }
     case 'resolved': {

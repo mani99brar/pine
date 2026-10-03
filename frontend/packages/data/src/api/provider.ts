@@ -103,18 +103,22 @@ const REPOSITORY_FILTER_NEEDS_GITHUB =
 
 type ListingPhase = 'evidence_open' | 'reveal_open' | 'closed'
 
-/** Backend listing phase that can contain claims of each frontend status (null: never on the backend). */
-const STATUS_PHASE: Record<ClaimStatus, ListingPhase | null> = {
-  draft: null,
-  publishing: null,
-  failed: null,
-  open: 'evidence_open',
-  awaiting_answer: 'closed',
-  answer_proposed: 'closed',
-  disputed: 'closed',
-  arbitration: 'closed',
-  resolved: 'closed',
-  settled: 'closed',
+/**
+ * Backend listing phases that can hold claims of each frontend status (none: never on the backend). `closed` means the
+ * reveal deadline has passed (oracle open, arbitration, finalized, resolved); a claim in its reveal window is
+ * `awaiting_answer` (claimStatusOf), never `open`.
+ */
+const STATUS_PHASES: Record<ClaimStatus, readonly ListingPhase[]> = {
+  draft: [],
+  publishing: [],
+  failed: [],
+  open: ['evidence_open'],
+  awaiting_answer: ['reveal_open', 'closed'],
+  answer_proposed: ['closed'],
+  disputed: ['closed'],
+  arbitration: ['closed'],
+  resolved: ['closed'],
+  settled: ['closed'],
 }
 
 function addressOf(value: string | undefined): Address | null {
@@ -181,17 +185,14 @@ function isRepositoryId(value: number): boolean {
 export function planClaimQuery(q: ClaimQuery, resolvedRepositoryId?: number): ClaimQueryPlan | null {
   if (q.chainId !== undefined && q.chainId !== API_CHAIN_ID) return null
   const statuses = q.status === undefined ? [] : Array.isArray(q.status) ? q.status : [q.status]
-  let phase: ListingPhase | undefined
-  if (statuses.length > 0) {
-    const phases = new Set(statuses.map((s) => STATUS_PHASE[s]).filter((p): p is ListingPhase => p !== null))
-    if (phases.size === 0) return null
-    if (phases.size === 1) phase = [...phases][0]
-  }
+  // null: every phase. One request carries at most one phase; several are filtered on the page.
+  let phases: Set<ListingPhase> | null = statuses.length > 0 ? new Set(statuses.flatMap((s) => STATUS_PHASES[s] ?? [])) : null
   if (q.outcome) {
-    // An outcome exists only once the claim is closed.
-    if (phase === 'evidence_open') return null
-    if (statuses.length === 0) phase = 'closed'
+    // An outcome exists only once the reveal deadline has passed.
+    phases = new Set<ListingPhase>(!phases || phases.has('closed') ? ['closed'] : [])
   }
+  if (phases?.size === 0) return null
+  const phase = phases?.size === 1 ? [...phases][0] : undefined
   let creator: Address | undefined
   if (q.creator !== undefined) {
     const c = addressOf(q.creator)

@@ -23,7 +23,8 @@ const payouts = (...n: string[]) => ({ payoutNumerators: n })
 describe('claimStatusOf (backend phase + oracle + resolution → ClaimStatus)', () => {
   const table: [ApiClaimPhase, ApiWireOracleStatus | null, { payoutNumerators: string[] } | null, ClaimStatus, Outcome | undefined][] = [
     ['evidence_open', { state: 'not_open', opensAt: 1_800_000_000 }, null, 'open', undefined],
-    ['reveal_open', { state: 'not_open', opensAt: 1_800_000_000 }, null, 'open', undefined],
+    // Evidence is closed on chain once the evidence deadline passes: the reveal window is not "open for evidence".
+    ['reveal_open', { state: 'not_open', opensAt: 1_800_000_000 }, null, 'awaiting_answer', undefined],
     ['oracle_open', null, null, 'awaiting_answer', undefined],
     ['oracle_open', { state: 'not_open', opensAt: 1_800_000_000 }, null, 'awaiting_answer', undefined],
     ['oracle_open', { state: 'open_unanswered' }, null, 'awaiting_answer', undefined],

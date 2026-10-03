@@ -135,6 +135,24 @@ describe('listClaims', () => {
     ])
   })
 
+  it('asks for every listing phase a status can be in: a claim in its reveal window is found under "awaiting answer" only', async () => {
+    const revealing = listedClaim({ phase: 'reveal_open' })
+    const { p, calls } = provider({ '/api/v1/claims': claimList([revealing]), '/api/v1/policies': policyList, [`/api/v1/agents/claims/${MARKET}`]: agentClaim() })
+    expect((await p.listClaims()).items.map((c) => c.status)).toEqual(['awaiting_answer'])
+    expect((await p.listClaims({ status: 'awaiting_answer' })).items).toHaveLength(1)
+    expect((await p.listClaims({ status: ['awaiting_answer', 'answer_proposed'] })).items).toHaveLength(1)
+    expect((await p.listClaims({ status: 'open' })).items).toEqual([])
+    expect((await p.listClaims({ status: ['answer_proposed', 'resolved'] })).items).toEqual([])
+    expect(calls.filter((u) => u.startsWith('/api/v1/claims'))).toEqual([
+      '/api/v1/claims?limit=20',
+      // reveal_open or closed: no single backend phase, filtered on the page.
+      '/api/v1/claims?limit=20',
+      '/api/v1/claims?limit=20',
+      '/api/v1/claims?phase=evidence_open&limit=20',
+      '/api/v1/claims?phase=closed&limit=20',
+    ])
+  })
+
   it('makes no request for queries nothing on the backend can match', async () => {
     const { p, calls } = provider({ '/api/v1/claims': claimList() })
     expect(await p.listClaims({ status: 'draft' })).toEqual({ items: [] })
@@ -160,9 +178,10 @@ describe('listClaims', () => {
     const { p } = provider({ '/api/v1/claims': claimList(items), '/api/v1/policies': policyList })
     const ids = async (q: Parameters<ApiDataProvider['listClaims']>[0]) => (await p.listClaims(q)).items.map((c) => c.id.slice(-2))
     expect(await ids({})).toEqual(['01', '02', '03', '04', '05'])
-    // The backend narrowed with phase=evidence_open; reveal_open also maps to "open".
-    expect(await ids({ status: 'open' })).toEqual(['01', '02'])
-    expect(await ids({ status: 'awaiting_answer' })).toEqual(['03'])
+    // The reveal window (02) is past the evidence deadline: awaiting an answer, never "open".
+    expect(await ids({ status: 'open' })).toEqual(['01'])
+    expect(await ids({ status: 'awaiting_answer' })).toEqual(['02', '03'])
+    expect(await ids({ status: ['awaiting_answer', 'answer_proposed'] })).toEqual(['02', '03'])
     expect(await ids({ status: ['resolved', 'settled'] })).toEqual(['04', '05'])
     expect(await ids({ outcome: 'no' })).toEqual(['05'])
     expect(await ids({ policyId: 'bot-001', family: 'BOT' })).toEqual(['01', '02', '03', '04', '05'])
