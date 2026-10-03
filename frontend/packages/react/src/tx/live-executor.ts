@@ -1,5 +1,6 @@
 import type { Config } from 'wagmi'
 import {
+  estimateGas,
   getAccount,
   getBytecode,
   getTransaction,
@@ -83,12 +84,23 @@ export function createLiveExecutor(config: Config, opts?: { receiptTimeoutMs?: n
           throw new Error(`No contract is deployed at ${req.to} on chain ${req.chainId}. Nothing was sent.`)
         }
       }
+      const value = BigInt(req.value || '0')
+      // SEC-TX-07: simulate on the chain before the wallet prompt; a call that would revert stops here, unsent. The gas
+      // limit gets a 20% margin: an exact estimate can fall short when state moves before inclusion (e.g. a pool's tick).
+      let estimate: bigint
+      try {
+        estimate = await estimateGas(config, { account: account.address, to: req.to, data: req.data, value, chainId: req.chainId })
+      } catch (e) {
+        const reason = (e as { shortMessage?: string }).shortMessage ?? errorMessage(e)
+        throw new Error(`"${step.label}" would fail on-chain (${reason}). Nothing was sent.`)
+      }
       progress.onAwaitingSignature()
       const hash = await sendTransaction(config, {
         to: req.to,
         data: req.data,
-        value: BigInt(req.value || '0'),
+        value,
         chainId: req.chainId,
+        gas: estimate + estimate / 5n,
       })
       progress.onSubmitted(hash)
       let replaced: ReplacementReason | undefined

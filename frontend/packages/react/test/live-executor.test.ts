@@ -4,6 +4,7 @@ import type { Config } from 'wagmi'
 import type { Hex, TxStep } from '@pine/core'
 
 const actions = vi.hoisted(() => ({
+  estimateGas: vi.fn(),
   getAccount: vi.fn(),
   getBytecode: vi.fn(),
   getTransaction: vi.fn(),
@@ -34,6 +35,7 @@ beforeEach(() => {
   progress.onSubmitted.mockReset()
   actions.getAccount.mockReturnValue({ address: TO, chainId: 100 })
   actions.getBytecode.mockResolvedValue('0x6080')
+  actions.estimateGas.mockResolvedValue(100_000n)
   actions.sendTransaction.mockResolvedValue(H1)
   actions.waitForTransactionReceipt.mockResolvedValue(receipt(H1))
 })
@@ -111,5 +113,22 @@ describe('live executor: checkPending', () => {
       return receipt(H2)
     })
     expect((await createLiveExecutor(config).checkPending(step(), H1, undefined)).status).toBe('failed')
+  })
+})
+
+describe('live executor: simulation and gas (SEC-TX-07)', () => {
+  it('SEC-TX-07 simulates before the wallet prompt and sends nothing when the call would revert', async () => {
+    actions.estimateGas.mockRejectedValue(Object.assign(new Error('execution reverted'), { shortMessage: 'Execution reverted: ClaimExists()' }))
+    const ex = createLiveExecutor(config)
+    await expect(ex.execute(step(), progress)).rejects.toThrow(/would fail on-chain \(Execution reverted: ClaimExists\(\)\)\. Nothing was sent/)
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+  })
+
+  it('sends with a 20% gas margin over the simulated estimate', async () => {
+    const ex = createLiveExecutor(config)
+    await ex.execute(step({ request: { chainId: 100, to: TO, data: '0xabcdef', value: '7' } }), progress)
+    expect(actions.estimateGas).toHaveBeenCalledWith(config, { account: TO, to: TO, data: '0xabcdef', value: 7n, chainId: 100 })
+    expect(actions.sendTransaction).toHaveBeenCalledWith(config, { to: TO, data: '0xabcdef', value: 7n, chainId: 100, gas: 120_000n })
   })
 })
