@@ -43,6 +43,14 @@ import type {
 } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { isoNow, randomId } from '../internal/util'
+import {
+  apiComposerIssues,
+  apiEvidenceWindowSeconds,
+  apiQuestionSketch,
+  apiTimeline,
+  isPublishablePolicy,
+  type ApiTimeline,
+} from './api-rules'
 
 export const DEFAULT_DEADLINE_HOURS = 72
 export const DEFAULT_ORACLE_DELAY_HOURS = 1
@@ -109,12 +117,15 @@ export interface CreateDraftInput {
   chainId: number
   spendingLimit?: DecimalString
   now?: Date
+  /** Evidence deadline (default: now + 72h on the hour; `api` mode passes the backend's default window). */
+  deadline?: IsoDate
   partial?: Partial<ClaimDraft>
+  normalize?: NormalizeOptions
 }
 
 export function createDefaultDraft(input: CreateDraftInput): ClaimDraft {
   const now = input.now ?? new Date()
-  const deadline = defaultDeadline(now)
+  const deadline = input.deadline ?? defaultDeadline(now)
   const ts = isoNow(now)
   const base: ClaimDraft = {
     id: input.id ?? newDraftId(),
@@ -148,6 +159,7 @@ export function createDefaultDraft(input: CreateDraftInput): ClaimDraft {
       funding: { ...base.funding, ...p.funding },
     },
     undefined,
+    input.normalize,
   )
 }
 
@@ -169,19 +181,27 @@ export function mergeDraft(base: ClaimDraft, patch: Partial<ClaimDraft>): ClaimD
   }
 }
 
+export interface NormalizeOptions {
+  /**
+   * Resolve `policyVersion` from the bundled static catalog when the policy changes (default). `api` mode passes false:
+   * the version comes from the backend catalog, which the composer sets explicitly.
+   */
+  staticPolicies?: boolean
+}
+
 /**
  * Keeps derived draft fields consistent after an edit:
  * - environment configHash/envHash recomputed from the pin;
- * - policyVersion follows policyId (latest version) when the policy changes;
+ * - policyVersion follows policyId (latest version) when the policy changes (static catalog only);
  * - oracle opening time follows the deadline while it is still the default offset;
  * - oracle chain fields follow funding.chainId.
  */
-export function normalizeDraft(next: ClaimDraft, prev: ClaimDraft | undefined): ClaimDraft {
+export function normalizeDraft(next: ClaimDraft, prev: ClaimDraft | undefined, opts: NormalizeOptions = {}): ClaimDraft {
   const spec: Partial<ClaimSpec> = { ...next.spec }
   const funding: Partial<FundingInput> = { ...next.funding }
 
   // Policy version follows policy id.
-  if (spec.policyId && (spec.policyId !== prev?.spec.policyId || !spec.policyVersion)) {
+  if (opts.staticPolicies !== false && spec.policyId && (spec.policyId !== prev?.spec.policyId || !spec.policyVersion)) {
     const p = getPolicy(spec.policyId, spec.policyId === prev?.spec.policyId ? spec.policyVersion : undefined)
     if (p) spec.policyVersion = p.version
   }
@@ -282,11 +302,37 @@ export interface ComposerDerived {
   blockedStages: ComposerStage[]
   /** Hard errors from builders (should not happen; surfaced instead of crashing the composer) */
   buildError?: string
+  /** `api` mode only: what the backend will fix at preview, derived for display. */
+  api?: ApiDerived
 }
 
-export function deriveComposer(draft: ClaimDraft, ctx: { creator?: Address; now?: Date } = {}): ComposerDerived {
+/** `api` mode inputs: the backend catalog's policy and the pinned deployment. */
+export interface ApiDeriveContext {
+  /** The chosen policy from the backend catalog: undefined while loading, null when the catalog does not list it. */
+  policy: PolicyVersion | null | undefined
+  /** The catalog lookup failed. */
+  policyError?: boolean
+  /** Pine's EvidenceRegistry, named by the market question. */
+  evidenceRegistry?: Address
+  /** The chain Pine publishes claims on (the deployment's chain). */
+  chainId: number
+}
+
+export interface ApiDerived {
+  /** True when the chosen policy can be used for new claims on this deployment. */
+  policyPublishable: boolean
+  /** Deadlines the preview would fix for the chosen evidence deadline. */
+  timeline?: ApiTimeline
+  /** Seconds from now to the evidence deadline (the window the backend receives). */
+  evidenceWindowSeconds: number | null
+  /** The market question with the claim document's CID and digest elided; null while it cannot be composed. */
+  questionSketch: string | null
+}
+
+export function deriveComposer(draft: ClaimDraft, ctx: { creator?: Address; now?: Date; api?: ApiDeriveContext } = {}): ComposerDerived {
   const now = ctx.now ?? new Date()
   const chainId = draft.funding?.chainId ?? draft.spec.oracle?.chainId ?? getChainOrDefault(undefined).id
+  if (ctx.api) return deriveApiComposer(draft, ctx.api, now, chainId)
   const policy = draft.spec.policyId ? getPolicy(draft.spec.policyId, draft.spec.policyVersion) : undefined
   const spec = completeSpec(
     { ...draft.spec, policyId: draft.spec.policyId, policyVersion: policy?.version ?? draft.spec.policyVersion },
@@ -349,3 +395,40 @@ export function deriveComposer(draft: ClaimDraft, ctx: { creator?: Address; now?
     buildError,
   }
 }
+
+/**
+ * `api` mode: the backend composes the claim document and the question at preview, so nothing is built locally. The
+ * policy is the backend's, validation is the backend's draft rules, and funding (a separate plan after the claim exists)
+ * is left out.
+ */
+function deriveApiComposer(draft: ClaimDraft, api: ApiDeriveContext, now: Date, chainId: number): ComposerDerived {
+  const policy = api.policy ?? undefined
+  const spec = completeSpec({ ...draft.spec }, chainId, now)
+  const issues = apiComposerIssues(draft, { policy: api.policy, policyError: api.policyError, now, chainId: api.chainId })
+  const timeline = apiTimeline(draft.spec.evidence?.deadline)
+  const source = draft.source
+  const questionSketch = apiQuestionSketch({
+    title: draft.spec.title?.trim(),
+    repositoryId: source?.repoId,
+    commit: source?.commit.sha,
+    timeline,
+    policySha256: policy?.contentHash,
+    evidenceRegistry: api.evidenceRegistry,
+  })
+  return {
+    policy,
+    spec,
+    claimId: draft.publication?.claimId ?? claimIdForDraft(draft.id),
+    validation: { ok: issues.length === 0, issues },
+    fundingInput: completeFunding(draft.funding, chainId),
+    frozen: isDraftFrozen(draft),
+    blockedStages: [...new Set(issues.map((i) => i.stage))],
+    api: {
+      policyPublishable: isPublishablePolicy(policy),
+      timeline,
+      evidenceWindowSeconds: apiEvidenceWindowSeconds(draft.spec.evidence?.deadline, now),
+      questionSketch,
+    },
+  }
+}
+

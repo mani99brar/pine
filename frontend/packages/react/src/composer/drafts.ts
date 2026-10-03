@@ -13,6 +13,7 @@ import { getBrowserStorage, removeKey } from '../internal/storage'
 import { isoNow } from '../internal/util'
 import { txStorageKey } from '../tx/machine'
 import { createDefaultDraft } from './defaults'
+import { apiDefaultDeadline } from './api-rules'
 
 export const LOCAL_DRAFT_OWNER = 'local'
 
@@ -89,18 +90,21 @@ export function useDrafts(): {
       const account = qc.getQueryData<{ preferences?: { defaultSpendingLimit?: string; defaultChainId?: number } } | null>(
         pineKeys.account(),
       )
+      const apiMode = env.dataSource === 'api'
       const d = createDefaultDraft({
         owner,
-        chainId: account?.preferences?.defaultChainId ?? env.defaultChainId,
+        chainId: apiMode ? env.defaultChainId : (account?.preferences?.defaultChainId ?? env.defaultChainId),
         spendingLimit: account?.preferences?.defaultSpendingLimit,
         partial,
+        // api mode: the backend's default evidence window; the policy version comes from the backend catalog.
+        ...(apiMode ? { deadline: apiDefaultDeadline(), normalize: { staticPolicies: false } } : {}),
       })
       qc.setQueryData(pineKeys.draft(d.id), d)
       upsertDraftInCache(qc, owner, d)
       void store.save(d)
       return d
     },
-    [qc, owner, env.defaultChainId, store],
+    [qc, owner, env.defaultChainId, env.dataSource, store],
   )
 
   const save = useCallback(
