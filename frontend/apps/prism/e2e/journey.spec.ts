@@ -47,6 +47,59 @@ test('wallet sign-in, GitHub link, compose, preview, publish and view a claim', 
     if (await next.count()) await next.first().click()
   }
   await expect(page.getByText(`@${stack.githubLogin}`).first()).toBeVisible()
+
+  // Compose: pin an exact commit of a pull request, choose a policy, state one bounded claim.
+  await page.goto('/compose')
+  await page.waitForURL(/draft=/)
+  await page.locator('#source-input').waitFor()
+  await caption(page, 'Compose: the repository browser reads GitHub through the backend (linked account, public repositories)')
+  await page.locator('#source-input').fill('pine-labs/keeper-bot')
+  await page.getByRole('button', { name: /use pull request.*#12/i }).click()
+  await expect(page.getByText(/Membership: pull request #12/)).toBeVisible()
+  await page.getByRole('button', { name: 'Use this commit' }).click()
+  await expect(page.getByText('Pinned. Continue when you are ready.')).toBeVisible()
+  await page.getByRole('button', { name: /Continue to policy/ }).click()
+  await caption(page, 'Policies come from the backend catalog; the claim pins the policy text by its sha256')
+  await page.getByRole('radio', { name: /FUNC-001@0\.1\.0/ }).click()
+  await page.getByRole('button', { name: /Continue to claim/ }).click()
+
+  const title = `Keeper retry budget caps reverted transactions per epoch ${new Date().toISOString().slice(11, 19)}`
+  await page.getByLabel('Title').fill(title)
+  await page.getByLabel('Requirement').fill('The keeper must not submit more than the configured retry budget of transactions per epoch, even when every attempt reverts.')
+  await page.getByLabel('Violation').fill('the keeper submits more transactions in one epoch than its retry budget allows')
+  await page.locator('#in-scope').fill('src/keeper/retry-budget.ts')
+  await page.locator('#in-scope').press('Enter')
+  await page.getByLabel('Fault model').fill('RPC errors and reverted transactions; no corruption of the keeper state.')
+  await page.getByLabel('Allowed inputs').fill('Any keeper configuration and any sequence of RPC responses.')
+  await page.getByRole('button', { name: /Continue to environment/ }).click()
+  await page.getByLabel('Runtime').fill('node 22.14.0')
+  await page.getByLabel('External state').fill('none')
+  await page.getByLabel('Reproduction command').fill('pnpm vitest run test/retry-budget.spec.ts')
+  await page.getByLabel('Dependency notes').fill('pnpm 10 with the lockfile in the repository')
+  await page.getByRole('button', { name: /Continue to deadlines/ }).click()
+  await caption(page, 'Deadlines: the evidence window is yours (3 to 30 days); reveal and oracle opening are fixed by Pine')
+  await page.getByRole('button', { name: /Continue to funding/ }).click()
+  await page.getByRole('button', { name: /Continue to review/ }).click()
+
+  // Review: the backend freezes the claim document; the browser re-derives its digest, CID and question before showing it.
+  await page.getByRole('checkbox', { name: /^I attest/ }).check()
+  await page.getByRole('button', { name: 'Preview the claim' }).click()
+  await expect(page.getByRole('heading', { name: "Pine's preview" })).toBeVisible({ timeout: 90_000 })
+  await expect(page.getByText('Verified in this browser')).toBeVisible()
+  await caption(page, 'The preview is verified in this browser: document sha256 and CID, the on-chain question, the policy digest')
+  await page.getByRole('checkbox', { name: /I have read these disclosures/ }).check()
+  await page.getByRole('button', { name: /Continue to publish/ }).click()
+
+  // Publish: one createClaim plan, decoded and compared with the previewed document, sent by the wallet.
+  await caption(page, 'Publish: the createClaim plan is decoded and compared with the previewed document before the wallet signs')
+  await page.getByRole('button', { name: 'Publish and seal' }).click()
+  await expect(page.getByRole('heading', { name: 'Your claim is on the light table.' })).toBeVisible({ timeout: 300_000 })
+  const href = await page.getByRole('link', { name: 'Watch it live' }).getAttribute('href')
+  expect(href).toMatch(/^\/claims\/0x[0-9a-f]{40}$/)
+  published = (href ?? '').split('/').pop() ?? null
+  await page.getByRole('link', { name: 'Watch it live' }).click()
+  await expect(page.getByRole('heading', { name: title })).toBeVisible({ timeout: 60_000 })
+  await caption(page, 'Live: ClaimRegistry created the Seer market; the indexer and the backend serve it back')
 })
 
 /** A claim whose evidence window is open: the one published earlier in this run, else the newest listed one. */
