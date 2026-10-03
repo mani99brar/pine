@@ -26,8 +26,8 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) on 202
   inputs the frozen renderer refuses are `mismatch` on `question`.
 - Document constants (Seer factory, collateral, realitio, arbitrator, timeout) come only from `buildDeploymentManifest(config.contracts)`
   for both preview and integrity; module registration throws if `config.seer` disagrees with the manifest.
-- `POST /publications` order: validation → compliance → NOT_READY → preview (NOT_FOUND) → 409 checks → row (reuse, else consume quota
-  then `INSERT ... ON CONFLICT DO NOTHING RETURNING`, re-read on conflict) → chain re-check → content → plan. Two racing first
+- `POST /publications` order: validation → compliance → NOT_READY → preview (NOT_FOUND) → 409 checks → GitHub visibility recheck on the new-row path (PRD-03 8d) → row (reuse, else consume quota
+  then `INSERT ... ON CONFLICT DO NOTHING RETURNING`, re-read on conflict) → chain re-check → GitHub visibility recheck on the existing-row path → content → plan. Two racing first
   requests may consume two quota units (accepted; no 500, no duplicate). After the plan offer expires a retry returns the
   publication with `planExpired: true` and no plan; a new preview (new nonce, new digest) is the way to publish again.
 - Deleting a draft without publications deletes its previews in the same transaction; with a publication it is 409.

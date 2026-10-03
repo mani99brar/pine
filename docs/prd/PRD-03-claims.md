@@ -231,6 +231,20 @@ The integrity job runs in two phases so that a run that stops partway never lose
   `document_unavailable`; it stays `pending` with backoff and is re-evaluated when the block is lifted.
 - `GET /api/v1/claims` caps `limit` at 25 like the agent feed.
 
+## 8d. claims-009 review fixes (carried by claims-010)
+- SEC-GH-13 (P1): `POST /publications` rechecks the repository with `ctx.github.getRepoById(userId, preview.repositoryId)` on every
+  path that returns a plan: on the new-row path BEFORE quota is consumed, and on the existing-row path after the chain re-check.
+  REPO_NOT_PUBLIC (private, internal, or the repository now invisible to the user) and NOT_FOUND → 422 `REPO_NOT_PUBLIC` with no plan
+  and no quota consumed; GITHUB_NOT_LINKED → 409; RATE_LIMITED/UPSTREAM → 503 NOT_READY-style refusal without a plan (never fall
+  back to "no check"). Integrity verification does not call GitHub (it is a chain/content check). Regression tests: flip the
+  FakeGitHubGateway repository to private between preview and publish → 422 and no plan, for both the first request and a
+  retry of an existing row; a GitHub outage at publish → no plan.
+- A hint's success counts only from a receipt in a block at or below the read model's covered (finalized) block; a receipt from a
+  newer block leaves the hint `unknown` and is re-fetched later. A publication whose recorded success disappears (receipt no
+  longer returned for a hint that was `succeeded`) returns to the plan-able state instead of staying `mined` forever. Test both.
+- The 7-day `document_unavailable` window excludes time the document was withheld by moderation: when moderation blocks a
+  document, `first_unavailable_at` is cleared, so the window restarts when the block is lifted. Test it.
+
 ## 9. Required tests (vitest with the frozen harness; name SEC ids in negative tests)
 Catalog digest tampering refuses startup; SC-001 FEATURE_DISABLED; draft policies refused when `allowDraftPolicies` is false;
 draft IDOR; GitHub error mapping; membership failure blocks preview; preview determinism except nonce/createdAt; attestation
