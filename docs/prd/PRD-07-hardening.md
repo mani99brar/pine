@@ -157,6 +157,14 @@ Contracts are immutable once deployed, so every contract change here lands befor
   a non-null plan (the reconcile "retry after reopen" case no longer exists: reopen is removed); the existing-row order test (publish, make the repository
   private or GitHub rate-limited, advance past planExpiresAt, retry → 200, plan null, planExpired true, no GitHub call).
 
+## 3e. hardening-cl-001 review fixes (carried by hardening-cl-002; claims)
+- Outbox atomicity tests (coverage P1, SEC-OPS-07): with the outbox INSERT refused (`CHECK (false) NOT VALID` on
+  claims_audit_outbox), drive EVERY audited write and assert the state, the hint status and the outbox are all unchanged:
+  the reconcile hint→mined transaction (a finalized succeeded receipt), the request-side `mined` transition, the `submitted`
+  transition (reached with a refusal that lets the hint CTE succeed, e.g. a constraint that rejects only the submitted
+  action), the publication insert, the tx_reported hint, the `confirmed` transition and the integrity verdict. Each test fails
+  if its outbox INSERT is moved out of the write's statement or transaction. Map the COVERAGE.md rows to these tests.
+
 ## 4. Checks
 contracts-hardening: `forge build`, `export-abis --check`, the plan-vector `--check`, forge unit tests (claim-registry and
 evidence-registry), the fork tests, the e2e tests, `check-forbidden`. api-hardening (and claims-hardening with `src/modules/claims`): `pnpm --filter @pine/api typecheck`,
