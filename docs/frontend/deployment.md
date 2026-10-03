@@ -26,6 +26,7 @@ NEXT_PUBLIC_PINE_DEMO_WALLET=0
 PINE_IPFS_UPLOAD_URL=...                           # server-side pinning endpoint used by /api/ipfs
 PINE_IPFS_UPLOAD_TOKEN=...
 AUTH_SECRET=$(openssl rand -base64 32)             # required outside mock mode
+AUTH_URL=https://console.example.org              # REQUIRED in production: SIWE domain + Origin checks use it instead of forwarded headers
 AUTH_GITHUB_ID=...                                 # GitHub OAuth app
 AUTH_GITHUB_SECRET=...
 ```
@@ -79,6 +80,9 @@ CMD node $APP_DIR/server.js
 - [ ] Oracle answering, monitoring and escalation funding assigned (SPEC §10.7).
 - [ ] Legal and regulatory review completed (SPEC §8).
 - [ ] `NEXT_PUBLIC_PINE_DEMO_WALLET=0` and the data source is not `mock`. The demo banner disappears automatically.
+- [ ] `AUTH_URL` (or `NEXTAUTH_URL`) set to the public origin. Without it, wallet linking (SIWE domain) and Auth.js trust `X-Forwarded-Host`. In that case run behind a proxy that overwrites the header.
+- [ ] `AUTH_SECRET` set. Production mock mode without it uses a public development secret, so sessions can be forged. Mock mode is for previews only.
+- [ ] Demo sign-in is disabled automatically in production `rest` mode without GitHub OAuth. Configure `AUTH_GITHUB_ID` and `AUTH_GITHUB_SECRET` before launch.
 - [ ] Security headers reviewed. Add a CSP that allows your RPC, WalletConnect, IPFS gateway and GitHub avatar hosts.
 - [ ] Observability: route-handler logs, client error reporting (wire into each app's `error.tsx`), and uptime checks on `/api/agent/v1/claims` and `/llms.txt`.
 - [ ] Abuse controls: rate-limit `/api/ipfs`, `/api/github/*` and `/api/account/*` at the edge.

@@ -322,3 +322,16 @@ curl -s localhost:3001/.well-known/pine.json
 ```
 
 The full guide is in [docs/agents/agent-api.md](../agents/agent-api.md).
+
+## Security behavior added after review (2026-10-03)
+
+The package security review added these behaviors. Apps get them automatically; this section explains what users may see.
+
+- **Spending limit is always required.** Pass a defined `spendingLimit` to `useTxRunner` / recovery flows: the claim's funding limit, the draft's, or the account default. An `undefined` limit disables enforcement, so block the action instead. Unparseable or negative cost amounts now block the run (fail closed).
+- **No double sends.** Retrying a step whose earlier transaction is still pending re-checks it first and never sends a second one. A double-click on start runs once. A second browser tab cannot run the same plan; it shows the `TX_IN_OTHER_TAB` message and resumes from shared storage.
+- **Replaced transactions.** A wallet "speed up" counts as confirmed. A "cancel" counts as failed, and the terms are *not* frozen.
+- **Live executor guards.** The executor refuses placeholder or zero addresses and targets without contract code, and confirms the chain switch before sending.
+- **Stricter validation.** Bidi-override and zero-width characters are rejected in the question, title and commands. Owner and repo must be valid GitHub names, and source URLs must be `https://github.com/...`. The oracle category and language must match strict patterns, and both are escaped in the Reality template.
+- **SIWE.** The expected domain comes from `AUTH_URL`/`NEXTAUTH_URL` when set (set it in production). The message URI must be on the same host, and `issuedAt` is required. State-changing account routes reject cross-site requests (`Sec-Fetch-Site`, `Origin: null`).
+- **Demo sign-in** is off in production `rest` mode without GitHub OAuth.
+- **Agent API.** Publicly cached responses send `Vary: Accept` (plus the forwarded-host headers when the site URL is derived from the request). Markdown briefs fence creator-supplied prose so it cannot add headings, and always link canonical github.com URLs.
