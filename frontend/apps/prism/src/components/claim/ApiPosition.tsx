@@ -6,14 +6,23 @@ import { formatUnits, parseUnits } from 'viem'
 import type { Address, ClaimDetail, LiquidityPosition, OutcomePosition, Portfolio } from '@pine/core'
 import { formatAmount, formatPriceCents } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { ApiDataProvider } from '@pine/data'
-import { useApiExits, useApiFunding, usePine, useWallet, type ApiPlanRunner, type LadderQuote } from '@pine/react'
+import { ApiDataProvider, type ApiClaimDetailFacts } from '@pine/data'
+import {
+  LADDER_CLOSES_BEFORE_DEADLINE_SECONDS,
+  ladderQuoteKey,
+  useApiExits,
+  useApiFunding,
+  usePine,
+  useWallet,
+  type ApiPlanRunner,
+  type LadderQuote,
+} from '@pine/react'
 import { Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { Notice, Skeleton } from '@/components/ui/primitives'
 import { apiDetailFactsOf } from '@/lib/claims'
 import { OUTCOME_HEX } from '@/lib/crystal'
-import { useMounted } from '@/lib/hooks'
+import { useMounted, useNowMs } from '@/lib/hooks'
 import { ApiSessionGate, PlanControls, PlanProgress, WriteErrorNotice, parseAmountWei, useSessionReady } from './ApiActionKit'
 
 const OUTCOME_NAME = { yes: 'Yes', no: 'No', invalid: 'Invalid result' } as const
@@ -193,13 +202,17 @@ function Ladder({ claim }: { claim: ClaimDetail }) {
   const [lower, setLower] = useState('')
   const [upper, setUpper] = useState('')
   const [limit, setLimit] = useState('')
-  const [ack, setAck] = useState(false)
+  const [ackFor, setAckFor] = useState<string | null>(null)
   const budgetWei = parseAmountWei(budget)
   const limitWei = parseAmountWei(limit)
   const lo = lower.trim().replace(',', '.')
   const hi = upper.trim().replace(',', '.')
   const rangeOk = PRICE.test(lo) && PRICE.test(hi)
   const quote: LadderQuote | null = funding.quote && funding.quote.market === market.toLowerCase() ? funding.quote : null
+  // SEC-LEGAL-03: the tick belongs to the figures shown when it was given. New figures (a requote, or the larger loss
+  // Pine answers with when the pool moved) are unticked until the user ticks them.
+  const quoteKey = quote ? ladderQuoteKey(quote) : null
+  const ack = quoteKey !== null && ackFor === quoteKey
   const quoteBudget = quote && UINT.test(quote.budgetWei) ? BigInt(quote.budgetWei) : null
   const overLimit = quoteBudget !== null && limitWei !== null && quoteBudget > limitWei
   const busy = funding.busy
@@ -215,7 +228,7 @@ function Ladder({ claim }: { claim: ClaimDetail }) {
           className="mt-3 grid gap-3"
           onSubmit={(e) => {
             e.preventDefault()
-            setAck(false)
+            setAckFor(null)
             if (budgetWei !== null && rangeOk) void funding.quoteLadder({ budgetWei, lowerPrice: lo, upperPrice: hi })
           }}
         >
@@ -277,7 +290,7 @@ function Ladder({ claim }: { claim: ClaimDetail }) {
               {overLimit && <p className="mt-1 text-[0.8125rem] text-ha">The budget is above this limit.</p>}
             </div>
             <label className="flex items-start gap-3 text-[0.875rem] text-lumen-2">
-              <input type="checkbox" className="facet-check" checked={ack} onChange={(e) => setAck(e.target.checked)} />
+              <input type="checkbox" className="facet-check" checked={ack} onChange={(e) => setAckFor(e.target.checked ? quoteKey : null)} />
               <span>
                 I understand I can lose up to {units(quote.maxLossIfYesXdaiWei)} xDAI of this budget if the claim resolves Yes, and that the position&apos;s value moves with trading.
               </span>
@@ -304,17 +317,32 @@ function Ladder({ claim }: { claim: ClaimDetail }) {
   )
 }
 
+/**
+ * Whether Pine offers a liquidity ladder now: undefined outside the evidence window (or before the clock is known), null
+ * when it does, else why not. Mirrors the backend's refusals (moderation, a claim document that does not match the
+ * chain or cannot be read, the last hour before the evidence deadline), so nobody spends a quote on a sure refusal.
+ */
+function ladderOffer(api: ApiClaimDetailFacts | null, nowMs: number | null): string | null | undefined {
+  if (!api || api.phase !== 'evidence_open' || api.hidden || nowMs === null) return undefined
+  if (api.integrity.status === 'mismatch' || api.integrity.status === 'document_unavailable') {
+    return 'Pine offers no liquidity for this claim: its claim document does not match the chain or cannot be read.'
+  }
+  if (nowMs >= (api.evidenceDeadline - LADDER_CLOSES_BEFORE_DEADLINE_SECONDS) * 1000) return 'Pine offers liquidity until one hour before the evidence deadline.'
+  return null
+}
+
 /** "Your position" for a backend claim: holdings in this market, exits, and liquidity while the evidence window is open. */
 export function ApiPositionPanel({ claim }: { claim: ClaimDetail }) {
   const mounted = useMounted()
   const wallet = useWallet()
+  const now = useNowMs()
   const api = apiDetailFactsOf(claim)
   const market = (claim.marketAddress ?? claim.id) as Address
   const q = useMarketPortfolio(wallet.address, market)
   const positions = q.data?.positions ?? []
   const lps = q.data?.liquidity ?? []
   const resolved = api?.phase === 'resolved'
-  const canFund = api?.phase === 'evidence_open' && !api.hidden
+  const offer = ladderOffer(api, now)
   const sym = claim.collateralSymbol
   return (
     <section className="glass cut-xl p-5 sm:p-6" aria-labelledby="pos-title">
@@ -334,8 +362,15 @@ export function ApiPositionPanel({ claim }: { claim: ClaimDetail }) {
         <Skeleton className="mt-3 h-16 w-full" />
       ) : (
         <div className="mt-3 grid gap-4">
-          {q.isError && <p className="text-[0.875rem] text-na">Your holdings could not be read right now.</p>}
-          {positions.length === 0 && lps.length === 0 ? (
+          {/* An unread balance is unknown, never zero: no holdings, no exits until a read succeeds. */}
+          {q.isError ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <p className="text-[0.875rem] text-na">Your holdings could not be read right now.</p>
+              <Button size="sm" variant="ghost" onClick={() => void q.refetch()}>
+                Try again
+              </Button>
+            </div>
+          ) : positions.length === 0 && lps.length === 0 ? (
             <p className="text-[0.9rem] text-lumen-2">This wallet holds no outcome tokens or liquidity in this market.</p>
           ) : (
             positions.length > 0 && (
@@ -346,8 +381,9 @@ export function ApiPositionPanel({ claim }: { claim: ClaimDetail }) {
               </ul>
             )
           )}
-          {(positions.length > 0 || lps.length > 0) && <Exits claim={claim} positions={positions} lps={lps} resolved={resolved} />}
-          {canFund && <Ladder claim={claim} />}
+          {!q.isError && (positions.length > 0 || lps.length > 0) && <Exits claim={claim} positions={positions} lps={lps} resolved={resolved} />}
+          {offer === null && <Ladder claim={claim} />}
+          {typeof offer === 'string' && <p className="text-[0.84375rem] text-lumen-3">{offer}</p>}
         </div>
       )}
     </section>

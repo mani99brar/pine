@@ -69,6 +69,8 @@ export {
 export {
   useApiFunding,
   checkLadderPlan,
+  ladderQuoteKey,
+  LADDER_CLOSES_BEFORE_DEADLINE_SECONDS,
   FUNDING_MAX_VALUE_WEI,
   FUNDING_MAX_APPROVAL,
   type ApiFunding,
