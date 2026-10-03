@@ -4,7 +4,7 @@ import { useCallback, useMemo } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import type { ClaimDraft } from '@pine/core'
-import type { DraftStore } from '@pine/data'
+import { anyBodySchema, seg, type DraftStore } from '@pine/data'
 import { usePine } from '../providers/context'
 import { pineKeys } from '../queries/keys'
 import { usePineSession } from '../api/session'
@@ -13,6 +13,7 @@ import { getBrowserStorage, removeKey } from '../internal/storage'
 import { isoNow } from '../internal/util'
 import { txStorageKey } from '../tx/machine'
 import { createDefaultDraft } from './defaults'
+import { apiDefaultDeadline } from './api-rules'
 
 export const LOCAL_DRAFT_OWNER = 'local'
 
@@ -75,7 +76,7 @@ export function useDrafts(): {
   error: Error | null
   refetch(): void
 } {
-  const { drafts: store, env } = usePine()
+  const { drafts: store, env, api } = usePine()
   const owner = useDraftOwner()
   const qc = useQueryClient()
   const q = useQuery({
@@ -89,18 +90,21 @@ export function useDrafts(): {
       const account = qc.getQueryData<{ preferences?: { defaultSpendingLimit?: string; defaultChainId?: number } } | null>(
         pineKeys.account(),
       )
+      const apiMode = env.dataSource === 'api'
       const d = createDefaultDraft({
         owner,
-        chainId: account?.preferences?.defaultChainId ?? env.defaultChainId,
+        chainId: apiMode ? env.defaultChainId : (account?.preferences?.defaultChainId ?? env.defaultChainId),
         spendingLimit: account?.preferences?.defaultSpendingLimit,
         partial,
+        // api mode: the backend's default evidence window; the policy version comes from the backend catalog.
+        ...(apiMode ? { deadline: apiDefaultDeadline(), normalize: { staticPolicies: false } } : {}),
       })
       qc.setQueryData(pineKeys.draft(d.id), d)
       upsertDraftInCache(qc, owner, d)
       void store.save(d)
       return d
     },
-    [qc, owner, env.defaultChainId, store],
+    [qc, owner, env.defaultChainId, env.dataSource, store],
   )
 
   const save = useCallback(
@@ -115,12 +119,21 @@ export function useDrafts(): {
 
   const remove = useCallback(
     async (id: string) => {
+      if (api) {
+        // api mode: Pine's copy of the draft goes too, unless a publication exists for it (Pine keeps those and
+        // answers 409). Best effort: a copy that stays behind is readable by this wallet only.
+        const backend = (await store.get(id))?.publication?.backend
+        if (backend?.draftId && !backend.publicationId) {
+          await api.request('DELETE', `/api/v1/drafts/${seg(backend.draftId)}`, anyBodySchema).catch(() => undefined)
+        }
+        removeKey(getBrowserStorage(), `pine:api-preview:${id}`)
+      }
       await store.remove(id)
       removeKey(getBrowserStorage(), txStorageKey(publishRunKey(id)))
       qc.removeQueries({ queryKey: pineKeys.draft(id) })
       qc.setQueryData<ClaimDraft[]>(pineKeys.drafts(owner), (prev) => prev?.filter((d) => d.id !== id))
     },
-    [qc, owner, store],
+    [qc, owner, store, api],
   )
 
   const refetch = useCallback(() => {

@@ -1,15 +1,19 @@
 'use client'
 
-import { useDemoWallet } from '@pine/react'
+import { useDemoWallet, usePine } from '@pine/react'
 import { Zap } from 'lucide-react'
 import { useMounted } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 
-/** Reviewer control (demo mode only): the next simulated wallet prompt is rejected, to exercise recovery. */
+/**
+ * Reviewer control (demo mode only): the next simulated wallet prompt is rejected, to exercise recovery. Never shown
+ * with the Pine backend (api mode), where plans are real transactions, even if a demo wallet flag is set.
+ */
 export function DemoFailToggle({ className, compact }: { className?: string; compact?: boolean }) {
   const dw = useDemoWallet()
+  const { env } = usePine()
   const mounted = useMounted()
-  if (!dw.enabled || !mounted) return null
+  if (!dw.enabled || !mounted || env.dataSource === 'api') return null
   const armed = dw.pendingFailure !== null
   return (
     <button

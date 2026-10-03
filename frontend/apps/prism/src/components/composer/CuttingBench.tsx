@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { AnimatePresence, motion } from 'motion/react'
-import type { ClaimComposer } from '@pine/react'
+import { isDraftFrozen, type ClaimComposer } from '@pine/react'
 import { formatAmount, formatDate, shortHash } from '@pine/core'
 import { Check, Lock } from 'lucide-react'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
@@ -19,6 +19,7 @@ export interface FacetState {
 
 /** Which facets are cut, from what the creator has pinned so far. Each facet is shaded by its input's hash. */
 export function facetState(c: ClaimComposer, furthest: UiStep): FacetState {
+  if (c.api) return apiFacetState(c, c.api, furthest)
   const d = c.draft
   const env = c.spec.environment
   const reached = (s: UiStep) => stepIndex(furthest) > stepIndex(s)
@@ -58,11 +59,58 @@ export function facetState(c: ClaimComposer, furthest: UiStep): FacetState {
   }
 }
 
+/**
+ * api mode: the question facet is cut once the registry's question can be composed, the oracle facet shows the opening
+ * Pine fixes (the reveal deadline), funding is the optional liquidity after publication, and the manifest facet is the
+ * claim document Pine froze at preview.
+ */
+function apiFacetState(c: ClaimComposer, api: NonNullable<ClaimComposer['api']>, furthest: UiStep): FacetState {
+  const d = c.draft
+  const env = c.spec.environment
+  const reached = (s: UiStep) => stepIndex(furthest) > stepIndex(s)
+  const documentSha256 = d.publication?.backend?.documentSha256
+  const cut: FacetId[] = []
+  if (d.source) cut.push('commit')
+  if (c.policy && api.policyPublishable) cut.push('policy')
+  if (d.spec.requirement?.trim() && d.spec.violation?.trim() && api.questionSketch) cut.push('question')
+  if (env.runtime.trim() && env.reproductionCommand.trim()) cut.push('environment')
+  if (reached('deadlines')) cut.push('deadline', 'oracle')
+  if (reached('funding')) cut.push('funding')
+  if (documentSha256 && c.validation.ok) cut.push('manifest')
+  if (isDraftFrozen(d)) cut.push('market')
+  return {
+    cut,
+    seeds: {
+      commit: d.source?.commit.sha,
+      policy: c.policy?.contentHash,
+      question: api.questionSketch ?? undefined,
+      environment: env.envHash,
+      deadline: c.spec.evidence.deadline,
+      oracle: `${api.timeline?.answersOpen ?? ''}:${c.spec.oracle.minBond}`,
+      funding: `${c.fundingInput.spendingLimit}`,
+      manifest: documentSha256,
+      market: d.publication?.marketAddress,
+    },
+    values: {
+      commit: d.source ? d.source.commit.sha.slice(0, 12) : undefined,
+      policy: c.policy ? `${c.policy.id}@${c.policy.version}` : undefined,
+      question: api.questionSketch ? 'composed' : undefined,
+      environment: env.runtime ? env.runtime.slice(0, 24) : undefined,
+      deadline: formatDate(c.spec.evidence.deadline, 'short'),
+      oracle: api.timeline ? `opens ${formatDate(api.timeline.answersOpen, 'short')}` : undefined,
+      funding: 'after publishing',
+      manifest: documentSha256 ? shortHash(documentSha256) : undefined,
+      market: d.publication?.marketAddress ? shortHash(d.publication.marketAddress) : undefined,
+    },
+  }
+}
+
 /** The cutting bench: the claim's crystal, cut one facet per pinned input, sealed when the market exists. */
 export function CuttingBench({ c, facets, compact }: { c: ClaimComposer; facets: FacetState; compact?: boolean }) {
   const reduce = useReduceMotion()
   const hue = FAMILY_HEX[c.policy?.family ?? 'FUNC']
-  const sealed = c.frozen
+  // Sealed once the market transaction confirmed (api mode also locks the inputs while it may still land).
+  const sealed = isDraftFrozen(c.draft)
   const n = facets.cut.length
   const sharp = Math.round((n / FACET_ORDER.length) * 100)
   const title = c.draft.spec.title?.trim()
