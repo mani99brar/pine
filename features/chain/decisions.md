@@ -21,8 +21,8 @@ Settled by the operator from ADR-0001 (docs/adr/ADR-0001-architecture.md) and th
   halt every read model).
 - Gas-constancy test (evidence registry): compare the 2nd and the 501st commit, each in its own call, within 2,000 gas; the 1st
   commit pays the 0→1 counter write and cold access and is excluded.
-- Fork tests: one fork per test contract (`setUp`), at most one `createClaim` per test function and at most four fork test
-  functions, so a cold run stays within the public RPC's limits; Foundry's RPC cache makes reruns cheap.
+- Fork tests: one fork per test contract (`setUp`), at most one `createClaim` per test function and at most five fork test
+  functions (raised from four by the operator for hardening-c-001's copycat and max-size tests), so a cold run stays within the public RPC's limits; Foundry's RPC cache makes reruns cheap.
 
 - The deployment script and the real-pair fork round trip move to the `assembly` feature (after both lanes merge); this feature writes no `contracts/script` files, and the EvidenceRegistry constructor never requires code at the registry address.
 
