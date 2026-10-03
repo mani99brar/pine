@@ -165,6 +165,23 @@ Contracts are immutable once deployed, so every contract change here lands befor
   action), the publication insert, the tx_reported hint, the `confirmed` transition and the integrity verdict. Each test fails
   if its outbox INSERT is moved out of the write's statement or transaction. Map the COVERAGE.md rows to these tests.
 
+## 3f. hardening-cl-002 security follow-up (carried by hardening-cl-003; claims)
+- Finality of `mined` (SEC-IDX-01, SEC-IDX-06; `mined` is permanent since 3b): a publication moves to `mined` only when the read
+  model serves the claim for this creator and document digest AND its creation block is at or below F, where F is the read
+  model's `status().finalizedBlock` when non-null, otherwise `ctx.chain.finalizedBlock()` (a failure of that call means no
+  transition). The read-model `indexedBlock` is never used as finality (Envio serves non-final rows). A hint receipt alone
+  never moves a publication to `mined`; a succeeded receipt only withholds the plan (503 NOT_READY, retryAfterSeconds 30) until
+  the read model confirms the claim. Tests: Envio-like status (finalizedBlock null) with the claim above the chain's finalized
+  block → not mined; at/below → mined; a succeeded receipt whose claim the read model does not serve → not mined, no plan;
+  finalizedBlock() failure → unchanged. Existing tests that expected `mined` from a receipt alone are rewritten to this rule
+  and listed in the completion (operator decision; no other existing test may change).
+- Request path: POST /publications and POST /publications/:id/submitted trigger the audit flush without awaiting it (as markets
+  and funding do since 3c; errors caught and logged through the redactor); the claims test helpers await the module's
+  single-flight flush after each response so the existing audit tests stay unchanged; a test proves a never-resolving audit
+  store does not delay the response.
+- `outboxSelect` generates the outbox id per row (`gen_random_uuid()` in SQL, or one id per returned row), not one constant;
+  test with a source returning two rows.
+
 ## 4. Checks
 contracts-hardening: `forge build`, `export-abis --check`, the plan-vector `--check`, forge unit tests (claim-registry and
 evidence-registry), the fork tests, the e2e tests, `check-forbidden`. api-hardening (and claims-hardening with `src/modules/claims`): `pnpm --filter @pine/api typecheck`,
