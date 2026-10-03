@@ -77,7 +77,10 @@ export const API_READ_GAPS = {
   volumes: 'liquidity, volume, volume24h, volumeTotal, openInterest are "0" and traders 0 (not indexed)',
   pools: 'MarketState.pools is empty (no TVL); pool addresses, prices and depth quotes are in `api.liquidity`',
   evidenceCount: 'list items report 0 (exact on claim details)',
-  source: 'owner/repo/prNumber come from the verified claim document; "" when it is unavailable or the claim is moderated',
+  source:
+    'repoId is the on-chain repository id; owner/repo/prNumber come from the verified claim document ("" when it is unavailable or the claim is moderated). No backend route resolves repository ids (SEC-GH-12), so owner/repo are only as stated by the document (unverifiedName: true) and the GitHub links built from them are best effort',
+  repositoryFilter:
+    'ClaimQuery.repositoryId, or the id GitHub gives for ClaimQuery.repo through the backend GitHub route (browser only: signed in with a linked GitHub account); never names stated in claim documents',
   policy:
     'labelled only from the catalog entry of the on-chain policy digest, or the indexed id of an integrity-verified claim; otherwise { id: "UNKNOWN", title: "Unknown policy", unknown: true, family "FUNC" as a placeholder }: show policy.hash / policy.uri, never /policies/<id>',
   arbitrationCost: 'ArbitrationState.cost is "" (the backend does not report the Kleros fee)',
@@ -386,6 +389,7 @@ export function claimSummaryFromApi(input: ApiClaimInput): ApiClaimSummary {
   const { status, outcome } = claimStatusOf(v)
   const ref = doc?.target.membership.ref
   const title = input.hidden ? HIDDEN_CLAIM_TITLE : (safeTitle(v.title) ?? safeTitle(doc?.claim.title) ?? UNTITLED_CLAIM_TITLE)
+  const stated = doc?.target.repository
   return {
     id: v.market,
     number: 0,
@@ -393,9 +397,12 @@ export function claimSummaryFromApi(input: ApiClaimInput): ApiClaimSummary {
     violation: doc?.claim.violation ?? '',
     policy: { ...input.policy },
     source: {
-      owner: doc?.target.repository.ownerLogin ?? '',
-      repo: doc?.target.repository.name ?? '',
+      owner: stated?.ownerLogin ?? '',
+      repo: stated?.name ?? '',
       commitSha: v.commit,
+      repoId: v.repositoryId,
+      // Display snapshots of the document: the backend ties only the numeric id to the chain (SEC-GH-12, SEC-EVID-15).
+      ...(stated ? { unverifiedName: true } : {}),
       ...(ref?.kind === 'pull' ? { prNumber: ref.number } : {}),
     },
     status,
@@ -747,7 +754,7 @@ function manifestOf(input: ApiClaimDetailInput, title: string, policy: ApiPolicy
       provider: 'github',
       owner,
       repo,
-      ...(doc ? { repoId: doc.target.repository.id } : {}),
+      repoId: v.repositoryId,
       commit: { sha: v.commit, message: '', author: '', committedAt: '', htmlUrl: commitUrl },
       ...(doc?.target.baseCommit ? { baseCommit: { sha: doc.target.baseCommit, htmlUrl: repoUrl ? `${repoUrl}/commit/${doc.target.baseCommit}` : '' } } : {}),
     },

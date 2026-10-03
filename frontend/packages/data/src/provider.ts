@@ -36,14 +36,14 @@ function internalApiBase(url: string | undefined): string | null {
 
 /**
  * `api` mode. Browser: the backend on the page's own origin (cookies stay same-origin). Server: the internal API URL
- * (public GET routes only, no cookie is ever forwarded); without one, an offline provider whose reads resolve
- * empty/null so SSR renders and the client fetches live.
+ * (public GET routes only, no cookie is ever forwarded, so repository names are never resolved there); without one, an
+ * offline provider whose reads resolve empty/null so SSR renders and the client fetches live.
  */
 function createApiDataProvider(env: PineEnv, opts: CreateDataProviderOptions): ApiDataProvider {
   const runtime = opts.runtime ?? (typeof window === 'undefined' ? 'server' : 'browser')
   if (runtime === 'browser') return new ApiDataProvider({ baseUrl: '', fetch: opts.fetch })
   const base = internalApiBase(env.apiInternalUrl)
-  return base ? new ApiDataProvider({ baseUrl: base, fetch: opts.fetch }) : new ApiDataProvider({ offline: true })
+  return base ? new ApiDataProvider({ baseUrl: base, fetch: opts.fetch, resolveRepositories: false }) : new ApiDataProvider({ offline: true })
 }
 
 /**

@@ -14,8 +14,8 @@ import type {
   PricePoint,
 } from '@pine/core'
 import type { ClaimDocument } from '@pine/core/pine-shared'
-import type { DataSourceKind, PineDataProvider } from '../types'
-import { PineApiClient, seg } from './http'
+import { PineDataError, type DataSourceKind, type PineDataProvider } from '../types'
+import { PineApiClient, PineBackendError, seg } from './http'
 import {
   activityFromApi,
   API_CHAIN_ID,
@@ -40,6 +40,7 @@ import {
   claimDetailSchema,
   claimListSchema,
   evidenceListSchema,
+  githubRepoSchema,
   liquidityViewSchema,
   oracleViewSchema,
   policyDetailSchema,
@@ -63,6 +64,11 @@ export interface ApiDataProviderOptions {
   fetch?: typeof fetch
   /** No backend reachable (SSR without PINE_API_INTERNAL_URL): every read resolves empty or null without a request. */
   offline?: boolean
+  /**
+   * Resolve `ClaimQuery.repo` (owner/name) to GitHub's repository id through the backend GitHub route, which needs the
+   * browser's session cookie and a linked GitHub account. Default true; server providers set false (no cookie there).
+   */
+  resolveRepositories?: boolean
   /** Clock in milliseconds (tests inject one). */
   now?: () => number
 }
@@ -87,6 +93,13 @@ const PORTFOLIO_MARKETS_MAX = 20
 /** The positions and liquidity routes allow 4 concurrent cache misses per process: stay well below. */
 const PORTFOLIO_CONCURRENCY = 2
 const CATALOG_TTL_MS = 60_000
+/** GitHub's answer for owner/name: an id is kept 10 minutes (renames and transfers), "no public repository" 1 minute. */
+const REPOSITORY_ID_TTL_MS = 600_000
+const REPOSITORY_MISS_TTL_MS = 60_000
+const REPOSITORY_LOOKUPS_MAX = 256
+
+const REPOSITORY_FILTER_NEEDS_GITHUB =
+  'Filtering claims by repository needs a signed-in account with a linked GitHub account: GitHub resolves owner/name to the repository id that claims pin on chain.'
 
 type ListingPhase = 'evidence_open' | 'reveal_open' | 'closed'
 
@@ -148,16 +161,24 @@ interface ClaimQueryPlan {
   query: { phase?: ListingPhase; repositoryId?: number; creator?: Address; cursor?: string; limit: number }
   statuses: ReadonlySet<ClaimStatus> | null
   outcome?: Outcome
-  /** Lowercase owner/name filtered on the page when no repository id is known for it. */
-  repo?: string
+  /** Lowercase owner/name whose GitHub repository id is still needed (no trusted id was given). */
+  repo?: { owner: string; name: string }
+}
+
+function isRepositoryId(value: number): boolean {
+  return Number.isSafeInteger(value) && value > 0
 }
 
 /**
  * ClaimQuery → the backend's strict listing query (phase, repositoryId, creator, cursor, limit ≤ 25; nothing else is
  * ever sent), plus the filters applied to the returned page. Null when nothing can match (draft/publishing/failed
- * statuses, another chain, malformed creator/repo/cursor), so no request is made.
+ * statuses, another chain, malformed creator/repo/repository id/cursor), so no request is made.
+ *
+ * A repository filter uses only a trusted numeric id: `q.repositoryId`, or `resolvedRepositoryId` (GitHub's answer for
+ * `q.repo`). Without one the plan carries `repo` for the caller to resolve; owner/name stated in claim documents are
+ * never used to filter or to learn ids (SEC-GH-12).
  */
-export function planClaimQuery(q: ClaimQuery, knownRepositoryIds: ReadonlyMap<string, number> = new Map()): ClaimQueryPlan | null {
+export function planClaimQuery(q: ClaimQuery, resolvedRepositoryId?: number): ClaimQueryPlan | null {
   if (q.chainId !== undefined && q.chainId !== API_CHAIN_ID) return null
   const statuses = q.status === undefined ? [] : Array.isArray(q.status) ? q.status : [q.status]
   let phase: ListingPhase | undefined
@@ -178,12 +199,16 @@ export function planClaimQuery(q: ClaimQuery, knownRepositoryIds: ReadonlyMap<st
     creator = c
   }
   let repositoryId: number | undefined
-  let repo: string | undefined
-  if (q.repo !== undefined) {
-    if (!REPO.test(q.repo) || q.repo.endsWith('/.') || q.repo.endsWith('/..')) return null
-    const key = q.repo.toLowerCase()
-    repositoryId = knownRepositoryIds.get(key)
-    if (repositoryId === undefined) repo = key
+  let repo: { owner: string; name: string } | undefined
+  if (q.repositoryId !== undefined) {
+    if (!isRepositoryId(q.repositoryId)) return null
+    repositoryId = q.repositoryId
+  } else if (q.repo !== undefined) {
+    const [, owner, name] = REPO.exec(q.repo) ?? []
+    if (!owner || !name || name === '.' || name === '..') return null
+    if (resolvedRepositoryId === undefined) repo = { owner: owner.toLowerCase(), name: name.toLowerCase() }
+    else if (isRepositoryId(resolvedRepositoryId)) repositoryId = resolvedRepositoryId
+    else return null
   }
   if (q.cursor !== undefined && q.cursor.length > LIST_CURSOR_MAX) return null
   const limit = Math.min(Math.max(1, Math.floor(q.limit ?? LIST_LIMIT_DEFAULT) || 1), LIST_LIMIT_MAX)
@@ -208,8 +233,8 @@ function matchesQuery(c: ApiClaimSummary, q: ClaimQuery, plan: ClaimQueryPlan): 
   if ((q.policyId || q.family) && c.policy.unknown) return false
   if (q.policyId && c.policy.id !== q.policyId.trim().toUpperCase()) return false
   if (q.family && c.policy.family !== q.family) return false
-  // A claim whose document is unknown never matches a repository filter.
-  if (plan.repo && (!c.source.owner || `${c.source.owner}/${c.source.repo}`.toLowerCase() !== plan.repo)) return false
+  // The backend filters by repository id; the on-chain id of every returned claim must agree.
+  if (plan.query.repositoryId !== undefined && c.api.repositoryId !== plan.query.repositoryId) return false
   const terms = (q.search ?? '').toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length > 0) {
     const haystack = [c.title, c.violation, c.policy.id, `${c.source.owner}/${c.source.repo}`, c.source.commitSha, c.marketAddress ?? '', c.creator].join(' ').toLowerCase()
@@ -243,12 +268,14 @@ export class ApiDataProvider implements PineDataProvider {
   private readonly policyParameters = new Map<string, Promise<WirePolicyParameters | null>>()
   /** Verified claim documents by digest (immutable content). Only listing enrichment reads from it. */
   private readonly documents = new Map<string, ClaimDocument>()
-  /** owner/name (lowercase) → numeric repository id, learnt from verified documents. */
-  private readonly repositoryIds = new Map<string, number>()
+  /** Lowercase owner/name → GitHub's repository id for it (null: no public repository), as GitHub answered. */
+  private readonly repositoryLookups = new Map<string, { at: number; id: number | null }>()
+  private readonly resolveRepositories: boolean
 
   constructor(opts: ApiDataProviderOptions = {}) {
     this.client = opts.offline ? null : (opts.client ?? new PineApiClient({ baseUrl: opts.baseUrl ?? '', fetch: opts.fetch }))
     this.now = opts.now ?? (() => Date.now())
+    this.resolveRepositories = opts.resolveRepositories ?? true
   }
 
   private nowSec(): number {
@@ -315,14 +342,42 @@ export class ApiDataProvider implements PineDataProvider {
 
   // ---------------------------------------------------------------- claims
 
+  /** Documents only: their owner/name are display snapshots, never a source of repository ids. */
   private rememberDocument(sha256: string, doc: ClaimDocument): void {
     if (!this.documents.has(sha256) && this.documents.size >= DOCUMENT_CACHE_MAX) {
       const oldest = this.documents.keys().next().value
       if (oldest !== undefined) this.documents.delete(oldest)
     }
     this.documents.set(sha256, doc)
-    const r = doc.target.repository
-    this.repositoryIds.set(`${r.ownerLogin}/${r.name}`.toLowerCase(), r.id)
+  }
+
+  /**
+   * GitHub's repository id for owner/name, read through the backend GitHub route (session cookie and linked GitHub
+   * account; one GitHub call, cached). Null when GitHub has no public repository by that name. Signed out or not linked
+   * (401/403) is an error that says so, not an empty result; so is a server provider, which cannot resolve names.
+   */
+  private async repositoryIdOf(client: PineApiClient, repo: { owner: string; name: string }): Promise<number | null> {
+    if (!this.resolveRepositories) throw new PineDataError('Filtering claims by repository name needs ClaimQuery.repositoryId on the server.', 'unsupported')
+    const key = `${repo.owner}/${repo.name}`
+    const now = this.now()
+    const hit = this.repositoryLookups.get(key)
+    if (hit && now - hit.at < (hit.id === null ? REPOSITORY_MISS_TTL_MS : REPOSITORY_ID_TTL_MS)) return hit.id
+    let id: number | null
+    try {
+      id = (await client.getOrNull(`/api/v1/github/repos/${seg(repo.owner)}/${seg(repo.name)}`, githubRepoSchema))?.id ?? null
+    } catch (err) {
+      if (!(err instanceof PineBackendError)) throw err
+      if (err.status === 401 || err.status === 403) throw new PineBackendError(REPOSITORY_FILTER_NEEDS_GITHUB, err.status, err.apiCode, err.requestId)
+      // 422: not a public repository. Pine claims target public repositories only.
+      if (err.status !== 422) throw err
+      id = null
+    }
+    if (!this.repositoryLookups.has(key) && this.repositoryLookups.size >= REPOSITORY_LOOKUPS_MAX) {
+      const oldest = this.repositoryLookups.keys().next().value
+      if (oldest !== undefined) this.repositoryLookups.delete(oldest)
+    }
+    this.repositoryLookups.set(key, { at: now, id })
+    return id
   }
 
   /**
@@ -348,7 +403,12 @@ export class ApiDataProvider implements PineDataProvider {
   async listClaims(q: ClaimQuery = {}): Promise<Page<ApiClaimSummary>> {
     const client = this.client
     if (!client) return { items: [] }
-    const plan = planClaimQuery(q, this.repositoryIds)
+    let plan = planClaimQuery(q)
+    if (plan?.repo) {
+      const id = await this.repositoryIdOf(client, plan.repo)
+      // No public repository by that name on GitHub: no claim can be on it.
+      plan = id === null ? null : planClaimQuery(q, id)
+    }
     if (!plan) return { items: [] }
     const [page, catalog] = await Promise.all([client.get('/api/v1/claims', claimListSchema, plan.query), this.catalogOrEmpty(client)])
     const documents = await mapLimit(page.items, DOCUMENT_CONCURRENCY, (item) => this.listingDocument(client, item))

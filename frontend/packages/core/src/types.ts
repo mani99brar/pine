@@ -479,7 +479,20 @@ export interface ClaimSummary {
     /** Additive (api mode): content address of that policy document (ipfs://<raw CID>). */
     uri?: string
   }
-  source: { owner: string; repo: string; commitSha: string; prNumber?: number; prTitle?: string }
+  source: {
+    owner: string
+    repo: string
+    commitSha: string
+    prNumber?: number
+    prTitle?: string
+    /** Additive (api mode): the numeric GitHub repository id the claim pins on chain (its repository identity). */
+    repoId?: number
+    /**
+     * Additive: `owner`/`repo` are only as stated in the claim document; nothing tied them to `repoId`. Show them as
+     * unverified, never as the verified repository.
+     */
+    unverifiedName?: boolean
+  }
   status: ClaimStatus
   outcome?: Outcome
   createdAt: IsoDate
@@ -530,6 +543,11 @@ export interface ClaimQuery {
   policyId?: string
   family?: PolicyFamilyId
   repo?: string // owner/name
+  /**
+   * Additive: a GitHub repository id from a trusted source (GitHub's answer for owner/name, or a claim's
+   * `source.repoId`). api mode: sent as the backend's repositoryId filter; takes precedence over `repo`.
+   */
+  repositoryId?: number
   creator?: Address
   chainId?: ChainId
   search?: string

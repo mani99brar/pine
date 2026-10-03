@@ -276,6 +276,9 @@ describe('createDataProvider in api mode', () => {
     const p = createDataProvider(readPineEnv({ dataSource: 'api', apiInternalUrl: 'http://pine-api.internal:3000/' }), { runtime: 'server', fetch: fetcher })
     await p.listClaims()
     expect(backend.calls).toContain('http://pine-api.internal:3000/api/v1/claims?limit=20')
+    // Without the browser's session the GitHub route cannot resolve owner/name: never tried on the server.
+    await expect(p.listClaims({ repo: 'kleros/kleros-v2' })).rejects.toMatchObject({ code: 'unsupported' })
+    expect(backend.calls.some((u) => u.includes('/github/'))).toBe(false)
     for (const init of seen) {
       expect(init.method).toBe('GET')
       expect(Object.keys((init.headers ?? {}) as Record<string, string>).map((k) => k.toLowerCase())).toEqual(['accept'])

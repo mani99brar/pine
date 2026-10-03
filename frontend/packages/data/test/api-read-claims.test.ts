@@ -1,6 +1,6 @@
 /** api read side: ApiDataProvider claims, claim detail, evidence and depth against a fake same-origin backend. */
 import { describe, expect, it } from 'vitest'
-import { rawCidFromSha256 } from '@pine/core/pine-shared'
+import { encodeClaimDocument, rawCidFromSha256 } from '@pine/core/pine-shared'
 import { ApiDataProvider, HIDDEN_CLAIM_TITLE, PineBackendError } from '../src'
 import {
   agentClaim,
@@ -24,6 +24,7 @@ import {
   evidenceList,
   evidenceManifest,
   fakeBackend,
+  githubRepo,
   INVALID,
   isoSeconds,
   json,
@@ -82,7 +83,7 @@ describe('listClaims', () => {
       title: TITLE,
       violation: claimDocument.claim.violation,
       policy: { id: 'BOT-001', version: '0.1.0', family: 'BOT', title: 'Automation and Keeper Reliability' },
-      source: { owner: 'kleros', repo: 'kleros-v2', commitSha: TARGET_COMMIT, prNumber: 2101 },
+      source: { owner: 'kleros', repo: 'kleros-v2', commitSha: TARGET_COMMIT, prNumber: 2101, repoId: 427_016_914, unverifiedName: true },
       status: 'open',
       createdAt: isoSeconds(CREATED_AT),
       evidenceDeadline: isoSeconds(EVIDENCE_DEADLINE),
@@ -142,6 +143,7 @@ describe('listClaims', () => {
     expect(await p.listClaims({ creator: 'alice' as `0x${string}` })).toEqual({ items: [] })
     expect(await p.listClaims({ repo: 'kleros/..' })).toEqual({ items: [] })
     expect(await p.listClaims({ repo: 'kleros/../admin' })).toEqual({ items: [] })
+    for (const repositoryId of [0, -1, 1.5, Number.NaN, 2 ** 53]) expect(await p.listClaims({ repositoryId })).toEqual({ items: [] })
     expect(await p.listClaims({ status: 'open', outcome: 'yes' })).toEqual({ items: [] })
     expect(await p.listClaims({ cursor: 'x'.repeat(201) })).toEqual({ items: [] })
     expect(calls).toEqual([])
@@ -181,18 +183,112 @@ describe('listClaims', () => {
     expect((await p.listClaims({ sort: 'volume' })).items.map((c) => c.id.slice(-2))).toEqual(['01', '02'])
   })
 
-  it('filters by repository from verified documents, then asks the backend by repository id once it is known', async () => {
-    const other = listedClaim({ market: '0x0000000000000000000000000000000000000c02', claimDocument: { sha256: `0x${'99'.repeat(32)}`, cid: DOC_CID, url: null } })
-    const { p, calls } = provider({
-      '/api/v1/claims': claimList([listedClaim(), other]),
-      '/api/v1/policies': policyList,
-      [`/api/v1/agents/claims/${MARKET}`]: agentClaim(),
-      // The second claim's document cannot be read: unknown repository, so it never matches a repository filter.
-      '/api/v1/agents/claims/0x0000000000000000000000000000000000000c02': apiError(503, 'NOT_READY'),
+  describe('repository identity (SEC-GH-12: only the numeric id is tied to the chain)', () => {
+    // A claim created directly on ClaimRegistry for the attacker's fork, whose document names the genuine repository.
+    const FORK_ID = 999_999_001
+    const FORK_MARKET = '0x0000000000000000000000000000000000000f01'
+    const forkDocument = {
+      ...claimDocument,
+      nonce: `0x${'6b'.repeat(32)}`,
+      target: { ...claimDocument.target, repository: { id: FORK_ID, ownerLogin: 'kleros', name: 'kleros-v2' }, commit: 'f'.repeat(40) },
+    } as typeof claimDocument
+    const FORK_SHA = encodeClaimDocument(forkDocument).sha256 as `0x${string}`
+    const forkFacts = { market: FORK_MARKET, repositoryId: FORK_ID, commit: 'f'.repeat(40), claimDocument: { sha256: FORK_SHA, cid: rawCidFromSha256(FORK_SHA), url: null } }
+    const forkAgent = agentClaim({ platform: { market: FORK_MARKET, claimDocument: { sha256: FORK_SHA, cid: rawCidFromSha256(FORK_SHA), url: null } }, userSupplied: { title: TITLE, marketName: QUESTION_TEXT, document: forkDocument } })
+    const GITHUB_REPO = '/api/v1/github/repos/kleros/kleros-v2'
+
+    it('SEC-GH-12 marks owner/name as stated by the claim document and exposes the on-chain repository id', async () => {
+      const { p } = provider({ '/api/v1/claims': claimList([listedClaim(forkFacts)]), '/api/v1/policies': policyList, [`/api/v1/agents/claims/${FORK_MARKET}`]: forkAgent })
+      const [c] = (await p.listClaims()).items
+      expect(c?.source).toEqual({ owner: 'kleros', repo: 'kleros-v2', commitSha: 'f'.repeat(40), repoId: FORK_ID, unverifiedName: true, prNumber: 2101 })
+      expect(c?.api.repositoryId).toBe(FORK_ID)
     })
-    expect((await p.listClaims({ repo: 'Kleros/Kleros-V2' })).items.map((c) => c.id)).toEqual([MARKET])
-    await p.listClaims({ repo: 'kleros/kleros-v2' })
-    expect(calls.filter((u) => u.startsWith('/api/v1/claims'))).toEqual(['/api/v1/claims?limit=20', '/api/v1/claims?repositoryId=427016914&limit=20'])
+
+    it('SEC-GH-12 a document naming kleros/kleros-v2 under another repository id does not change the repository filter', async () => {
+      const both = claimList([listedClaim(forkFacts), listedClaim()])
+      const { p, calls } = provider({
+        // A backend that ignored the filter: the page-local check on the on-chain id still applies.
+        '/api/v1/claims': both,
+        '/api/v1/policies': policyList,
+        [`/api/v1/agents/claims/${MARKET}`]: agentClaim(),
+        [`/api/v1/agents/claims/${FORK_MARKET}`]: forkAgent,
+        [`/api/v1/claims/${FORK_MARKET}`]: claimDetail(forkFacts),
+        [`/api/v1/markets/${FORK_MARKET}/evidence`]: evidenceList([]),
+        [GITHUB_REPO]: githubRepo(),
+      })
+      // Read the fork's document both ways (listing enrichment and the claim page), as a browsing session would.
+      await p.listClaims()
+      expect((await p.getClaim(FORK_MARKET))?.source).toMatchObject({ owner: 'kleros', repo: 'kleros-v2', repoId: FORK_ID, unverifiedName: true })
+      const page = await p.listClaims({ repo: 'Kleros/Kleros-V2' })
+      expect(page.items.map((c) => c.id)).toEqual([MARKET])
+      expect(calls.filter((u) => u.startsWith('/api/v1/claims?'))).toEqual(['/api/v1/claims?limit=20', '/api/v1/claims?repositoryId=427016914&limit=20'])
+      expect(calls.join(' ')).not.toContain(String(FORK_ID))
+    })
+
+    it('resolves owner/name once through the backend GitHub route and caches the answer', async () => {
+      let now = NOW_MS
+      const backend = fakeBackend({ '/api/v1/claims': claimList([listedClaim()]), '/api/v1/policies': policyList, [`/api/v1/agents/claims/${MARKET}`]: agentClaim(), [GITHUB_REPO]: githubRepo() })
+      const p = new ApiDataProvider({ baseUrl: '', fetch: backend.fetch, now: () => now })
+      await p.listClaims({ repo: 'kleros/kleros-v2' })
+      await p.listClaims({ repo: 'KLEROS/kleros-v2', status: 'open' })
+      expect(backend.calls.filter((u) => u.startsWith('/api/v1/github/'))).toEqual([GITHUB_REPO])
+      now += 600_001
+      await p.listClaims({ repo: 'kleros/kleros-v2' })
+      expect(backend.calls.filter((u) => u.startsWith('/api/v1/github/'))).toEqual([GITHUB_REPO, GITHUB_REPO])
+    })
+
+    it('uses a trusted ClaimQuery.repositoryId as is, without a GitHub lookup', async () => {
+      const { p, calls } = provider({ '/api/v1/claims': claimList([listedClaim()]), '/api/v1/policies': policyList, [`/api/v1/agents/claims/${MARKET}`]: agentClaim() })
+      expect((await p.listClaims({ repositoryId: 427_016_914, repo: 'someone/else' })).items.map((c) => c.id)).toEqual([MARKET])
+      expect(calls.filter((u) => u.startsWith('/api/v1/claims?') || u.startsWith('/api/v1/github/'))).toEqual(['/api/v1/claims?repositoryId=427016914&limit=20'])
+    })
+
+    it('SEC-GH-12 never filters by a stated name: signed out or GitHub not linked is an error, not a document-name match', async () => {
+      for (const [status, code] of [
+        [401, 'UNAUTHENTICATED'],
+        [403, 'FORBIDDEN'],
+      ] as const) {
+        const { p, calls } = provider({ '/api/v1/claims': claimList([listedClaim()]), '/api/v1/policies': policyList, [`/api/v1/agents/claims/${MARKET}`]: agentClaim(), [GITHUB_REPO]: apiError(status, code) })
+        const err = await p.listClaims({ repo: 'kleros/kleros-v2' }).then(
+          () => null,
+          (e: unknown) => e,
+        )
+        expect(err).toBeInstanceOf(PineBackendError)
+        expect(err).toMatchObject({ status, code: 'unauthorized' })
+        expect((err as Error).message).toMatch(/linked GitHub account/)
+        expect(calls.filter((u) => u.startsWith('/api/v1/claims'))).toEqual([])
+      }
+    })
+
+    it('returns no claims for a name GitHub has no public repository for, and asks again after a minute', async () => {
+      let now = NOW_MS
+      for (const answer of [apiError(404, 'NOT_FOUND'), apiError(422, 'UNPROCESSABLE')]) {
+        const backend = fakeBackend({ '/api/v1/claims': claimList([listedClaim()]), [GITHUB_REPO]: answer })
+        const p = new ApiDataProvider({ baseUrl: '', fetch: backend.fetch, now: () => now })
+        expect(await p.listClaims({ repo: 'kleros/kleros-v2' })).toEqual({ items: [] })
+        expect(await p.listClaims({ repo: 'kleros/kleros-v2' })).toEqual({ items: [] })
+        now += 60_001
+        await p.listClaims({ repo: 'kleros/kleros-v2' })
+        expect(backend.calls).toEqual([GITHUB_REPO, GITHUB_REPO])
+      }
+    })
+
+    it('surfaces a rate-limited or failing GitHub lookup without caching it', async () => {
+      const backend = fakeBackend({ '/api/v1/claims': claimList([listedClaim()]), [GITHUB_REPO]: apiError(429, 'RATE_LIMITED') })
+      const p = new ApiDataProvider({ baseUrl: '', fetch: backend.fetch, now: () => NOW_MS })
+      await expect(p.listClaims({ repo: 'kleros/kleros-v2' })).rejects.toMatchObject({ status: 429, code: 'rate_limited' })
+      await expect(p.listClaims({ repo: 'kleros/kleros-v2' })).rejects.toMatchObject({ status: 429 })
+      expect(backend.calls).toEqual([GITHUB_REPO, GITHUB_REPO])
+    })
+
+    it('a server provider never resolves names (no session there) and makes no request for them', async () => {
+      const backend = fakeBackend({ '/api/v1/claims': claimList([listedClaim()]), '/api/v1/policies': policyList })
+      const p = new ApiDataProvider({ baseUrl: 'http://pine-api.internal:3000', fetch: backend.fetch, resolveRepositories: false, now: () => NOW_MS })
+      await expect(p.listClaims({ repo: 'kleros/kleros-v2' })).rejects.toMatchObject({ code: 'unsupported' })
+      expect(backend.calls).toEqual([])
+      await p.listClaims({ repositoryId: 427_016_914 })
+      expect(backend.calls).toContain('http://pine-api.internal:3000/api/v1/claims?repositoryId=427016914&limit=20')
+    })
   })
 
   it('reads each claim document once (documents are immutable) with bounded fan-out', async () => {
@@ -387,7 +483,8 @@ describe('getClaim', () => {
     if (!c) throw new Error('claim expected')
     expect(c.title).toBe(HIDDEN_CLAIM_TITLE)
     expect(c.violation).toBe('')
-    expect(c.source).toEqual({ owner: '', repo: '', commitSha: TARGET_COMMIT })
+    // The on-chain repository id is a chain fact, not user text.
+    expect(c.source).toEqual({ owner: '', repo: '', commitSha: TARGET_COMMIT, repoId: 427_016_914 })
     expect(c.manifest.claim).toMatchObject({ requirement: '', violation: '', scope: { inScope: [], outOfScope: [] }, assumptions: [], exclusions: [], parameters: {} })
     expect(c.manifest.question.text).toBe('')
     expect(c.manifestUri).toBe('')
