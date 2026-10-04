@@ -163,7 +163,8 @@ export function TxSteps({
                 <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-lumen-3">
                   {s.collateralCost && Number(s.collateralCost.amount) > 0 && (
                     <span>
-                      Moves <span className="tnum font-semibold text-lumen">{s.collateralCost.amount}</span> {s.collateralCost.currency} into the market
+                      {s.collateralCost.purpose ? 'Sends' : 'Moves'} <span className="tnum font-semibold text-lumen">{s.collateralCost.amount}</span> {s.collateralCost.currency}{' '}
+                      {s.collateralCost.purpose ?? 'into the market'}
                     </span>
                   )}
                   {s.estimatedCost && Number(s.estimatedCost.amount) > 0 && (

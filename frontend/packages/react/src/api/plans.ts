@@ -249,6 +249,20 @@ export function describePlanStep(step: PlanStep, manifest: DeploymentManifest): 
   }
 }
 
+/** Where the xDAI a step sends (its native value) goes, worded for the action. */
+function valuePurpose(step: PlanStep): string {
+  switch (step.allowlistId) {
+    case 'gnosisRouter.splitFromBase':
+      return 'into the market'
+    case 'realitio.submitAnswer':
+      return 'as the answer bond'
+    case 'realitio.fundAnswerBounty':
+      return 'as the answer bounty'
+    default:
+      return 'with this transaction'
+  }
+}
+
 /** The runner step id of a plan step. */
 export function planStepId(stepId: string): TxStepId {
   return `plan:${stepId}`
@@ -273,7 +287,8 @@ export function planToTxSteps(plan: TxPlan, manifest: DeploymentManifest): TxSte
       kind: 'transaction',
       request: { chainId: step.chainId, to: step.to as Hex, data: step.data as Hex, value: step.value.toString(10), from: plan.account as Hex },
       freezesTerms: step.allowlistId === 'claimRegistry.createClaim' ? true : undefined,
-      estimatedCost: step.value > 0n ? { amount: formatUnits(step.value, 18), currency: 'xDAI' } : undefined,
+      // The value is money the step sends, not gas (plans carry no gas estimate).
+      collateralCost: step.value > 0n ? { amount: formatUnits(step.value, 18), currency: 'xDAI', purpose: valuePurpose(step) } : undefined,
     } satisfies TxStep
   })
 }

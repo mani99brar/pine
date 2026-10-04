@@ -740,8 +740,12 @@ export interface TxStep {
   request?: { chainId: ChainId; to: Address; data: Hex; value: string /* wei */; from?: Address }
   /** Estimated cost shown before the wallet prompt */
   estimatedCost?: { amount: DecimalString; currency: string }
-  /** Collateral this step moves out of the wallet (e.g. the liquidity deposit); counts toward the spending limit */
-  collateralCost?: { amount: DecimalString; currency: string }
+  /**
+   * Collateral this step moves out of the wallet (e.g. the liquidity deposit, or the xDAI a transaction sends); counts
+   * toward the spending limit. `purpose` words where it goes for the action ("as the answer bond"); without it, it moves
+   * into the market. Never gas: that is `estimatedCost`.
+   */
+  collateralCost?: { amount: DecimalString; currency: string; purpose?: string }
   /** After this step confirms, claim terms are frozen */
   freezesTerms?: boolean
   optional?: boolean

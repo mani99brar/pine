@@ -148,4 +148,22 @@ describe('plan step presentation (SEC-TX-10: labels come from decoded calldata)'
     const step = buildStep(manifest, { id: 'answer', allowlistId: 'realitio.submitAnswer', args: [QUESTION, `0x${'00'.repeat(31)}01`, 0n], value: 10n ** 19n })
     expect(describePlanStep(step, manifest).label).toBe('Answer “No” with a 10 xDAI bond')
   })
+
+  it('shows the xDAI a step sends as money leaving the wallet, worded for the action, never as gas', () => {
+    const sent = (allowlistId: string, args: readonly unknown[], value: bigint) => {
+      const plan = newPlan(manifest, 'plan-value', ACCOUNT, [buildStep(manifest, { id: 'only', allowlistId, args, value })])
+      const [step] = planToTxSteps(plan, manifest)
+      expect(step!.estimatedCost).toBeUndefined()
+      return step!.collateralCost
+    }
+    expect(sent('gnosisRouter.splitFromBase', [MARKET], 10n ** 18n)).toEqual({ amount: '1', currency: 'xDAI', purpose: 'into the market' })
+    expect(sent('realitio.submitAnswer', [QUESTION, `0x${'00'.repeat(31)}01`, 0n], 12_345_678_901_234_567_891n)).toEqual({
+      amount: '12.345678901234567891',
+      currency: 'xDAI',
+      purpose: 'as the answer bond',
+    })
+    expect(sent('realitio.fundAnswerBounty', [QUESTION], 1n)).toEqual({ amount: '0.000000000000000001', currency: 'xDAI', purpose: 'as the answer bounty' })
+    // A step without value sends nothing and shows no amount.
+    expect(sent('realityProxy.resolve', [MARKET], 0n)).toBeUndefined()
+  })
 })
