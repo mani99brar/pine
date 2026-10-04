@@ -310,6 +310,10 @@ PINE_DEV_CONTROL_URL=http://127.0.0.1:$CONTROL_PORT
 PINE_DEV_PROXY=1
 # GitHub is simulated here: "Link GitHub" opens the dev control server's consent page instead of github.com.
 NEXT_PUBLIC_PINE_DEV_GITHUB_ORIGIN=http://127.0.0.1:$CONTROL_PORT
+# Local fork only: on wallet connect Prism asks this dev control server (POST /dev/fund) to top the wallet up with test
+# xDAI on the anvil fork, and blocks sending while the wallet's own network is not the fork. Honoured only for a loopback
+# origin; production builds never set it.
+NEXT_PUBLIC_PINE_DEV_FORK_ORIGIN=http://127.0.0.1:$CONTROL_PORT
 EOF
 chmod 644 "$STATE_DIR/frontend.env"
 
@@ -362,7 +366,7 @@ cat <<EOF
 [dev-stack] READY (development only; local anvil fork, nothing touches a real network)
   API              http://127.0.0.1:$API_PORT   (healthz, readyz, /api/v1/*, /api/openapi.json, /.well-known/pine.json)
   user content     $USER_CONTENT_ORIGIN
-  dev control      http://127.0.0.1:$CONTROL_PORT/dev/health
+  dev control      http://127.0.0.1:$CONTROL_PORT/dev/health   (faucet: POST /dev/fund, see README "Your own wallet on the fork")
   anvil (chain 100) $RPC_PRIMARY   head $(rpc_call eth_blockNumber | jq -r '.result' | xargs printf '%d')
   postgres         127.0.0.1:$PG_PORT/$PG_DB   (container $PG_CONTAINER)
   indexer health   http://127.0.0.1:$INDEXER_METRICS_PORT/readyz

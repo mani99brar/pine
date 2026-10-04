@@ -28,7 +28,7 @@ directly, never `pnpm` (pnpm rewrites `pnpm-lock.yaml`).
 | API (dev server) | `http://127.0.0.1:3000` | `packages/api/scripts/dev-server.ts`: the real `run()` of `src/main.ts`, fake GitHub + fake IPFS |
 | user content | `http://127.0.0.1:3001` | `GET /c/<sha256>` (attachment, sandbox CSP) |
 | API metrics | `http://127.0.0.1:9464/metrics` | |
-| dev control | `http://127.0.0.1:3999` | `GET /dev/health`, `GET /dev/github/repos`, `POST /dev/github/authorize` |
+| dev control | `http://127.0.0.1:3999` | `GET /dev/health`, `GET /dev/github/repos`, `POST /dev/github/authorize`, `POST /dev/fund` (faucet, below) |
 
 State lives in `scripts/dev-stack/.state/` (git-ignored): `logs/*.log`, `pids/`, `deployment.json`, `api.env`,
 `indexer.env`, `secrets.env`, and **`frontend.env`** (the frontend's environment against this stack).
@@ -55,6 +55,55 @@ PR #12 with 2 commits, PR #15 with 1 commit, branches `main`, `feature/retry-bud
 One GitHub user id links to one wallet at a time (`?github=error` otherwise): give each test wallet its own
 `githubUserId` (the login can stay `pine-labs`), or unlink with `DELETE /api/v1/auth/github`. The smoke test uses id
 190455299 and unlinks at the end; it leaves a listed claim and a funded market behind as demo data.
+
+## Your own wallet on the fork (MetaMask)
+
+The fork exists only on this machine. MetaMask's built-in **Gnosis** network talks to the **real** Gnosis RPC: Prism reads
+and simulates through the fork, but MetaMask would sign and broadcast on real Gnosis (real gas, contracts that exist only
+on the fork). Point the wallet at the fork first:
+
+1. MetaMask → Networks → **Gnosis** (chain id 100) → edit → RPC URLs → **Add RPC URL** `http://127.0.0.1:8545`, then
+   select it as the network's RPC. (Or add a separate network: name "Gnosis (local fork)", RPC `http://127.0.0.1:8545`,
+   chain id `100`, symbol `XDAI`.) Switch back to the real RPC when you are done testing.
+2. Open Prism at exactly `http://localhost:3004` (not `127.0.0.1:3004`: the faucet and the API only accept that origin).
+3. Connect. In a dev-fork build Prism then:
+   - **checks the wallet's own network** through the wallet's provider (not the app's RPC): chain id 100, Pine's
+     ClaimRegistry has code, and the hash of Pine's deployment block equals the fork's (anvil mined it, so real Gnosis has
+     another block at that height). Otherwise a red strip says the wallet is on the real network, and the transaction
+     runner refuses every send before the wallet's signature prompt ("Nothing was sent"). Chain 1 (Ethereum) is not
+     forked, so steps on it are refused too. The strip's button asks the wallet (`wallet_addEthereumChain`) to add the
+     fork RPC; if MetaMask keeps its existing Gnosis RPC, select the local one by hand. Signing in (SIWE,
+     `personal_sign`) moves no funds and stays allowed.
+   - **funds the wallet** once per address per browser tab, only when the check passed: `POST /dev/fund` raises its
+     native xDAI to **1,000 xDAI** when it holds less than **500 xDAI** (never lowers a balance), and a toast says so.
+     No token is given: every Pine flow in `api` mode (gas, the liquidity ladder's `splitFromBase` budget, Reality bonds
+     and bounties) is paid in native xDAI. The header's sDAI balance is display only and stays 0.
+
+Prism enables both only when it is built with `NEXT_PUBLIC_PINE_DEV_FORK_ORIGIN` (written to `.state/frontend.env` by
+`up.sh`; a loopback http(s) origin only, together with a loopback `NEXT_PUBLIC_RPC_URL_100`). Production builds never set
+it, so they contain no path that funds or blocks. After pulling this change, rebuild/restart Prism with the new
+`frontend.env`; the API dev server picks up the route on its next start (`up.sh --restart`, which keeps anvil and Postgres).
+
+### The faucet: `POST http://127.0.0.1:3999/dev/fund`
+
+```sh
+curl -s -X POST http://127.0.0.1:3999/dev/fund -H 'origin: http://localhost:3004' -H 'x-pine-dev: 1' \
+  -H 'content-type: application/json' --data '{"address":"0x70997970C51812dc3A010C7d01b50e0d17dc79C8"}'
+# {"address":"0x7099…79C8","chainId":100,"funded":false,"balanceWei":"…","previousBalanceWei":"…",
+#  "thresholdWei":"500000000000000000000","targetWei":"1000000000000000000000","delegatedTo":null,"tokens":[]}
+```
+
+- Body: `{address}`, an EIP-55 checksummed, non-zero address. Only the app origin (`Origin: http://localhost:3004`
+  exactly) may call it, with `x-pine-dev: 1` and `content-type: application/json`; the CORS preflight is answered for that
+  origin only (no credentials). Limits: 5 requests per address and 60 overall per minute (429 with `Retry-After`).
+- It uses `anvil_setBalance` (a state write: no transaction, no signature, the wallet's fork nonce is unchanged) against
+  the RPC the dev server verified at startup, and re-checks before every top-up that the node answers as `anvil/…`, on
+  chain id `0x64`, with Pine's ClaimRegistry deployed. A real Gnosis node fails all three, so it is never touched.
+- Addresses with contract code are refused (422). An EIP-7702-delegated EOA (code `0xef0100…`; every anvil dev account
+  on this fork carries one, inherited from Gnosis) is funded with a `warning`: steps that pay xDAI back to it (merge,
+  redeem, Reality withdraw) run its delegate's code and revert if that cannot receive xDAI, as they would on mainnet.
+- Side note: anvil itself answers CORS for any origin (its default), so any page in your browser can already call
+  `anvil_*` on `127.0.0.1:8545`; keep the stack down when you are not using it.
 
 ## Frontend integration
 
