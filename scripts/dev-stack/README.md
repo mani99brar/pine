@@ -56,6 +56,22 @@ One GitHub user id links to one wallet at a time (`?github=error` otherwise): gi
 `githubUserId` (the login can stay `pine-labs`), or unlink with `DELETE /api/v1/auth/github`. The smoke test uses id
 190455299 and unlinks at the end; it leaves a listed claim and a funded market behind as demo data.
 
+## Start Prism against the stack
+
+Build Prism with `.state/frontend.env` and serve it on **loopback only**:
+
+```sh
+cd frontend/apps/prism
+set -a && . ../../../scripts/dev-stack/.state/frontend.env && set +a
+corepack pnpm build
+corepack pnpm exec next start -p 3004 -H 127.0.0.1
+# or, while editing the frontend: corepack pnpm exec next dev -p 3004 -H 127.0.0.1
+```
+
+Always pass `-H 127.0.0.1`. Without it Next.js listens on every interface, so Prism, and the dev proxy it runs to the
+local API (`PINE_DEV_PROXY=1`: `/api/v1/*` and friends with your session cookie), are reachable from anyone on the LAN.
+Open it as `http://localhost:3004` (below).
+
 ## Your own wallet on the fork (MetaMask)
 
 The fork exists only on this machine. MetaMask's built-in **Gnosis** network talks to the **real** Gnosis RPC: Prism reads
@@ -63,21 +79,31 @@ and simulates through the fork, but MetaMask would sign and broadcast on real Gn
 on the fork). Point the wallet at the fork first:
 
 1. MetaMask → Networks → **Gnosis** (chain id 100) → edit → RPC URLs → **Add RPC URL** `http://127.0.0.1:8545`, then
-   select it as the network's RPC. (Or add a separate network: name "Gnosis (local fork)", RPC `http://127.0.0.1:8545`,
-   chain id `100`, symbol `XDAI`.) Switch back to the real RPC when you are done testing.
-2. Open Prism at exactly `http://localhost:3004` (not `127.0.0.1:3004`: the faucet and the API only accept that origin).
-3. Connect. In a dev-fork build Prism then:
+   select it as the network's RPC. (Current MetaMask refuses a second network with chain id 100, so adding the RPC URL to
+   the existing Gnosis network is the only way.) Switch back to the real RPC when you are done testing.
+2. Open Prism at exactly `http://localhost:3004` (not `127.0.0.1:3004`: the faucet and the API only accept that origin;
+   on another origin the faucet toast says so).
+3. Connect a **browser-extension wallet** (MetaMask, Rabby, or any injected/EIP-6963 wallet). A dev-fork build lists only
+   those: a WalletConnect wallet's reads are answered by the app's own RPC (the fork) while the phone signs and broadcasts
+   on its own network, so it can never be checked and is blocked ("Only a browser-extension wallet can be checked on the
+   local fork; this wallet is blocked here"). In a dev-fork build Prism then:
    - **checks the wallet's own network** through the wallet's provider (not the app's RPC): chain id 100, Pine's
      ClaimRegistry has code, and the hash of Pine's deployment block equals the fork's (anvil mined it, so real Gnosis has
      another block at that height). Otherwise a red strip says the wallet is on the real network, and the transaction
      runner refuses every send before the wallet's signature prompt ("Nothing was sent"). Chain 1 (Ethereum) is not
      forked, so steps on it are refused too. The strip's button asks the wallet (`wallet_addEthereumChain`) to add the
-     fork RPC; if MetaMask keeps its existing Gnosis RPC, select the local one by hand. Signing in (SIWE,
-     `personal_sign`) moves no funds and stays allowed.
-   - **funds the wallet** once per address per browser tab, only when the check passed: `POST /dev/fund` raises its
-     native xDAI to **1,000 xDAI** when it holds less than **500 xDAI** (never lowers a balance), and a toast says so.
+     fork RPC; if MetaMask keeps its existing Gnosis RPC, select the local one by hand. Prism re-checks after that, when
+     the window regains focus or the tab becomes visible, and every 15 s. Signing in (SIWE, `personal_sign`) moves no
+     funds and stays allowed.
+   - **funds the wallet** only when the check passed, on every connect, account switch, page load and move onto the
+     fork: `POST /dev/fund` raises its native xDAI to **1,000 xDAI** when it holds less than **500 xDAI** (never lowers a
+     balance; repeated calls are no-ops, and it is rate-limited), and a toast says so when it actually topped up.
      No token is given: every Pine flow in `api` mode (gas, the liquidity ladder's `splitFromBase` budget, Reality bonds
      and bounties) is paid in native xDAI. The header's sDAI balance is display only and stays 0.
+
+After the fork restarts (`down.sh && up.sh`, a new chain with the same chain id), MetaMask still holds the old chain's
+nonce and activity for the account and its transactions fail: clear them (MetaMask → Settings → Advanced → **Clear
+activity tab data**) and reconnect.
 
 Prism enables both only when it is built with `NEXT_PUBLIC_PINE_DEV_FORK_ORIGIN` (written to `.state/frontend.env` by
 `up.sh`; a loopback http(s) origin only, together with a loopback `NEXT_PUBLIC_RPC_URL_100`). Production builds never set

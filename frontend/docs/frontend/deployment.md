@@ -56,8 +56,13 @@ PINE_API_INTERNAL_URL=http://127.0.0.1:3000          # runtime, server only: pub
 ```bash
 scripts/dev-stack/up.sh            # repository root: Postgres, anvil fork of Gnosis with Pine deployed, pine-api, indexer
 set -a && . scripts/dev-stack/.state/frontend.env && set +a
-cd frontend && NEXT_PUBLIC_RPC_URL_100=http://127.0.0.1:8545 pnpm dev:prism    # http://localhost:3004
+cd frontend/apps/prism && corepack pnpm exec next dev -p 3004 -H 127.0.0.1    # http://localhost:3004
+# production build instead: corepack pnpm build && corepack pnpm exec next start -p 3004 -H 127.0.0.1
 ```
+
+Bind Prism to loopback (`-H 127.0.0.1`): otherwise Next.js listens on every interface and Prism, with its dev proxy to the
+local API (`PINE_DEV_PROXY=1`), is reachable from the LAN. `frontend.env` already sets `NEXT_PUBLIC_RPC_URL_100` to the
+fork. See `scripts/dev-stack/README.md` ("Start Prism against the stack", "Your own wallet on the fork").
 
 ## 3. Vercel
 
