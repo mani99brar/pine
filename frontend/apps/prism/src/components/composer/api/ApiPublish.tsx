@@ -112,7 +112,8 @@ export function ApiStagePublish({ c, nav, acknowledged }: { c: ClaimComposer; na
   const runner = pub.runner.runner
   const preview = pub.preview
   const state = pub.publication?.state ?? null
-  const locked = publicationLocked(pub)
+  // A claim found on chain for this document (a transaction of an earlier visit landed) freezes the terms as well.
+  const locked = publicationLocked(pub) || market !== null
   const ready = identityReady(id, 'publish')
   const failedRun = runner.state === 'failed' && !locked
   // Defence in depth (the hook already marks such a preview stale): never publish while the composed claim has issues.
@@ -176,6 +177,12 @@ export function ApiStagePublish({ c, nav, acknowledged }: { c: ClaimComposer; na
             {COPY.frozenTerms}
           </Notice>
         )}
+        {market && pub.status === 'confirming' && (
+          <Notice tone="boundary" title="Your claim is already on chain">
+            Pine&apos;s claim registry records this claim from your wallet: an earlier transaction created it, so nothing more is sent. Pine confirms it once it
+            has indexed the claim.
+          </Notice>
+        )}
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
@@ -200,6 +207,13 @@ export function ApiStagePublish({ c, nav, acknowledged }: { c: ClaimComposer; na
             </p>
           )}
           {pub.error && <WriteErrorNotice className="mt-5" error={pub.error} onRetry={() => void pub.publish()} onRepreview={() => nav.go('review')} saveDraft={c.saveNow} />}
+          {pub.existingMarket && (
+            <p className="mt-3 text-[0.875rem]">
+              <Link href={`/claims/${pub.existingMarket}`} className="link">
+                Open the existing claim
+              </Link>
+            </p>
+          )}
           {!ready && !locked && <ApiIdentityGate need="publish" className="mt-5" saveDraft={c.saveNow} reason="Pine publishes claims for the wallet you signed in with." />}
           <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-edge pt-5">
             {pub.status === 'confirming' || (pub.status === 'confirmed' && !market) ? (

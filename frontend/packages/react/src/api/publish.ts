@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { usePublicClient } from 'wagmi'
 import type { Address, ClaimDraft, Hex, PublicationStep } from '@pine/core'
-import { canonicalJson, PlanVerificationError, type JsonValue } from '@pine/core/pine-shared'
+import { canonicalJson, claimRegistryAbi, PlanVerificationError, type JsonValue } from '@pine/core/pine-shared'
 import {
   claimPreviewResponseSchema,
   describeWriteError,
@@ -87,8 +88,16 @@ export interface ApiPublish {
   /** The wallet steps (createClaim). Drive it with `publish()`, not with runner.run(). */
   runner: ApiPlanRunner
   publication: PublicationView | null
-  /** The claim's Seer market once the backend confirmed it and ClaimRegistry (user's RPC) records this document for it. */
+  /**
+   * The claim's Seer market once ClaimRegistry (user's RPC) records this document and creator for it: reported by the
+   * backend, or found on chain when the createClaim transaction landed without its hash reaching this page.
+   */
   market: Address | null
+  /**
+   * The market a DuplicateClaim revert named while it could not be confirmed on chain (null otherwise): link to it, but
+   * the draft is not marked published from it. The address comes from the RPC's revert text.
+   */
+  existingMarket: Address | null
   error: WriteErrorInfo | null
   busy: boolean
   /** Mirrors the draft to the backend (create or update). Returns false when invalid or refused. */
@@ -175,6 +184,28 @@ function upsertStep(steps: PublicationStep[] | undefined, step: PublicationStep)
 
 const PUBLICATION_LIMITS = { maxTotalValueWei: 0n, maxApprovalAmount: 0n } as const
 
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
+/** ClaimRegistry's DuplicateClaim(address existingMarket) selector (IClaimRegistry.sol). */
+const DUPLICATE_CLAIM = '0x05e2858b'
+
+/**
+ * A failed step whose pre-flight simulation reverted with DuplicateClaim: the market its argument names, or null when the
+ * revert text has no readable address; undefined when no step failed that way. The text comes from the RPC, so the
+ * address is only ever a link, never proof.
+ */
+function duplicateClaimOf(steps: readonly { status: string; error?: string }[]): Address | null | undefined {
+  for (const s of steps) {
+    const text = s.status === 'failed' ? (s.error?.toLowerCase() ?? '') : ''
+    const at = text.indexOf(DUPLICATE_CLAIM)
+    if (at < 0) continue
+    const word = /^0x05e2858b[^0-9a-f]*(?:0x)?0{24}([0-9a-f]{40})(?![0-9a-f])/.exec(text.slice(at))
+    const market = word ? `0x${word[1]}` : null
+    return market && market !== ZERO_ADDRESS ? (market as Address) : null
+  }
+  return undefined
+}
+
 export function useApiPublish(draftId: string, options: UseApiPublishOptions = {}): ApiPublish {
   const { env, drafts: draftStore } = usePine()
   const api = useWriteApi()
@@ -253,15 +284,16 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
   const preview = verified?.preview ?? null
   const verifyIssues = useMemo(() => verified?.issues ?? [], [verified])
 
-  const latest = useRef({ preview, verifyIssues, account, manifest, backend })
-  useEffect(() => {
-    latest.current = { preview, verifyIssues, account, manifest, backend }
-  })
+  const latest = useRef({ preview, verifyIssues, account, manifest, backend, market: null as Address | null })
 
   // The market Pine reports is accepted only once ClaimRegistry on the user's own RPC says it carries this document
   // and creator (the backend is never trusted for chain facts).
   const reader = useRegistryReader()
+  const client = usePublicClient({ chainId: env.defaultChainId })
   const [market, setMarket] = useState<Address | null>(null)
+  useEffect(() => {
+    latest.current = { preview, verifyIssues, account, manifest, backend, market }
+  })
   const checkedMarket = useRef<string | null>(null)
   const followPublication = useCallback(
     (view: PublicationView) => {
@@ -287,6 +319,34 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
       )
     },
     [reader, writeDraft],
+  )
+
+  /**
+   * The claim ClaimRegistry records for the verified preview's creator and document, null when there is none. createClaim
+   * keys claims by (msg.sender, claimDocumentSha256) and reverts DuplicateClaim for a second one, so this is the claim of
+   * this draft's preview: a transaction of an earlier visit landed. Read on the user's RPC, then checked like a reported
+   * market.
+   */
+  const findOnChain = useCallback(async (): Promise<Address | null> => {
+    const { preview: p, verifyIssues: issues, manifest: m } = latest.current
+    if (!p || issues.length > 0 || !m || !reader || !client) return null
+    const raw = await client.readContract({ address: m.pine.claimRegistry, abi: claimRegistryAbi, functionName: 'marketOf', args: [p.document.creator, p.documentSha256] })
+    const found = String(raw).toLowerCase()
+    if (!/^0x[0-9a-f]{40}$/.test(found) || found === ZERO_ADDRESS) return null
+    const claim = await readOnChainClaim(reader, m, found as Address)
+    if (!claim || claim.claimDocumentSha256 !== p.documentSha256 || claim.creator !== p.document.creator) return null
+    return found as Address
+  }, [reader, client])
+
+  /** Records a claim found on chain as this draft's market; the publication is then followed until Pine confirms it. */
+  const adopt = useCallback(
+    (found: Address) => {
+      checkedMarket.current = found
+      setMarket(found)
+      setError(null)
+      void writeDraft((pub) => ({ ...pub, marketAddress: found, claimId: found }))
+    },
+    [writeDraft],
   )
 
   const action = usePlanAction({
@@ -339,18 +399,40 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
     publication === null ||
     publication.state === 'submitted' ||
     publication.state === 'mined' ||
-    (publication.state === 'planned' && runner.runner.state === 'done')
+    (publication.state === 'planned' && (runner.runner.state === 'done' || market !== null))
   usePolledStatus<PublicationView>({
     key: publicationId && awaitingIndex ? `publication:${publicationId}` : null,
     load: () => requireWriteApi(api).getPublication(publicationId ?? ''),
-    done: (v) => FINAL_PUBLICATION_STATES.includes(v.state) || (v.state === 'planned' && !runnerHasSentSteps(runner)),
+    done: (v) => FINAL_PUBLICATION_STATES.includes(v.state) || (v.state === 'planned' && !runnerHasSentSteps(runner) && market === null),
     onValue: followPublication,
     intervalMs: options.pollIntervalMs ?? 5_000,
     sleep: options.sleep ? (ms) => options.sleep?.(ms) ?? Promise.resolve() : undefined,
   })
 
+  // A publication was planned, so its createClaim may have landed without its hash reaching this page (a reload while
+  // the wallet was answering), or the last attempt reverted (DuplicateClaim): ask ClaimRegistry whenever nothing runs,
+  // and adopt the claim it records for this creator and document instead of sending again.
+  const chainCheck =
+    preview && publicationId && market === null && publication?.state !== 'confirmed' && !runnerIsBusy(runner)
+      ? `${publicationId}:${preview.documentSha256}:${publication?.state ?? ''}:${runner.runner.state}`
+      : null
+  useEffect(() => {
+    if (!chainCheck) return
+    let cancelled = false
+    findOnChain().then(
+      (found) => {
+        if (found && !cancelled) adopt(found)
+      },
+      () => undefined, // RPC unavailable: checked again with the next change, and before any publish.
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [chainCheck, findOnChain, adopt])
+
   /** Terms are locked once a createClaim transaction may land (until the backend says it failed or expired). */
   const locked =
+    market !== null ||
     publication?.state === 'submitted' ||
     publication?.state === 'mined' ||
     publication?.state === 'confirmed' ||
@@ -464,6 +546,15 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
       setError({ code: 'CONFLICT', action: 'repreview', message: 'The offer to publish this preview expired. Request a new preview.' })
       return
     }
+    if (latest.current.market) return
+    if (latest.current.backend?.publicationId) {
+      // Planned before: never send again when its transaction landed without its hash reaching this page.
+      const found = await findOnChain().catch(() => null)
+      if (found) {
+        adopt(found)
+        return
+      }
+    }
     await action.runWhenReady()
     // Set by create() during the run (TS keeps the narrowing from the reset above across the await).
     const noPlan = noPlanRef.current as PublicationView | null
@@ -473,7 +564,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
       followPublication(noPlan)
       if (noPlan.planExpired) setError({ code: 'CONFLICT', action: 'repreview', message: 'The offer to publish this preview expired. Request a new preview.' })
     }
-  }, [action, runner, now, followPublication])
+  }, [action, runner, now, followPublication, findOnChain, adopt])
 
   const refresh = useCallback(async () => {
     const id = publication?.id ?? backend?.publicationId
@@ -494,6 +585,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
   const sent = runnerHasSentSteps(runner)
   let status: ApiPublishStatus
   if (publication?.state === 'confirmed') status = 'confirmed'
+  else if (market) status = 'confirming' // found on chain: Pine is still indexing it
   else if (publication?.state === 'failed') status = 'failed'
   else if (publication?.state === 'expired' || (publication?.state === 'planned' && publication.planExpired && !sent)) status = 'expired'
   else if (publication && (publication.state === 'submitted' || publication.state === 'mined')) status = 'confirming'
@@ -508,9 +600,21 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
   else status = 'idle'
 
   const runnerError = runner.error ?? runner.runner.error ?? null
+  // A DuplicateClaim revert not (yet) confirmed on chain: the claim exists, but this draft is not marked published from
+  // the RPC's word alone.
+  const duplicate = market === null ? duplicateClaimOf(runner.runner.steps) : undefined
+  const duplicateError: WriteErrorInfo | null =
+    duplicate === undefined
+      ? null
+      : {
+          code: 'CONFLICT',
+          action: 'none',
+          message: `ClaimRegistry refused to create this claim again: it already exists${duplicate ? ` (market ${duplicate})` : ''}, so nothing was sent. This app could not confirm it on chain yet; publish again to check once more.`,
+        }
   const shownError =
     (refusal !== null && error === refusal.error && !refusalApplies ? null : error) ??
     action.lastError ??
+    duplicateError ??
     (runnerError && !noPlanRef.current ? { code: 'UNKNOWN' as const, action: 'none' as const, message: runnerError } : null)
 
   return {
@@ -523,6 +627,7 @@ export function useApiPublish(draftId: string, options: UseApiPublishOptions = {
     runner,
     publication,
     market,
+    existingMarket: duplicate ?? null,
     error: shownError,
     busy: op !== null || runnerIsBusy(runner),
     saveDraft,
