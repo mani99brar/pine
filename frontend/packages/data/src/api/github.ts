@@ -49,7 +49,20 @@ function avatarFor(login: string): string {
   return `https://avatars.githubusercontent.com/${encodeURIComponent(login)}`
 }
 
+const BOT_SUFFIX = '[bot]'
+
+/** A GitHub App author ("dependabot[bot]") has its page at github.com/apps/<name> and no user avatar by login. */
+function authorPage(login: string): string {
+  return login.endsWith(BOT_SUFFIX)
+    ? `https://github.com/apps/${encodeURIComponent(login.slice(0, -BOT_SUFFIX.length))}`
+    : `https://github.com/${encodeURIComponent(login)}`
+}
+
 const GHOST: GitHubUser = { login: 'ghost', id: 0, name: null, avatarUrl: 'https://avatars.githubusercontent.com/u/10137?v=4', htmlUrl: 'https://github.com/ghost' }
+
+function authorAvatar(login: string): string {
+  return login.endsWith(BOT_SUFFIX) ? GHOST.avatarUrl : avatarFor(login)
+}
 
 /** RepoSummary from a backend GitHubRepo; description, language, stars and license are not served (null / 0). */
 export function repoFromApi(r: WireGitHubRepo): RepoSummary {
@@ -72,7 +85,7 @@ export function repoFromApi(r: WireGitHubRepo): RepoSummary {
 /** PullSummary from a backend GitHubPull; draft flag, counts, labels, body and creation time are not served. */
 export function pullFromApi(p: WireGitHubPull, owner: string, name: string): PullSummary {
   const author: GitHubUser = p.authorLogin
-    ? { login: p.authorLogin, id: 0, name: null, avatarUrl: avatarFor(p.authorLogin), htmlUrl: `https://github.com/${encodeURIComponent(p.authorLogin)}` }
+    ? { login: p.authorLogin, id: 0, name: null, avatarUrl: authorAvatar(p.authorLogin), htmlUrl: authorPage(p.authorLogin) }
     : GHOST
   return {
     number: p.number,
@@ -103,7 +116,7 @@ export function commitFromApi(c: WireGitHubCommit, owner: string, name: string):
     message: c.message,
     author: {
       name: c.authorLogin ?? 'unknown',
-      ...(c.authorLogin ? { login: c.authorLogin, avatarUrl: avatarFor(c.authorLogin) } : {}),
+      ...(c.authorLogin ? { login: c.authorLogin, avatarUrl: authorAvatar(c.authorLogin) } : {}),
       date: c.committedAt ?? '',
     },
     htmlUrl: `${repoUrl(owner, name)}/commit/${c.sha}`,

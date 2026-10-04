@@ -2,6 +2,7 @@
 import "./testing/suite-lock.js";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GitHubGatewayError, type GitHubErrorCode } from "../../contracts/app.js";
+import { githubCommitSchema, githubPullSchema, githubRepoSchema, githubUserSchema } from "./github-schemas.js";
 import {
   API,
   appGrant,
@@ -372,6 +373,21 @@ describe("pulls and commits", () => {
       htmlUrl: `https://github.com/kleros/pine/commit/${sha(1000)}`,
     });
     expect(h.fetch.callsTo(/\/pulls\/7\/commits/)).toHaveLength(3);
+  });
+
+  it("SEC-GH-15 accepts bot authors (dependabot[bot]) on pulls and commits, but never a bot identity or a malformed suffix", async () => {
+    publicRepo();
+    h.fetch.json("GET", `${REPO}/pulls?state=open&per_page=30&page=1`, 200, [pullJson(3, sha(3)), pullJson(4, sha(4), { user: { login: "dependabot[bot]" } })]);
+    const pulls = await github().listPulls(USER_A, "kleros", "pine", "open", 1);
+    expect(pulls.items.map((pull) => pull.authorLogin)).toEqual(["alice", "dependabot[bot]"]);
+    h.fetch.json("GET", `${REPO}/pulls/7/commits?per_page=100&page=1`, 200, [commitJson(sha(70), { author: { login: "github-actions[bot]" } })]);
+    const commits = await github().listPullCommits(USER_A, "kleros", "pine", 7);
+    expect(commits.map((commit) => commit.authorLogin)).toEqual(["github-actions[bot]"]);
+    // A login that is an identity or a repository owner stays strict: a bot can never link, own or pose as either.
+    expect(githubUserSchema.safeParse({ id: 1, login: "dependabot[bot]" }).success).toBe(false);
+    expect(githubRepoSchema.safeParse(repoJson({ owner: { id: 7, login: "dependabot[bot]" } })).success).toBe(false);
+    expect(githubPullSchema.safeParse(pullJson(5, sha(5), { user: { login: "alice[bot]x" } })).success).toBe(false);
+    expect(githubCommitSchema.safeParse(commitJson(sha(71), { author: { login: "[bot]" } })).success).toBe(false);
   });
 
   it("getCommit returns null when GitHub has no such object", async () => {

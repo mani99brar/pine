@@ -424,6 +424,8 @@ export const policyParametersSchema = z.object({
 })
 
 const githubLogin = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/)
+// Authors of pull requests and commits may be GitHub Apps ("dependabot[bot]"); owners and identities stay strict.
+const githubAuthorLogin = z.string().regex(/^[A-Za-z0-9_-]{1,100}(\[bot\])?$/)
 const githubRepoName = z
   .string()
   .regex(/^[A-Za-z0-9._-]{1,100}$/)
@@ -463,7 +465,7 @@ export const githubPullSchema = z.object({
   baseSha: sha40,
   baseRef: githubRef,
   htmlUrl: z.string().max(2_048),
-  authorLogin: githubLogin.nullable(),
+  authorLogin: githubAuthorLogin.nullable(),
   updatedAt: z.string().max(40),
 })
 
@@ -475,7 +477,7 @@ export const githubCommitSchema = z.object({
   sha: sha40,
   parents: z.array(sha40).max(100),
   message: z.string().max(65_536),
-  authorLogin: githubLogin.nullable(),
+  authorLogin: githubAuthorLogin.nullable(),
   committedAt: z.string().max(40).nullable(),
   htmlUrl: z.string().max(2_048),
 })

@@ -140,6 +140,26 @@ describe('ApiGitHubSource', () => {
     expect(calls).toEqual([`${REPO}/pulls?state=all&page=1`, `${REPO}/pulls/2101/commits`])
   })
 
+  it('SEC-GH-15 maps bot authors (dependabot[bot]) to their GitHub App page, and keeps repository owners strict', async () => {
+    const { gh } = source({
+      [`${REPO}/pulls?state=all&page=1`]: { items: [githubPull({ number: 9, authorLogin: 'dependabot[bot]' })], hasMore: false },
+      [`${REPO}/pulls/9/commits`]: { items: [githubCommit({ authorLogin: 'github-actions[bot]' })] },
+    })
+    const [pull] = await gh.listPulls('kleros', 'kleros-v2', { state: 'all' })
+    expect(pull?.author).toEqual({
+      login: 'dependabot[bot]',
+      id: 0,
+      name: null,
+      avatarUrl: 'https://avatars.githubusercontent.com/u/10137?v=4',
+      htmlUrl: 'https://github.com/apps/dependabot',
+    })
+    const [commit] = await gh.listPullCommits('kleros', 'kleros-v2', 9)
+    expect(commit?.author).toMatchObject({ name: 'github-actions[bot]', login: 'github-actions[bot]', avatarUrl: 'https://avatars.githubusercontent.com/u/10137?v=4' })
+    // A malformed suffix, and a bot as a repository owner, are still not well-formed GitHub data.
+    await expect(source({ [`${REPO}/pulls?state=all&page=1`]: { items: [githubPull({ authorLogin: 'alice[bot]x' })], hasMore: false } }, 'throw').gh.listPulls('kleros', 'kleros-v2', { state: 'all' })).rejects.toThrow()
+    await expect(source({ [REPO]: githubRepo({ owner: 'dependabot[bot]' }) }, 'throw').gh.getRepo('kleros', 'kleros-v2')).rejects.toThrow()
+  })
+
   it('SEC-GH-15 rejects GitHub data that is not well-formed', async () => {
     await expect(source({ [`${REPO}/pulls/2101/commits`]: { items: [githubCommit({ sha: 'abc123' })] } }).gh.listPullCommits('kleros', 'kleros-v2', 2101)).rejects.toMatchObject({ apiCode: 'BAD_RESPONSE' })
     await expect(source({ [`${REPO}/pulls/2101`]: githubPull({ headSha: `0x${TARGET_COMMIT}` }) }).gh.getPull('kleros', 'kleros-v2', 2101)).rejects.toMatchObject({ apiCode: 'BAD_RESPONSE' })
