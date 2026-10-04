@@ -217,6 +217,11 @@ function Ladder({ claim }: { claim: ClaimDetail }) {
   const overLimit = quoteBudget !== null && limitWei !== null && quoteBudget > limitWei
   const busy = funding.busy
   const sent = funding.runner.runner.steps.some((s) => s.status !== 'idle')
+  // The figures belong to the inputs they were quoted for: an edit drops them with their error.
+  const edit = (set: (v: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
+    set(e.target.value)
+    funding.discardQuote()
+  }
   return (
     <details className="cut-md border border-edge bg-void p-4" open={sent || undefined}>
       <summary className="cursor-pointer text-[0.9375rem] font-semibold text-lumen">Add liquidity</summary>
@@ -237,19 +242,19 @@ function Ladder({ claim }: { claim: ClaimDetail }) {
               <label htmlFor="ladder-budget" className="label">
                 Budget in xDAI
               </label>
-              <input id="ladder-budget" className="field tnum" inputMode="decimal" value={budget} onChange={(e) => setBudget(e.target.value)} aria-invalid={budget !== '' && budgetWei === null} />
+              <input id="ladder-budget" className="field tnum" inputMode="decimal" value={budget} onChange={edit(setBudget)} aria-invalid={(budget !== '' && budgetWei === null) || funding.invalid.budget} />
             </div>
             <div>
               <label htmlFor="ladder-lower" className="label">
                 Lowest Yes price
               </label>
-              <input id="ladder-lower" className="field tnum" inputMode="decimal" placeholder="e.g. 0.05" value={lower} onChange={(e) => setLower(e.target.value)} aria-invalid={lower !== '' && !PRICE.test(lo)} />
+              <input id="ladder-lower" className="field tnum" inputMode="decimal" placeholder="e.g. 0.05" value={lower} onChange={edit(setLower)} aria-invalid={(lower !== '' && !PRICE.test(lo)) || funding.invalid.lowerPrice} />
             </div>
             <div>
               <label htmlFor="ladder-upper" className="label">
                 Highest Yes price
               </label>
-              <input id="ladder-upper" className="field tnum" inputMode="decimal" placeholder="e.g. 0.5" value={upper} onChange={(e) => setUpper(e.target.value)} aria-invalid={upper !== '' && !PRICE.test(hi)} />
+              <input id="ladder-upper" className="field tnum" inputMode="decimal" placeholder="e.g. 0.5" value={upper} onChange={edit(setUpper)} aria-invalid={(upper !== '' && !PRICE.test(hi)) || funding.invalid.upperPrice} />
             </div>
           </div>
           <p className="help -mt-1">Prices in sDAI per Yes token, between 0.01 and 0.95. Pine computes what you could lose before anything is sent.</p>

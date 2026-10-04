@@ -662,6 +662,72 @@ describe('useApiFunding', () => {
     await waitFor(() => expect(result.current.funding.plan?.state).toBe('confirmed'))
   })
 
+  it('SEC-LEGAL-03 a failed requote invalidates the earlier figures: they can no longer be acknowledged or funded', async () => {
+    fake.on('POST', /^\/api\/v1\/funding\/plans\/ladder$/, (req) =>
+      (req.json as { budgetWei: string }).budgetWei === '1'
+        ? apiError(400, 'VALIDATION_FAILED', 'Request validation failed', { issues: [{ path: ['budgetWei'], message: 'too small' }] })
+        : apiError(409, 'CONFLICT', 'The maximum loss if YES resolves is now 66 … Review the figures and acknowledge again.', { issues: FIGURES }),
+    )
+    const { result } = render()
+    const old = await quoted(result)
+    await act(async () => {
+      await result.current.funding.quoteLadder({ budgetWei: 1n, lowerPrice: '0.05', upperPrice: '0.5' })
+    })
+    expect(result.current.funding.quote).toBeNull()
+    expect(result.current.funding.error?.issues).toEqual([{ path: ['budgetWei'], message: 'too small' }])
+    // The field the backend names is the one highlighted.
+    expect(result.current.funding.invalid).toEqual({ budget: true, lowerPrice: false, upperPrice: false })
+
+    // Funding the figures shown before the failed requote is refused without asking Pine.
+    await act(async () => {
+      await result.current.funding.fund({ quote: old, spendingLimitWei: 200n * XDAI })
+    })
+    expect(result.current.funding.error?.message).toMatch(/Ask for the ladder figures again/)
+    expect(fake.of(/\/funding\/plans\/ladder$/)).toHaveLength(2)
+    expect(result.current.funding.runner.runner.steps).toEqual([])
+  })
+
+  it('SEC-LEGAL-03 editing the inputs discards the figures, their stale error, and figures still on their way', async () => {
+    const { result } = render()
+    const old = await quoted(result)
+    act(() => result.current.funding.discardQuote())
+    expect(result.current.funding.quote).toBeNull()
+    await act(async () => {
+      await result.current.funding.fund({ quote: old, spendingLimitWei: 200n * XDAI })
+    })
+    expect(result.current.funding.error?.message).toMatch(/Ask for the ladder figures again/)
+    expect(fake.of(/\/funding\/plans\/ladder$/)).toHaveLength(1)
+
+    // The error of the old inputs goes once they change.
+    act(() => result.current.funding.discardQuote())
+    expect(result.current.funding.error).toBeNull()
+
+    // Figures answered for inputs edited meanwhile are not shown.
+    await act(async () => {
+      const pending = result.current.funding.quoteLadder({ budgetWei: 100n * XDAI, lowerPrice: '0.05', upperPrice: '0.5' })
+      result.current.funding.discardQuote()
+      await pending
+    })
+    expect(result.current.funding.quote).toBeNull()
+  })
+
+  it('highlights the fields a refused quote names, and clears them with the inputs', async () => {
+    const { result } = render()
+    act(() => result.current.wallet.connect())
+    await waitFor(() => expect(result.current.funding.claim).not.toBeNull())
+    await act(async () => {
+      await result.current.funding.quoteLadder({ budgetWei: 100n * XDAI, lowerPrice: '0.5', upperPrice: '0.05' })
+    })
+    expect(result.current.funding.invalid).toEqual({ budget: false, lowerPrice: true, upperPrice: true })
+    await act(async () => {
+      await result.current.funding.quoteLadder({ budgetWei: 0n, lowerPrice: '0.05', upperPrice: '0.5' })
+    })
+    expect(result.current.funding.invalid).toEqual({ budget: true, lowerPrice: false, upperPrice: false })
+    act(() => result.current.funding.discardQuote())
+    expect(result.current.funding.invalid).toEqual({ budget: false, lowerPrice: false, upperPrice: false })
+    expect(fake.of(/\/funding\/plans\/ladder$/)).toEqual([])
+  })
+
   it('refuses a budget above the spending limit without asking Pine', async () => {
     const { result } = render()
     const quote = await quoted(result)

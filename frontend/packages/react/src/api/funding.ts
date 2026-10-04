@@ -413,12 +413,26 @@ export function ladderQuoteKey(q: LadderQuote): string {
 /** Pine offers ladders only until this long before the evidence deadline (packages/api funding LADDER_MIN_TIME_BEFORE_DEADLINE). */
 export const LADDER_CLOSES_BEFORE_DEADLINE_SECONDS = 3_600
 
+/** The ladder inputs a refused quote names (from this app's checks or the backend's field issues). */
+export interface LadderInvalidFields {
+  budget: boolean
+  lowerPrice: boolean
+  upperPrice: boolean
+}
+
 export interface ApiFunding {
   claim: OnChainClaim | null
-  /** The latest figures to acknowledge (also refreshed when the loss grew between quote and plan). */
+  /**
+   * The latest figures to acknowledge (also refreshed when the loss grew between quote and plan). They belong to the
+   * inputs they were quoted for: a new quote (failed or not) and discardQuote() drop them.
+   */
   quote: LadderQuote | null
   /** Asks the backend for the ladder figures (no plan is created; it costs one plan unit of the daily quota). */
   quoteLadder(request: LadderRequest): Promise<LadderQuote | null>
+  /** The inputs changed: forget the figures, the error and the highlighted fields of the old ones. */
+  discardQuote(): void
+  /** The inputs the last refused quote names. */
+  invalid: LadderInvalidFields
   /**
    * Builds and runs the ladder the user acknowledged. `spendingLimitWei` is the user's limit in sDAI base units: the budget
    * must not exceed it and no approval may exceed it.
@@ -435,24 +449,40 @@ export interface ApiFunding {
 const MIN_PRICE = 10n ** 16n // 0.01
 const MAX_PRICE = 95n * 10n ** 16n // 0.95
 
-function validLadder(r: LadderRequest): string | null {
-  if (r.budgetWei <= 0n || r.budgetWei > FUNDING_MAX_VALUE_WEI) return 'Enter a budget between 0 and 10,000 xDAI.'
-  if (!PRICE.test(r.lowerPrice) || !PRICE.test(r.upperPrice)) return 'Enter prices as decimals, e.g. 0.05.'
+const VALID: LadderInvalidFields = { budget: false, lowerPrice: false, upperPrice: false }
+const BAD_BUDGET: LadderInvalidFields = { ...VALID, budget: true }
+const BAD_RANGE: LadderInvalidFields = { ...VALID, lowerPrice: true, upperPrice: true }
+
+function validLadder(r: LadderRequest): { message: string; fields: LadderInvalidFields } | null {
+  if (r.budgetWei <= 0n || r.budgetWei > FUNDING_MAX_VALUE_WEI) return { message: 'Enter a budget between 0 and 10,000 xDAI.', fields: BAD_BUDGET }
+  if (!PRICE.test(r.lowerPrice) || !PRICE.test(r.upperPrice)) return { message: 'Enter prices as decimals, e.g. 0.05.', fields: BAD_RANGE }
   const lo = toScaled(r.lowerPrice, 18)?.value ?? -1n
   const hi = toScaled(r.upperPrice, 18)?.value ?? -1n
-  if (lo < MIN_PRICE || hi > MAX_PRICE || !(lo < hi)) return 'Choose a YES price range with 0.01 ≤ lower < upper ≤ 0.95.'
+  if (lo < MIN_PRICE || hi > MAX_PRICE || !(lo < hi)) return { message: 'Choose a YES price range with 0.01 ≤ lower < upper ≤ 0.95.', fields: BAD_RANGE }
   return null
+}
+
+/** The inputs a backend refusal of a quote names (`budgetWei`, `riskAcknowledgement.budgetWei`, `lowerPrice`, …). */
+function invalidFieldsOf(e: unknown): LadderInvalidFields {
+  if (!(e instanceof PineBackendError) || e.apiCode === 'CONFLICT') return VALID
+  const named = new Set((e.issues ?? []).map((i) => String(i.path.at(-1))))
+  return { budget: named.has('budgetWei'), lowerPrice: named.has('lowerPrice'), upperPrice: named.has('upperPrice') }
 }
 
 export function useApiFunding(market: Address, options: FundingFlowOptions = {}): ApiFunding {
   const api = useWriteApi()
   const m = market.toLowerCase() as Address
-  const [quote, setQuote] = useState<LadderQuote | null>(null)
+  const [quote, setQuoteState] = useState<LadderQuote | null>(null)
+  const [invalid, setInvalid] = useState<LadderInvalidFields>(VALID)
   const [quoting, setQuoting] = useState(false)
+  // Read by fund() and the conflict handler in the same tick as a change, so kept in step with the state by hand.
   const quoteRef = useRef(quote)
-  useEffect(() => {
-    quoteRef.current = quote
-  })
+  const setQuote = useCallback((q: LadderQuote | null) => {
+    quoteRef.current = q
+    setQuoteState(q)
+  }, [])
+  // Bumped whenever the inputs change: figures answered for older inputs are dropped.
+  const inputsRef = useRef(0)
 
   const flow = useFundingPlanFlow(
     m,
@@ -488,9 +518,14 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
   const quoteLadder = useCallback(
     async (request: LadderRequest): Promise<LadderQuote | null> => {
       flow.setError(null)
-      const invalid = validLadder(request)
-      if (invalid) {
-        flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: invalid })
+      // A quote (whatever its outcome) replaces the figures of earlier inputs: they can no longer be acknowledged.
+      setQuote(null)
+      setInvalid(VALID)
+      const inputs = inputsRef.current
+      const refused = validLadder(request)
+      if (refused) {
+        flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: refused.message })
+        setInvalid(refused.fields)
         return null
       }
       setQuoting(true)
@@ -502,12 +537,15 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
           { market: m, budgetWei: budget, lowerPrice: request.lowerPrice, upperPrice: request.upperPrice, riskAcknowledgement: { budgetWei: budget, maxLossIfYesShares: '0' } },
           newIdempotencyKey(),
         )
-        flow.setError({ code: 'BAD_RESPONSE', action: 'retry_later', message: 'Pine did not return the ladder figures to acknowledge.' })
+        if (inputs === inputsRef.current) flow.setError({ code: 'BAD_RESPONSE', action: 'retry_later', message: 'Pine did not return the ladder figures to acknowledge.' })
         return null
       } catch (e) {
+        // Inputs edited while Pine answered: neither the figures nor the error belong to what is on screen.
+        if (inputs !== inputsRef.current) return null
         const figures = e instanceof PineBackendError && e.apiCode === 'CONFLICT' ? ladderFiguresFromIssues(e.issues) : null
         if (!figures || figures.budgetWei !== budget) {
           flow.setError(describeWriteError(e))
+          setInvalid(invalidFieldsOf(e))
           return null
         }
         const q: LadderQuote = { ...figures, market: m, requestedLowerPrice: request.lowerPrice, requestedUpperPrice: request.upperPrice }
@@ -517,8 +555,15 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
         setQuoting(false)
       }
     },
-    [api, m, flow],
+    [api, m, flow, setQuote],
   )
+
+  const discardQuote = useCallback(() => {
+    inputsRef.current += 1
+    setQuote(null)
+    setInvalid(VALID)
+    flow.setError(null)
+  }, [flow, setQuote])
 
   const fund = useCallback(
     async ({ quote: q, spendingLimitWei }: { quote: LadderQuote; spendingLimitWei: bigint }) => {
@@ -526,14 +571,21 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
         flow.setError({ code: 'UNKNOWN', action: 'none', message: 'These figures are for another market.' })
         return
       }
+      // SEC-LEGAL-03: only the figures on screen for the current inputs may be funded, never ones a requote or an edit
+      // replaced.
+      const current = quoteRef.current
+      if (!current || ladderQuoteKey(current) !== ladderQuoteKey(q)) {
+        flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: 'Ask for the ladder figures again before funding.' })
+        return
+      }
       if (!UINT.test(q.budgetWei) || !UINT.test(q.sets) || !UINT.test(q.maxLossIfYesShares) || BigInt(q.sets) <= 0n) {
         flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: 'Ask for the ladder figures again before funding.' })
         return
       }
       const budget = BigInt(q.budgetWei)
-      const invalid = validLadder({ budgetWei: budget, lowerPrice: q.requestedLowerPrice, upperPrice: q.requestedUpperPrice })
-      if (invalid) {
-        flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: invalid })
+      const refused = validLadder({ budgetWei: budget, lowerPrice: q.requestedLowerPrice, upperPrice: q.requestedUpperPrice })
+      if (refused) {
+        flow.setError({ code: 'UNKNOWN', action: 'fix_input', message: refused.message })
         return
       }
       if (spendingLimitWei <= 0n || budget > spendingLimitWei) {
@@ -560,6 +612,8 @@ export function useApiFunding(market: Address, options: FundingFlowOptions = {})
     claim: flow.claim,
     quote,
     quoteLadder,
+    discardQuote,
+    invalid,
     fund,
     plan: flow.plan,
     runner: flow.runner,
