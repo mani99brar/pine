@@ -111,8 +111,16 @@ function BackendAccountMenu({ backend, signOut }: { backend: BackendIdentity; si
 
 function AccountMenu() {
   const mounted = useMounted()
-  const { status, account, user, signOut, backend } = useAccount()
+  const { status, account, user, signOut, backend, refresh } = useAccount()
   if (!mounted || status === 'loading') return <span className="skeleton inline-block h-8 w-8" aria-hidden />
+  if (status === 'error') {
+    // Pine could not be asked: neither "Sign in" (a second session) nor an account it cannot confirm.
+    return (
+      <button type="button" onClick={() => void refresh()} className="btn btn-ghost btn-sm" aria-label="Retry: Pine could not check your sign-in">
+        Retry
+      </button>
+    )
+  }
   if (status === 'signed_out') {
     return (
       <Link href="/account" className="btn btn-ghost btn-sm">

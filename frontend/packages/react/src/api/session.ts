@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useSignMessage } from 'wagmi'
 import { createSiweMessage, parseSiweMessage } from 'viem/siwe'
 import type { Address } from '@pine/core'
@@ -166,15 +166,102 @@ function requireApi(api: PineApiClient | null): PineApiClient {
  */
 const USER_KEYS = new Set(['account', 'drafts', 'draft', 'github', 'notifications', 'portfolio', 'plans'])
 
+const isUserQuery = (key: readonly unknown[]) => key[0] === 'pine' && USER_KEYS.has(String(key[1]))
+
+/** Drops the per-user queries and records "signed out" for the session in this tab. */
+function dropSession(qc: QueryClient): void {
+  qc.removeQueries({ predicate: (query) => isUserQuery(query.queryKey) })
+  qc.setQueryData(pineKeys.session(), null)
+}
+
+/** A 401 from Pine other than a step-up request: the session cookie is missing, expired or was ended elsewhere. */
+export function isSessionGone(error: unknown): boolean {
+  return error instanceof PineBackendError && error.status === 401 && error.apiCode !== 'STEP_UP_REQUIRED'
+}
+
+/**
+ * Any backend 401 means this browser has no valid session: the cached session and the per-user data are dropped, as a
+ * confirmed sign-out drops them, so the page says signed out instead of "Sign in required" next to "Signed in as".
+ * Called for every failed query and mutation (createPineQueryClient) and by direct calls. Returns whether it was one.
+ */
+export function handleSessionGone(qc: QueryClient, error: unknown): boolean {
+  if (!isSessionGone(error)) return false
+  if (qc.getQueryData(pineKeys.session()) === null) return true
+  dropSession(qc)
+  announceSessionChange()
+  return true
+}
+
+// Cross-tab sync: every tab of this browser shares the session cookie, so a tab that signs in, signs out or changes the
+// GitHub link says so on a BroadcastChannel and the other tabs refetch. The message carries no data.
+const SESSION_CHANNEL = 'pine:session'
+const SESSION_CHANGED = 'session-changed'
+const syncedClients = new Map<QueryClient, number>()
+let channel: BroadcastChannel | null = null
+
+function onSessionMessage(event: MessageEvent<unknown>): void {
+  if (event.data !== SESSION_CHANGED) return
+  for (const qc of syncedClients.keys()) {
+    void qc.invalidateQueries({ predicate: (query) => query.queryKey[0] === 'pine' && (query.queryKey[1] === 'session' || isUserQuery(query.queryKey)) })
+  }
+}
+
+function openChannel(): BroadcastChannel | null {
+  if (typeof BroadcastChannel === 'undefined') return null
+  try {
+    return new BroadcastChannel(SESSION_CHANNEL)
+  } catch {
+    return null
+  }
+}
+
+/** Tells this browser's other tabs that the Pine session changed (sign-in, sign-out, GitHub link or unlink). */
+export function announceSessionChange(): void {
+  // A channel never receives its own messages, so the tab's listening channel sends (else a short-lived one).
+  const sender = channel ?? openChannel()
+  try {
+    sender?.postMessage(SESSION_CHANGED)
+  } catch {
+    // Nothing to tell.
+  } finally {
+    if (sender && sender !== channel) sender.close()
+  }
+}
+
+/** Keeps `qc`'s session and per-user queries in step with this browser's other tabs while subscribed. */
+function subscribeSessionSync(qc: QueryClient): () => void {
+  syncedClients.set(qc, (syncedClients.get(qc) ?? 0) + 1)
+  if (!channel) {
+    channel = openChannel()
+    channel?.addEventListener('message', onSessionMessage)
+  }
+  return () => {
+    const left = (syncedClients.get(qc) ?? 1) - 1
+    if (left > 0) syncedClients.set(qc, left)
+    else syncedClients.delete(qc)
+    if (syncedClients.size === 0 && channel) {
+      channel.removeEventListener('message', onSessionMessage)
+      channel.close()
+      channel = null
+    }
+  }
+}
+
 export interface PineSessionState {
-  /** `disabled` outside `api` mode. */
-  status: 'disabled' | 'loading' | 'signed_out' | 'signed_in'
+  /**
+   * `disabled` outside `api` mode. `error`: Pine could not be asked (5xx, network error) and nothing is known yet, so the
+   * session is unknown: neither signed in nor signed out. A failed refetch keeps the last known state instead.
+   */
+  status: 'disabled' | 'loading' | 'signed_out' | 'signed_in' | 'error'
   session: PineSession | null
   error: Error | null
   refresh(): Promise<void>
 }
 
-/** The backend session: GET /api/v1/auth/session (401 → signed out). */
+/**
+ * The backend session: GET /api/v1/auth/session (401 → signed out). Asked again when the window regains focus, when the
+ * browser comes back online and when another tab of this browser announces a change.
+ */
 export function usePineSession(): PineSessionState {
   const { api } = usePine()
   const qc = useQueryClient()
@@ -183,6 +270,12 @@ export function usePineSession(): PineSessionState {
     enabled: api !== null,
     staleTime: 60_000,
     retry: (count, error) => !(error instanceof PineBackendError && error.status > 0 && error.status < 500) && count < 2,
+    // A failed check is not refetched by every component that mounts afterwards: on /account that put the query back
+    // to loading, which unmounted and remounted the sign-in form, once a second forever. Focus, reconnect and "Try
+    // again" ask again.
+    retryOnMount: false,
+    refetchOnWindowFocus: 'always',
+    refetchOnReconnect: 'always',
     queryFn: async () => {
       try {
         return await requireApi(api).get('/api/v1/auth/session', pineSessionSchema)
@@ -192,12 +285,14 @@ export function usePineSession(): PineSessionState {
       }
     },
   })
+  useEffect(() => (api === null ? undefined : subscribeSessionSync(qc)), [api, qc])
   const refresh = useCallback(async () => {
     await qc.invalidateQueries({ queryKey: pineKeys.session() })
   }, [qc])
   let status: PineSessionState['status']
   if (api === null) status = 'disabled'
   else if (q.isPending) status = 'loading'
+  else if (q.data === undefined) status = 'error'
   else status = q.data ? 'signed_in' : 'signed_out'
   return { status, session: q.data ?? null, error: q.error, refresh }
 }
@@ -233,8 +328,9 @@ export function useSiweSignIn(): { signIn(): Promise<PineSession>; step: SiweSte
       const signature = await signMessageAsync({ message: challenge.message, account: address })
       setStep('verifying')
       const session = await client.post('/api/v1/auth/siwe/verify', pineSessionSchema, { message: challenge.message, signature })
-      qc.removeQueries({ predicate: (query) => query.queryKey[0] === 'pine' && USER_KEYS.has(String(query.queryKey[1])) })
+      qc.removeQueries({ predicate: (query) => isUserQuery(query.queryKey) })
       qc.setQueryData(pineKeys.session(), session)
+      announceSessionChange()
       setStep('done')
       return session
     } catch (e) {
@@ -282,8 +378,8 @@ export function useSignOut(): (opts?: SignOutOptions) => Promise<void> {
   return useCallback(
     async (opts?: SignOutOptions) => {
       const dropLocal = () => {
-        qc.removeQueries({ predicate: (query) => query.queryKey[0] === 'pine' && USER_KEYS.has(String(query.queryKey[1])) })
-        qc.setQueryData(pineKeys.session(), null)
+        dropSession(qc)
+        announceSessionChange()
       }
       try {
         await requireApi(api).request('POST', '/api/v1/auth/logout', emptySchema, { body: opts?.everywhere ? { everywhere: true } : {} })
@@ -321,20 +417,22 @@ export function useGitHubLink(): { link(): Promise<void>; unlink(): Promise<void
       const { authorizationUrl } = await requireApi(api).post('/api/v1/auth/github/start', startSchema)
       window.location.assign(githubConsentUrl(checkGitHubAuthorizationUrl(authorizationUrl), devGitHubOrigin()))
     } catch (e) {
+      handleSessionGone(qc, e)
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)
       throw e
     }
-  }, [api])
+  }, [api, qc])
 
   const unlink = useCallback(async () => {
     setError(null)
     setBusy(true)
     try {
       await requireApi(api).request('DELETE', '/api/v1/auth/github', emptySchema)
-      qc.removeQueries({ predicate: (query) => query.queryKey[0] === 'pine' && USER_KEYS.has(String(query.queryKey[1])) })
-      qc.setQueryData(pineKeys.session(), null)
+      dropSession(qc)
+      announceSessionChange()
     } catch (e) {
+      handleSessionGone(qc, e)
       setError(e instanceof Error ? e.message : String(e))
       throw e
     } finally {

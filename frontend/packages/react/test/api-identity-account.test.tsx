@@ -141,7 +141,8 @@ describe('useAccount in api mode', () => {
     backend((c) => (c.path === '/api/v1/auth/session' ? json(200, { ...sessionView(), wallet: 'javascript:alert(1)' }) : undefined))
     const { result } = render(() => ({ a: useAccount(), owner: useDraftOwner() }))
     await waitFor(() => expect(result.current.a.error).not.toBeNull())
-    expect(result.current.a.status).toBe('signed_out')
+    // Unknown, neither signed in nor signed out.
+    expect(result.current.a.status).toBe('error')
     expect(result.current.a.account).toBeNull()
     expect(result.current.a.error?.message).toMatch(/unexpected shape/)
     expect(result.current.owner).toBe(LOCAL_DRAFT_OWNER)

@@ -16,9 +16,8 @@ import {
 } from '@pine/data'
 import { useSessionReplacement } from '../account'
 import { usePine } from '../providers/context'
-import { pineKeys } from '../queries/keys'
 import { useWallet } from '../wallet'
-import { SIWE_TERMS_STATEMENT, usePineSession, useSignOut } from './session'
+import { SIWE_TERMS_STATEMENT, handleSessionGone, usePineSession, useSignOut } from './session'
 
 // `api` mode identity support on top of ./session: the signed-in user's notifications, the terms digest of the sign-in
 // message being signed, and the wallet-switch guard (SEC-AUTH-13).
@@ -84,8 +83,9 @@ export function usePineNotifications(opts: { unreadOnly?: boolean } = {}): PineN
         if (!page) throw new PineBackendError(`Empty response (GET ${NOTIFICATIONS_PATH})`, 204, 'BAD_RESPONSE')
         return page
       } catch (e) {
-        // The session ended server-side (expiry, sign-out elsewhere): let the session query find out.
-        if (e instanceof PineBackendError && e.status === 401) void qc.invalidateQueries({ queryKey: pineKeys.session() })
+        // The session ended server-side (expiry, sign-out elsewhere): drop it here too. Asking the session again instead
+        // would loop when Pine answers the session but not this route.
+        handleSessionGone(qc, e)
         throw e
       }
     },
@@ -181,6 +181,8 @@ export function usePendingSiweTerms(): Hex | null {
   })
   return pending.findLast((d): d is Hex => d !== null) ?? null
 }
+
+export { announceSessionChange } from './session'
 
 /** An automatic sign-out caused by the wallet switching accounts. */
 export interface WalletSwitch {

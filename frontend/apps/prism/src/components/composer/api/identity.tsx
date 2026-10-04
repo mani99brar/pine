@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import type { Address } from '@pine/core'
 import type { SiweStep } from '@pine/react'
 import { useAccount, useGitHubLink, useWallet } from '@pine/react'
-import { Link2, LogIn, Wallet } from 'lucide-react'
+import { Link2, LogIn, RotateCw, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { LoadingBlock, Notice } from '@/components/ui/primitives'
 import { shortAddress } from '@/components/shell/wallet-display'
@@ -23,7 +23,8 @@ const SIWE_TEXT: Partial<Record<SiweStep, string>> = {
 }
 
 export interface ApiIdentity {
-  status: 'loading' | 'signed_out' | 'signed_in'
+  /** `error`: Pine could not be asked whether there is a session; it is unknown, neither signed in nor out. */
+  status: 'loading' | 'signed_out' | 'signed_in' | 'error'
   /** The session wallet (lowercase). */
   wallet: Address | null
   github: { login: string; id: number } | null
@@ -104,6 +105,19 @@ export function ApiIdentityGate({ need, reason, className, saveDraft }: { need: 
   const signIn = actions.signIn
 
   if (id.status === 'loading') return <LoadingBlock lines={2} label="Checking your Pine session" className={className} />
+
+  if (id.status === 'error') {
+    // Unknown, not signed out: a sign-in prompt here would start a second session.
+    return (
+      <GatePanel title="Pine could not check your session" icon={<RotateCw size={18} aria-hidden />} className={className}>
+        <p>{reason}</p>
+        <p className="mt-2 text-[0.875rem] text-lumen-3">Pine did not answer. Your draft stays saved in this browser.</p>
+        <Button variant="glass" className="mt-4" onClick={() => void a.refresh()} icon={<RotateCw size={15} aria-hidden />}>
+          Try again
+        </Button>
+      </GatePanel>
+    )
+  }
 
   if (id.status === 'signed_out') {
     return (

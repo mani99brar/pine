@@ -187,7 +187,11 @@ export interface BackendIdentity {
 }
 
 export interface UseAccountResult {
-  status: 'loading' | 'signed_out' | 'signed_in'
+  /**
+   * `error` (`api` mode only): Pine could not be asked whether there is a session (5xx, network error), so it is
+   * unknown. Neither offer a sign-in (that would start a second session) nor treat the user as signed in.
+   */
+  status: 'loading' | 'signed_out' | 'signed_in' | 'error'
   account: Account | null
   /** next-auth sign-in; in `api` mode Sign-In with Ethereum against the backend (the provider is ignored). */
   signIn(provider?: 'github' | 'demo'): Promise<void>
@@ -320,7 +324,9 @@ export function useAccount(): UseAccountResult {
     const s = backendSession.session
     const selected = wallet.isConnected && !wallet.isReconnecting ? wallet.address?.toLowerCase() : undefined
     const status: UseAccountResult['status'] =
-      backendSession.status === 'signed_in' ? 'signed_in' : backendSession.status === 'loading' ? 'loading' : 'signed_out'
+      backendSession.status === 'signed_in' || backendSession.status === 'loading' || backendSession.status === 'error'
+        ? backendSession.status
+        : 'signed_out'
     return {
       status,
       account: apiAccount,

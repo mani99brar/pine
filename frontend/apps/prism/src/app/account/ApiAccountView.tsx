@@ -13,7 +13,7 @@ import { Dialog, HashChip } from '@/components/ui/interactive'
 import { FormField, Notice, Panel, Skeleton } from '@/components/ui/primitives'
 import { checksummed, shortAddress } from '@/components/shell/wallet-display'
 import { useMounted } from '@/lib/hooks'
-import { ApiSignIn } from './ApiSignIn'
+import { ApiSignIn, SessionCheckFailed } from './ApiSignIn'
 import { focusAfter, takeFocus } from './focus'
 import { Notifications } from './Notifications'
 
@@ -342,6 +342,12 @@ export function ApiAccountView() {
       </p>
       {!mounted || a.status === 'loading' || !backend ? (
         <Skeleton className="h-72 w-full" />
+      ) : a.status === 'error' ? (
+        // Unknown, not signed out: offering a sign-in here would start a second session.
+        <div className="glass cut-xl p-6 sm:p-8">
+          <h2 className="t-h2">Your Pine session</h2>
+          <SessionCheckFailed error={a.error} refresh={a.refresh} className="mt-6" />
+        </div>
       ) : signedIn ? (
         <SignedIn a={a} backend={backend} session={signedIn} />
       ) : (

@@ -59,6 +59,25 @@ function Step({ n, done, title, children }: { n: number; done: boolean; title: s
   )
 }
 
+/** Pine could not be asked about the session (5xx, network error): the session is unknown until "Try again" works. */
+export function SessionCheckFailed({ error, refresh, className }: { error: Error | null; refresh(): Promise<void>; className?: string }) {
+  return (
+    <Notice
+      tone="critical"
+      role="alert"
+      className={className}
+      title="Pine could not check your session"
+      action={
+        <Button size="sm" variant="glass" onClick={() => void refresh()}>
+          Try again
+        </Button>
+      }
+    >
+      <span className="untrusted">{error?.message ?? 'Pine did not answer.'}</span>
+    </Notice>
+  )
+}
+
 /** `api` mode sign-in: connect a wallet (RainbowKit), then Sign-In with Ethereum against the Pine backend. */
 export function ApiSignIn() {
   const a = useAccount()
@@ -188,21 +207,7 @@ export function ApiSignIn() {
             <span className="untrusted">{siwe.error}</span>
           </Notice>
         )}
-        {a.error && (
-          <Notice
-            tone="critical"
-            role="alert"
-            className="mt-6"
-            title="Pine could not check your session"
-            action={
-              <Button size="sm" variant="glass" onClick={() => void a.refresh()}>
-                Try again
-              </Button>
-            }
-          >
-            <span className="untrusted">{a.error.message}</span>
-          </Notice>
-        )}
+        {a.error && <SessionCheckFailed error={a.error} refresh={a.refresh} className="mt-6" />}
       </div>
       <div className="hidden justify-center lg:flex" aria-hidden>
         <CrystalGlyph seed="account:sign-in" hue="#5AD8FF" state="partial" cut={['commit', 'policy']} size={320} decorative />

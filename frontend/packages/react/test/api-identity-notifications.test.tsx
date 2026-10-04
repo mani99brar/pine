@@ -168,14 +168,17 @@ describe('usePineNotifications', () => {
     expect(calls.some((c) => c.path.startsWith('/api/v1/accounts'))).toBe(false)
   })
 
-  it('checks the session again when the backend says it ended', async () => {
+  it('drops the session when the backend says it ended, without asking again in a loop', async () => {
     const calls = backend((c) => {
       if (c.path === '/api/v1/auth/session') return json(200, SESSION)
       if (c.path === '/api/v1/accounts/me/notifications') return unauthenticated()
       return undefined
     })
     const { result } = renderHook(() => usePineNotifications(), { wrapper })
-    await waitFor(() => expect(result.current.status).toBe('error'))
-    await waitFor(() => expect(calls.filter((c) => c.path === '/api/v1/auth/session').length).toBeGreaterThan(1))
+    await waitFor(() => expect(result.current.status).toBe('signed_out'))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(result.current.status).toBe('signed_out')
+    expect(calls.filter((c) => c.path === '/api/v1/auth/session')).toHaveLength(1)
+    expect(calls.filter((c) => c.path === '/api/v1/accounts/me/notifications')).toHaveLength(1)
   })
 })

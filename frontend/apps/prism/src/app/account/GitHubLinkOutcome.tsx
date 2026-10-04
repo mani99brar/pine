@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef } from 'react'
-import { useAccount, useGitHubLink } from '@pine/react'
+import { announceSessionChange, useAccount, useGitHubLink } from '@pine/react'
 import { Button, ButtonLink } from '@/components/ui/Button'
 import { Notice } from '@/components/ui/primitives'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
@@ -25,6 +25,15 @@ export function GitHubLinkOutcome({ outcome }: { outcome: 'linked' | 'error' }) 
   const wallet = a.backend?.wallet ? shortAddress(a.backend.wallet) : null
   const login = a.backend?.github?.login ?? null
   const signedIn = !loading && a.status === 'signed_in'
+  const read = !loading && a.status !== 'error'
+
+  // Other tabs of this browser learn about the new link once this tab has read it back.
+  const announced = useRef(false)
+  useEffect(() => {
+    if (!read || announced.current) return
+    announced.current = true
+    announceSessionChange()
+  }, [read])
 
   let detail: string
   if (loading) detail = 'Checking your session.'
