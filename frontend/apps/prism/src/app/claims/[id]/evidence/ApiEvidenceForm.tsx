@@ -6,7 +6,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import type { Address, ClaimDetail } from '@pine/core'
 import { explorerTxUrl, formatDate } from '@pine/core'
 import { COPY } from '@pine/core/copy'
-import { DEFAULT_ARTIFACT_MEDIA_TYPES, EVIDENCE_UPLOAD_MAX_BYTES, type ApiClaimFacts } from '@pine/data'
+import { DEFAULT_ARTIFACT_MEDIA_TYPES, type ApiClaimFacts } from '@pine/data'
 import { mediaTypeOf, pineKeys, useApiEvidence, usePolicy, useWallet, type EvidenceComposition, type EvidenceFieldError, type SealedEvidenceView } from '@pine/react'
 import { ArrowLeft, Eye, Lock, X } from 'lucide-react'
 import { Button, ButtonLink } from '@/components/ui/Button'
@@ -17,6 +17,7 @@ import { ApiSessionGate, PlanControls, PlanProgress, WriteErrorNotice, useSessio
 import { API_DEADLINE_RULES, claimLabel, countdown, isoOfUnix } from '@/lib/claims'
 import { useNowMs } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
+import { addAttachments, fileProblem, kib, MAX_FILES } from './attachments'
 
 type Mode = 'sealed' | 'publish'
 
@@ -34,7 +35,6 @@ interface Fields {
 }
 
 const EMPTY: Fields = { title: '', violatedRequirement: '', summary: '', expectedBehavior: '', actualBehavior: '', environment: '', setup: '', command: '', initialState: '', notes: '' }
-const MAX_FILES = 16
 const ACCEPT = [...DEFAULT_ARTIFACT_MEDIA_TYPES, '.json', '.txt', '.gz', '.zip', '.tar', '.png', '.jpg', '.jpeg'].join(',')
 
 /** Manifest paths of the composition → the form field that shows the error. */
@@ -49,17 +49,6 @@ const FIELD_OF: Record<string, keyof Fields> = {
   'reproduction.command': 'command',
   'reproduction.initialState': 'initialState',
   'reproduction.notes': 'notes',
-}
-
-function kib(n: number): string {
-  return n >= 1024 ? `${Math.ceil(n / 1024)} KiB` : `${n} B`
-}
-
-function fileProblem(f: File): string | null {
-  if (f.size > EVIDENCE_UPLOAD_MAX_BYTES) return `larger than 256 KiB (${kib(f.size)})`
-  const type = mediaTypeOf(f)
-  if (!DEFAULT_ARTIFACT_MEDIA_TYPES.includes(type)) return type ? `${type} is not accepted` : 'unknown file type'
-  return null
 }
 
 const SEAL_STATE: Record<SealedEvidenceView['state'], string> = {
@@ -86,6 +75,9 @@ function SealRow({ seal, chainId, busy, revealing, canReveal, onReveal }: SealRo
   const [files, setFiles] = useState<File[]>([])
   const [acknowledge, setAcknowledge] = useState(false)
   const missing = seal.missingArtifacts
+  // Pine refuses empty uploads: an empty file of an earlier seal can never be attached again.
+  const absent = missing.filter((m) => m.size > 0)
+  const empty = missing.filter((m) => m.size === 0)
   const inputId = `reveal-files-${seal.contentSha256.slice(2, 10)}`
   const deadline = seal.revealDeadline !== null ? isoOfUnix(seal.revealDeadline) : null
   return (
@@ -128,10 +120,13 @@ function SealRow({ seal, chainId, busy, revealing, canReveal, onReveal }: SealRo
               <label htmlFor={inputId} className="label">
                 Attach the committed files again
               </label>
-              <p className="help -mt-1">
-                This browser no longer holds {missing.map((m) => m.name).join(', ')}. Pick the same files: they are matched by their SHA-256 and uploaded only now, with the reveal. Pine stores
-                your written report only together with every file it lists.
-              </p>
+              {absent.length > 0 && (
+                <p className="help -mt-1">
+                  This browser no longer holds {absent.map((m) => m.name).join(', ')}. Pick the same files: they are matched by their SHA-256 and uploaded only now, with the reveal. Pine
+                  stores your written report only together with every file it lists.
+                </p>
+              )}
+              {empty.length > 0 && <p className="help -mt-1">{empty.map((m) => m.name).join(', ')} {empty.length === 1 ? 'is' : 'are'} empty, and Pine does not store empty files.</p>}
               <input
                 id={inputId}
                 type="file"
@@ -177,6 +172,8 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
   const [mode, setMode] = useState<Mode>('sealed')
   const [fields, setFields] = useState<Fields>(EMPTY)
   const [files, setFiles] = useState<File[]>([])
+  /** Names of the last picked files beyond MAX_FILES. */
+  const [notAdded, setNotAdded] = useState<string[]>([])
   const [preview, setPreview] = useState(false)
   const [checks, setChecks] = useState<Record<number, boolean>>({})
   const queued = useRef<{ kind: 'commit' | 'publish'; sha: string } | null>(null)
@@ -275,6 +272,7 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                 ev.abandon()
                 setFields(EMPTY)
                 setFiles([])
+                setNotAdded([])
                 setChecks({})
               }}
             >
@@ -448,8 +446,9 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                 aria-describedby="ev-files-help"
                 className="block text-[0.875rem] text-lumen-2 file:mr-3 file:rounded-[5px] file:border file:border-[var(--edge-strong)] file:bg-smoke-2 file:px-3 file:py-1.5 file:font-semibold file:text-lumen"
                 onChange={(e) => {
-                  const picked = Array.from(e.target.files ?? [])
-                  setFiles((prev) => [...prev, ...picked].slice(0, MAX_FILES))
+                  const next = addAttachments(files, Array.from(e.target.files ?? []))
+                  setFiles(next.files)
+                  setNotAdded(next.notAdded.map((f) => f.name))
                   e.target.value = ''
                 }}
               />
@@ -466,7 +465,10 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                         <button
                           type="button"
                           className="inline-flex h-7 w-7 items-center justify-center rounded-[3px] text-lumen-3 hover:bg-smoke-3 hover:text-lumen"
-                          onClick={() => setFiles(files.filter((_, j) => j !== i))}
+                          onClick={() => {
+                            setFiles(files.filter((_, j) => j !== i))
+                            setNotAdded([])
+                          }}
                           aria-label={`Remove ${f.name}`}
                         >
                           <X size={14} aria-hidden />
@@ -475,6 +477,11 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
                     )
                   })}
                 </ul>
+              )}
+              {notAdded.length > 0 && (
+                <p className="mt-1.5 text-[0.8125rem] font-medium text-ha" role="alert">
+                  At most {MAX_FILES} files. Not added: <span className="untrusted">{notAdded.join(', ')}</span>.
+                </p>
               )}
               {fileErrors.map((e) => (
                 <p key={e.field} className="mt-1.5 text-[0.8125rem] font-medium text-ha">

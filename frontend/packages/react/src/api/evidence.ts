@@ -158,6 +158,11 @@ export async function prepareEvidence(input: EvidenceComposition, ctx: EvidenceC
       errors.push({ field: `artifacts.${i}.size`, message: `Each file can be at most 256 KiB (this one is ${Math.ceil(a.file.size / 1024)} KiB).` })
       continue
     }
+    // Pine refuses empty uploads, so an empty file committed now could never be revealed.
+    if (a.file.size === 0) {
+      errors.push({ field: `artifacts.${i}.size`, message: 'This file is empty: Pine does not store empty files.' })
+      continue
+    }
     const description = field(errors, `artifacts.${i}.description`, a.description, 2_000, false)
     const locators = (a.locators ?? []).map((l) => l.trim()).filter((l) => l.length > 0)
     if (locators.length > 4 || locators.some((l) => l.length > 512)) errors.push({ field: `artifacts.${i}.locators`, message: 'At most 4 locators of up to 512 characters.' })
@@ -349,9 +354,15 @@ export async function findCommittedSubmission(api: PineWriteApi, market: Address
   return null
 }
 
+/** Pine refuses empty uploads: an empty artifact (only an earlier seal can hold one) can never be uploaded. */
+function unavailable(a: EvidenceManifest['artifacts'][number]): boolean {
+  return a.size === 0 || !sessionArtifacts.has(a.sha256)
+}
+
 /** Uploads the artifacts (from this session's memory) and the manifest; checks every digest Pine reports. */
 export async function uploadEvidence(client: PineWriteApi, manifestBody: EvidenceManifest, contentSha256: Hex32): Promise<void> {
   for (const a of manifestBody.artifacts) {
+    if (a.size === 0) throw new Error(`“${a.name}” is empty, and Pine does not store empty files.`)
     const bytes = sessionArtifacts.get(a.sha256)
     if (!bytes) throw new Error(`Attach “${a.name}” again: its bytes are no longer in this browser session.`)
     const stored = await client.uploadArtifact(bytes, { mediaType: a.mediaType, expectedSha256: a.sha256 })
@@ -701,12 +712,14 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
           const digest = sha256Hex(bytes)
           if (seal.manifest.artifacts.some((a) => a.sha256 === digest)) sessionArtifacts.set(digest, bytes)
         }
-        const missing = seal.manifest.artifacts.filter((a) => !sessionArtifacts.has(a.sha256))
+        const missing = seal.manifest.artifacts.filter(unavailable)
         if (missing.length > 0 && opts.acknowledgeUnavailableContent !== true) {
           setError({
             code: 'UNKNOWN',
             action: 'fix_input',
-            message: `Attach the committed files again to reveal: ${missing.map((a) => a.name).join(', ')}. Pine stores your evidence (the written report and its files) only when every committed file is attached.`,
+            message: missing.every((a) => a.size === 0)
+              ? `Pine does not store empty files, so ${missing.map((a) => a.name).join(', ')} cannot be uploaded: this evidence can only be revealed without its files.`
+              : `Attach the committed files again to reveal: ${missing.filter((a) => a.size > 0).map((a) => a.name).join(', ')}. Pine stores your evidence (the written report and its files) only when every committed file is attached.`,
           })
           return
         }
@@ -762,7 +775,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
         submissionId: s.submissionId,
         revealDeadline,
         revealOpen: state === 'committed' && revealDeadline !== null && now < revealDeadline - SUBMISSION_MARGIN_SECONDS,
-        missingArtifacts: s.manifest.artifacts.filter((a) => !sessionArtifacts.has(a.sha256)).map((a) => ({ name: a.name, sha256: a.sha256 as Hex32, size: a.size })),
+        missingArtifacts: s.manifest.artifacts.filter(unavailable).map((a) => ({ name: a.name, sha256: a.sha256 as Hex32, size: a.size })),
       }
     })
   }, [sealVersion, account, claim?.revealDeadline, storage, m, nowSec, runner.runner.state])
