@@ -4,7 +4,7 @@ The web frontend for Pine's GitHub claim verification. A team pins an exact comm
 
 > A NO outcome means *no qualifying counterexample was submitted*. It is not a safety certification. See [`../SPEC.md`](../SPEC.md).
 
-This directory is a **self-contained pnpm workspace**: its own `package.json`, lockfile, `tsconfig` and `.gitignore`. It is separate from the backend workspace at the repository root, so neither one's installs, configs or CI affect the other. **It is not wired to the backend API yet.** It reads data through its own `PineDataProvider` adapters (mock, REST, Envio), and demo mode needs no services at all.
+This directory is a **self-contained pnpm workspace**: its own `package.json`, lockfile, `tsconfig` and `.gitignore`. It is separate from the backend workspace at the repository root, so neither one's installs, configs or CI affect the other. In **`api` mode** (`NEXT_PUBLIC_PINE_DATA_SOURCE=api`) it runs against the Pine backend of this repository (`../packages/api`), served on the same origin under `/api/v1`: wallet sign-in (SIWE), GitHub linking, claims, drafts, previews, publication, evidence, oracle and funding. Every transaction plan the backend proposes is verified in the browser with a vendored copy of `@pine/shared` before any wallet prompt. Demo mode (`mock`, the default) needs no services at all. See [`docs/frontend/deployment.md`](docs/frontend/deployment.md).
 
 ## Pine Prism
 
@@ -67,11 +67,10 @@ frontend/
 
 Prism reads through one interface (`PineDataProvider`), selected by `NEXT_PUBLIC_PINE_DATA_SOURCE`:
 
+- `api`: the Pine backend (`../packages/api`) on the same origin. This is the production mode.
 - `mock`: fixtures. This is the default.
-- `rest`: a service implementing [`docs/indexer/rest-api.openapi.yaml`](docs/indexer/rest-api.openapi.yaml).
-- `envio`: an Envio HyperIndex deployment matching [`docs/indexer/envio/schema.graphql`](docs/indexer/envio/schema.graphql).
-
-These are the frontend's own contracts. Aligning them with the backend in this repository (`../packages/api`, `../packages/indexer-envio`) is planned separately.
+- `rest`: a service implementing [`docs/indexer/rest-api.openapi.yaml`](docs/indexer/rest-api.openapi.yaml) (the frontend's own earlier contract).
+- `envio`: an Envio HyperIndex deployment matching [`docs/indexer/envio/schema.graphql`](docs/indexer/envio/schema.graphql) (the same).
 
 ## Data for AI agents
 

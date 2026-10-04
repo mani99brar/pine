@@ -9,7 +9,8 @@
     "./copy": "./src/copy.ts",
     "./abis": "./src/abis/index.ts",
     "./chains": "./src/chains.ts",
-    "./agent": "./src/agent/index.ts"
+    "./agent": "./src/agent/index.ts",
+    "./pine-shared": "./src/pine-shared/index.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

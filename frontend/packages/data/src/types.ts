@@ -25,8 +25,8 @@ import type {
   RepoSummary,
 } from '@pine/core'
 
-/** Which indexer backs reads. */
-export type DataSourceKind = 'mock' | 'rest' | 'envio'
+/** Which indexer backs reads. `api` is the Pine backend (`packages/api`), served same-origin under /api/v1. */
+export type DataSourceKind = 'mock' | 'rest' | 'envio' | 'api'
 
 /**
  * Read-side contract for indexed chain + off-chain state.
@@ -78,11 +78,31 @@ export interface ManifestStorage {
   gatewayUrl(uri: string): string
 }
 
-/** Draft persistence (local storage in mock/envio modes, REST in rest mode). */
+/**
+ * What `DraftStore.saveIfUnchanged` did: saved the draft, or saved nothing because the stored draft is no longer the
+ * version this store last read or wrote (`base`, null when the store keeps no copy): another tab saved it (`current`)
+ * or deleted it (`current: null`).
+ */
+export type DraftSaveResult =
+  | { ok: true; draft: ClaimDraft }
+  | { ok: false; current: ClaimDraft | null; base: ClaimDraft | null }
+
+/**
+ * Draft persistence (local storage in mock/envio modes, REST in rest mode). `updatedAt` is the draft's revision: every
+ * save moves it forward. The local store also never lets a save take a stored draft's market or confirmed publication
+ * steps away (a sealed draft stays sealed).
+ */
 export interface DraftStore {
   list(owner: string): Promise<ClaimDraft[]>
   get(id: string): Promise<ClaimDraft | null>
   save(draft: ClaimDraft): Promise<ClaimDraft>
+  /**
+   * Optimistic concurrency between tabs: saves only while the stored draft is still the version this store last read
+   * (`get`) or wrote, or, for a draft it never saw stored, while none is stored. Otherwise it saves nothing, and the
+   * stored draft becomes the version this store last saw: the caller adopts `current` before saving again. A draft
+   * deleted elsewhere stays a conflict until the caller recreates it on purpose with `save`.
+   */
+  saveIfUnchanged(draft: ClaimDraft): Promise<DraftSaveResult>
   remove(id: string): Promise<void>
 }
 
@@ -98,9 +118,20 @@ export interface AccountStore {
   remove(githubLogin: string): Promise<void>
 }
 
+/** Pine's own contract deployment (the rest of the deployment manifest is the verified Gnosis constants). */
+export interface PineDeploymentEnv {
+  claimRegistry: Address
+  evidenceRegistry: Address
+  deploymentBlock: number
+}
+
 export interface PineEnv {
   dataSource: DataSourceKind
   apiUrl?: string
+  /** `api` mode, server only: the internal origin of pine-api for SSR reads (PINE_API_INTERNAL_URL). */
+  apiInternalUrl?: string
+  /** `api` mode: Pine's deployment, pinned at build time, used to verify every transaction plan. */
+  deployment?: PineDeploymentEnv
   envioGraphqlUrl?: string
   ipfsGateway: string
   ipfsUploadUrl?: string

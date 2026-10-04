@@ -156,6 +156,8 @@ export interface SourceRef {
   /** Required when the claim concerns a regression introduced relative to base */
   baseCommit?: { sha: string; htmlUrl: string }
   license?: string | null
+  /** Additive (api mode): branch whose history contains the commit, proving membership when there is no pull request */
+  branch?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -461,8 +463,36 @@ export interface ClaimSummary {
   number: number // 42 → displayed "PINE-0042"
   title: string
   violation: string
-  policy: { id: string; version: string; family: PolicyFamilyId; title: string }
-  source: { owner: string; repo: string; commitSha: string; prNumber?: number; prTitle?: string }
+  policy: {
+    id: string
+    version: string
+    family: PolicyFamilyId
+    title: string
+    /**
+     * Additive (api mode): the policy the claim pins on chain cannot be named (its digest is no catalog policy and the
+     * claim is not integrity-verified). `id` is 'UNKNOWN' and `family` a placeholder: show `hash`/`uri`, never a
+     * /policies/<id> link or a family label.
+     */
+    unknown?: boolean
+    /** Additive (api mode): SHA-256 of the policy document the claim pins on chain. */
+    hash?: Hex
+    /** Additive (api mode): content address of that policy document (ipfs://<raw CID>). */
+    uri?: string
+  }
+  source: {
+    owner: string
+    repo: string
+    commitSha: string
+    prNumber?: number
+    prTitle?: string
+    /** Additive (api mode): the numeric GitHub repository id the claim pins on chain (its repository identity). */
+    repoId?: number
+    /**
+     * Additive: `owner`/`repo` are only as stated in the claim document; nothing tied them to `repoId`. Show them as
+     * unverified, never as the verified repository.
+     */
+    unverifiedName?: boolean
+  }
   status: ClaimStatus
   outcome?: Outcome
   createdAt: IsoDate
@@ -513,6 +543,11 @@ export interface ClaimQuery {
   policyId?: string
   family?: PolicyFamilyId
   repo?: string // owner/name
+  /**
+   * Additive: a GitHub repository id from a trusted source (GitHub's answer for owner/name, or a claim's
+   * `source.repoId`). api mode: sent as the backend's repositoryId filter; takes precedence over `repo`.
+   */
+  repositoryId?: number
   creator?: Address
   chainId?: ChainId
   search?: string
@@ -687,6 +722,9 @@ export type TxStepId =
   | 'submit_evidence'
   | 'redeem_positions'
   | 'approve_outcome_tokens'
+  // additive (api mode): one step of a backend transaction plan, `plan:<plan step id>`, plus the offchain step that
+  // creates and verifies the plan
+  | `plan:${string}`
 
 export type TxStepStatus = 'idle' | 'awaiting_signature' | 'pending' | 'confirmed' | 'failed' | 'skipped'
 
@@ -695,12 +733,19 @@ export interface TxStep {
   label: string
   description: string
   kind: 'offchain' | 'transaction' | 'signature'
-  /** Present for transactions */
-  request?: { chainId: ChainId; to: Address; data: Hex; value: string /* wei */ }
+  /**
+   * Present for transactions. `from`, when set, is the only account the step may be sent from (the account a verified
+   * plan was built for): the executor refuses to simulate or send from any other.
+   */
+  request?: { chainId: ChainId; to: Address; data: Hex; value: string /* wei */; from?: Address }
   /** Estimated cost shown before the wallet prompt */
   estimatedCost?: { amount: DecimalString; currency: string }
-  /** Collateral this step moves out of the wallet (e.g. the liquidity deposit); counts toward the spending limit */
-  collateralCost?: { amount: DecimalString; currency: string }
+  /**
+   * Collateral this step moves out of the wallet (e.g. the liquidity deposit, or the xDAI a transaction sends); counts
+   * toward the spending limit. `purpose` words where it goes for the action ("as the answer bond"); without it, it moves
+   * into the market. Never gas: that is `estimatedCost`.
+   */
+  collateralCost?: { amount: DecimalString; currency: string; purpose?: string }
   /** After this step confirms, claim terms are frozen */
   freezesTerms?: boolean
   optional?: boolean
@@ -749,7 +794,15 @@ export interface ClaimDraft {
   spec: Partial<ClaimSpec>
   funding?: Partial<FundingInput>
   /** Persisted tx progress for recovery */
-  publication?: { steps: PublicationStep[]; manifestUri?: string; manifestHash?: Hex; marketAddress?: Address; claimId?: string }
+  publication?: {
+    steps: PublicationStep[]
+    manifestUri?: string
+    manifestHash?: Hex
+    marketAddress?: Address
+    claimId?: string
+    /** Additive (api mode): the backend draft this local draft is mirrored to, and its latest preview and publication */
+    backend?: { draftId: string; revision: number; previewId?: string; documentSha256?: Hex; publicationId?: string }
+  }
 }
 
 export interface LinkedWallet {

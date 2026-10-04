@@ -1,14 +1,16 @@
 'use client'
 
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react'
-import { WagmiContext } from 'wagmi'
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
+import { WagmiContext, type Config } from 'wagmi'
+import { getAccount } from 'wagmi/actions'
 import type { DecimalString, Hex, TxStep, TxStepId } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { usePine } from '../providers/context'
 import { getBrowserStorage, type KeyValueStorage } from '../internal/storage'
 import { demoWalletStore } from '../wallet/demo-store'
 import { createDemoExecutor, type DemoExecutorOptions } from './demo-executor'
-import { createLiveExecutor } from './live-executor'
+import { createLiveExecutor, type SendGuard } from './live-executor'
+import { createDevForkSendGuard, devForkConfig } from '../dev/fork'
 import {
   TxMachine,
   isManualStep,
@@ -74,16 +76,32 @@ const missingExecutor: TxExecutor = {
   },
 }
 
+/** Local dev-fork builds only (undefined otherwise): the wallet must be on the local fork before anything is sent. */
+function devSendGuard(config: Config): SendGuard | undefined {
+  const fork = devForkConfig()
+  if (!fork) return undefined
+  return createDevForkSendGuard(fork, () => getAccount(config).connector)
+}
+
 function defaultLimitCurrency(steps: TxStep[]): string | undefined {
   const chainId = steps.find((s) => s.request)?.request?.chainId
   return getChainOrDefault(chainId).collateral.symbol
 }
 
-/** Internal: returns the machine as well, for hooks that need to drive it imperatively. */
+/**
+ * Internal: returns the machine as well, for hooks that need to drive it imperatively.
+ *
+ * The callbacks a machine calls (onConfirmed, onDone, prepare, handlers, …) are bound to the machine's own key: they
+ * follow the options this hook passes while it shows that key, and keep the last of them once it moves on to another
+ * key. A machine still running for an earlier key therefore never reaches the callbacks of the key shown now (which
+ * would, e.g., report its transaction under another plan).
+ */
 export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOptions = {}): { runner: TxRunner; machine: TxMachine } {
   const pine = usePine()
   const wagmiConfig = useContext(WagmiContext)
-  const optsRef = useRef(opts)
+  // One holder per key (a new object whenever the key changes); only the current key's holder is updated.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const optsRef = useMemo(() => ({ current: opts }), [key])
   useIsomorphicLayoutEffect(() => {
     optsRef.current = opts
   })
@@ -96,7 +114,9 @@ export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOpti
     if (pine.demo) {
       return createDemoExecutor({ wallet: demoWalletStore, collateralSymbol: limitCurrency, delays: opts.demoDelays })
     }
-    return wagmiConfig ? createLiveExecutor(wagmiConfig) : missingExecutor
+    if (!wagmiConfig) return missingExecutor
+    const sendGuard = devSendGuard(wagmiConfig)
+    return createLiveExecutor(wagmiConfig, sendGuard ? { sendGuard } : undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.executor, pine.demo, wagmiConfig, limitCurrency, demoDelaysKey])
 
@@ -109,7 +129,7 @@ export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOpti
       isManual: (s: TxStep) => (optsRef.current.isManual ? optsRef.current.isManual(s) : isManualStep(s)),
       manualUrl: (s: TxStep, r: Partial<Record<TxStepId, unknown>>) => optsRef.current.manualUrl?.(s, r),
     }),
-    [],
+    [optsRef],
   )
   const handlerIds = Object.keys(opts.handlers ?? {}).sort().join(',')
   const handlers = useMemo(() => {
@@ -122,7 +142,7 @@ export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOpti
       }
     }
     return out
-  }, [handlerIds])
+  }, [handlerIds, optsRef])
 
   const machine = useMemo(() => {
     let m = registry.get(key)

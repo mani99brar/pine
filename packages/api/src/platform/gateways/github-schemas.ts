@@ -7,6 +7,9 @@ const id = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 export const SHA_PATTERN = /^[0-9a-f]{40}$/;
 const sha = z.string().regex(SHA_PATTERN);
 const login = z.string().regex(/^[A-Za-z0-9_-]{1,100}$/);
+// Who authored a pull request or commit, shown as text only: GitHub Apps author as "<name>[bot]" (dependabot[bot],
+// github-actions[bot]). Identities and repository owners keep the strict `login` (a bot can never link or own a repo).
+const authorLogin = z.string().regex(/^[A-Za-z0-9_-]{1,100}(\[bot\])?$/);
 const repoName = z.string().regex(/^[A-Za-z0-9_.-]{1,100}$/);
 const ref = z.string().min(1).max(255);
 const url = z.string().max(2048).regex(/^https:\/\//);
@@ -46,7 +49,7 @@ export const githubPullSchema = z.object({
   merged_at: timestamp.nullable().optional(),
   html_url: url,
   updated_at: timestamp,
-  user: z.object({ login }).nullable().optional(),
+  user: z.object({ login: authorLogin }).nullable().optional(),
   head: z.object({ sha, ref, repo: z.object({ id }).nullable().optional() }),
   base: z.object({ sha, ref, repo: githubRepoSchema }),
   commits: z.number().int().nonnegative().optional(),
@@ -57,7 +60,7 @@ export const githubCommitSchema = z.object({
   sha,
   html_url: url,
   parents: z.array(z.object({ sha })).max(100),
-  author: z.object({ login }).nullable().optional(),
+  author: z.object({ login: authorLogin }).nullable().optional(),
   commit: z.object({
     message: z.string().max(65_536),
     committer: z.object({ date: timestamp.nullable().optional() }).nullable().optional(),

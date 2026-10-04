@@ -1,21 +1,24 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { SessionProvider } from 'next-auth/react'
+import { SessionContext, SessionProvider } from 'next-auth/react'
 import type { Session } from 'next-auth'
 import { WagmiProvider, type Config } from 'wagmi'
-import { QueryClient, QueryClientProvider, notifyManager, useQueryClient } from '@tanstack/react-query'
+import { MutationCache, QueryCache, QueryClient, QueryClientProvider, notifyManager, useQueryClient } from '@tanstack/react-query'
 import { RainbowKitProvider, type Theme } from '@rainbow-me/rainbowkit'
 import {
   createDataProvider,
   createDraftStore,
   createManifestStorage,
+  PineApiClient,
   readPineEnv,
   type PineEnv,
 } from '@pine/data'
 import { PineContext, isDemoEnv, type PineContextValue } from './context'
 import { createPineWagmiConfig } from './wagmi-config'
+import { WalletReconnect } from '../wallet/reconnect'
 import { createApiTokenGetter } from '../internal/api-token'
+import { handleSessionGone } from '../api/session'
 
 // The claim composer keeps its draft in the TanStack Query cache and binds it to controlled inputs.
 // TanStack's default notify scheduler defers cache notifications to a later tick, so React restores the
@@ -43,8 +46,19 @@ export interface PineProvidersProps {
   apiBase?: string
 }
 
+/**
+ * The Pine query client. A backend 401 from any query or mutation means this browser has no valid session, so the
+ * cached session and the per-user data are dropped from here (handleSessionGone) instead of each hook finding out.
+ */
 export function createPineQueryClient(): QueryClient {
-  return new QueryClient({
+  const qc: QueryClient = new QueryClient({
+    queryCache: new QueryCache({
+      onError: (error, query) => {
+        // A query removed meanwhile (a sign-in replaced the per-user data) answered for the session before it.
+        if (qc.getQueryCache().get(query.queryHash) === query) handleSessionGone(qc, error)
+      },
+    }),
+    mutationCache: new MutationCache({ onError: (error) => void handleSessionGone(qc, error) }),
     defaultOptions: {
       queries: {
         staleTime: 30_000,
@@ -58,6 +72,7 @@ export function createPineQueryClient(): QueryClient {
       },
     },
   })
+  return qc
 }
 
 function createContextValue(appName: string, overrides: Partial<PineEnv> | undefined, apiBase: string): PineContextValue {
@@ -73,6 +88,8 @@ function createContextValue(appName: string, overrides: Partial<PineEnv> | undef
     demo: isDemoEnv(env),
     appName,
     apiBase: base,
+    // The backend is same-origin in the browser; the session cookie is HttpOnly and never read by script.
+    api: env.dataSource === 'api' ? new PineApiClient({ baseUrl: '' }) : null,
   }
 }
 
@@ -111,8 +128,12 @@ export function PineProviders(props: PineProvidersProps): React.JSX.Element {
   )
   const [queryClient] = useState(() => props.queryClient ?? createPineQueryClient())
 
+  // `api` mode: identity is the backend's SIWE session (usePineSession), not next-auth. Hooks that read next-auth get a
+  // fixed signed-out context, so nothing ever calls /api/auth (which the backend owns), not even after a dev remount.
+  const apiMode = value.env.dataSource === 'api'
+  const SessionScope = apiMode ? SignedOutSession : SessionProvider
   return (
-    <SessionProvider session={session} basePath={value.apiBase ? `${value.apiBase}/api/auth` : undefined}>
+    <SessionScope session={apiMode ? null : session} basePath={value.apiBase ? `${value.apiBase}/api/auth` : undefined}>
       <WagmiProvider config={wagmiConfig}>
         <QueryClientProvider client={queryClient}>
           <RainbowKitProvider
@@ -123,13 +144,21 @@ export function PineProviders(props: PineProvidersProps): React.JSX.Element {
           >
             <PineContext.Provider value={value}>
               <DataSync data={value.data} />
+              <WalletReconnect />
               {children}
             </PineContext.Provider>
           </RainbowKitProvider>
         </QueryClientProvider>
       </WagmiProvider>
-    </SessionProvider>
+    </SessionScope>
   )
+}
+
+const SIGNED_OUT = { data: null, status: 'unauthenticated' as const, update: async () => null }
+
+/** next-auth's context, permanently signed out (api mode). */
+function SignedOutSession({ children }: { children: ReactNode; session?: Session | null; basePath?: string }): React.JSX.Element {
+  return <SessionContext.Provider value={SIGNED_OUT}>{children}</SessionContext.Provider>
 }
 
 export default PineProviders

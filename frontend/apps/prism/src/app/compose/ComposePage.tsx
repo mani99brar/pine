@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import { newDraftId } from '@pine/react'
 import { Composer } from '@/components/composer/Composer'
@@ -17,12 +17,19 @@ export function ComposePage() {
   const pathname = usePathname()
   const mounted = useMounted()
   const draftId = params.get('draft') ?? undefined
+  // The id being put into the URL: a re-run effect (React StrictMode) reuses it instead of racing a second draft id;
+  // once the URL carries a draft, the next visit without one gets a new id.
+  const pending = useRef<string | null>(null)
 
   useEffect(() => {
-    if (draftId) return
+    if (draftId) {
+      pending.current = null
+      return
+    }
+    pending.current ??= newDraftId()
     const next = new URLSearchParams(params.toString())
     next.delete('new')
-    next.set('draft', newDraftId())
+    next.set('draft', pending.current)
     router.replace(`${pathname}?${next.toString()}`, { scroll: false })
   }, [draftId, params, pathname, router])
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { parseGitHubRefDetailed } from '@pine/core'
 import type { CommitSummary, Page, ParsedGitHubRef, PullSummary, RepoSummary, SourceRef } from '@pine/core'
+import { ApiGitHubSource, PineBackendError, PineDataError, type GitHubSource, type PineApiClient } from '@pine/data'
 import { usePine } from '../providers/context'
 import { pineKeys } from '../queries/keys'
 import { apiFetch, PineApiError } from '../internal/api'
@@ -12,15 +13,54 @@ import { apiFetch, PineApiError } from '../internal/api'
  * GitHub hooks. They call the app's `/api/github/*` proxy (mounted from `@pine/server/github`),
  * which uses the signed-in user's token (scope `read:user`, public repositories only) or the mock
  * GitHub source in demo mode. The token never reaches the browser.
+ *
+ * `api` mode: the Pine backend's `/api/v1/github/*` routes on the page's own origin, authorised by the backend
+ * session cookie and the user's linked GitHub account (the app's proxy cannot forward that cookie). Errors keep the
+ * proxy's semantics: a missing resource is a 404, and 401/403 (signed out, GitHub not linked) or 422 (not a public
+ * repository) surface with the backend's message.
  */
 
 const GH_STALE = 60_000
 
-function useGh<T>(key: (string | number | undefined)[], path: string | null, opts?: { staleTime?: number }) {
-  const { apiBase } = usePine()
+const backendSources = new WeakMap<PineApiClient, GitHubSource>()
+
+function backendSource(api: PineApiClient): GitHubSource {
+  let source = backendSources.get(api)
+  if (!source) {
+    source = new ApiGitHubSource({ client: api, unavailable: 'throw' })
+    backendSources.set(api, source)
+  }
+  return source
+}
+
+function hookError(err: unknown): PineApiError {
+  if (err instanceof PineApiError) return err
+  // Pine's own error stays the cause, so a 401 still ends the cached session (handleSessionGone).
+  if (err instanceof PineBackendError) return Object.assign(new PineApiError(err.message, err.status, err.code, err.retryAfter), { cause: err })
+  if (err instanceof PineDataError) return new PineApiError(err.message, err.code === 'not_found' ? 404 : 502, err.code)
+  return new PineApiError('GitHub request failed.', 0, 'network')
+}
+
+function found<T>(value: T | null, message: string): T {
+  if (value === null) throw new PineApiError(message, 404, 'not_found')
+  return value
+}
+
+function useGh<T>(
+  key: (string | number | undefined)[],
+  path: string | null,
+  viaBackend: (gh: GitHubSource) => Promise<T>,
+  opts?: { staleTime?: number },
+) {
+  const { apiBase, api } = usePine()
   return useQuery<T, PineApiError>({
     queryKey: pineKeys.github(...key),
-    queryFn: () => apiFetch<T>(apiBase, `/api/github/${path}`),
+    queryFn: api
+      ? () =>
+          viaBackend(backendSource(api)).catch((err: unknown) => {
+            throw hookError(err)
+          })
+      : () => apiFetch<T>(apiBase, `/api/github/${path}`),
     enabled: path !== null,
     staleTime: opts?.staleTime ?? GH_STALE,
     retry: (count, err) => (err.status === 429 || err.status >= 500 || err.status === 0) && count < 1,
@@ -34,22 +74,27 @@ export function useGitHubViewerRepos(opts?: { cursor?: string; limit?: number })
   if (opts?.cursor) params.set('cursor', opts.cursor)
   if (opts?.limit) params.set('limit', String(opts.limit))
   const qs = params.toString()
-  return useGh<Page<RepoSummary>>(['viewer-repos', opts?.cursor, opts?.limit], `viewer/repos${qs ? `?${qs}` : ''}`)
+  return useGh<Page<RepoSummary>>(['viewer-repos', opts?.cursor, opts?.limit], `viewer/repos${qs ? `?${qs}` : ''}`, (gh) =>
+    gh.listViewerRepos({ cursor: opts?.cursor, limit: opts?.limit }),
+  )
 }
 
 export function useGitHubRepoSearch(query: string) {
   const q = useDebouncedValue(query.trim(), 300)
-  return useGh<RepoSummary[]>(['search', q], q.length >= 2 ? `search/repos?q=${enc(q)}` : null)
+  return useGh<RepoSummary[]>(['search', q], q.length >= 2 ? `search/repos?q=${enc(q)}` : null, (gh) => gh.searchRepos(q))
 }
 
 export function useGitHubRepo(owner?: string, repo?: string) {
-  return useGh<RepoSummary>(['repo', owner, repo], owner && repo ? `repos/${enc(owner)}/${enc(repo)}` : null)
+  return useGh<RepoSummary>(['repo', owner, repo], owner && repo ? `repos/${enc(owner)}/${enc(repo)}` : null, async (gh) =>
+    found(await gh.getRepo(owner ?? '', repo ?? ''), `Repository ${owner}/${repo} was not found or is private.`),
+  )
 }
 
 export function useGitHubPulls(owner?: string, repo?: string, state: 'open' | 'closed' | 'all' = 'open') {
   return useGh<PullSummary[]>(
     ['pulls', owner, repo, state],
     owner && repo ? `repos/${enc(owner)}/${enc(repo)}/pulls?state=${state}` : null,
+    (gh) => gh.listPulls(owner ?? '', repo ?? '', { state }),
   )
 }
 
@@ -57,6 +102,7 @@ export function useGitHubPull(owner?: string, repo?: string, number?: number) {
   return useGh<PullSummary>(
     ['pull', owner, repo, number],
     owner && repo && number ? `repos/${enc(owner)}/${enc(repo)}/pulls/${number}` : null,
+    async (gh) => found(await gh.getPull(owner ?? '', repo ?? '', number ?? 0), `Pull request #${number} was not found in ${owner}/${repo}.`),
   )
 }
 
@@ -64,6 +110,7 @@ export function useGitHubPullCommits(owner?: string, repo?: string, number?: num
   return useGh<CommitSummary[]>(
     ['pull-commits', owner, repo, number],
     owner && repo && number ? `repos/${enc(owner)}/${enc(repo)}/pulls/${number}/commits` : null,
+    (gh) => gh.listPullCommits(owner ?? '', repo ?? '', number ?? 0),
   )
 }
 
@@ -71,6 +118,7 @@ export function useGitHubCommits(owner?: string, repo?: string, ref?: string) {
   return useGh<CommitSummary[]>(
     ['commits', owner, repo, ref],
     owner && repo ? `repos/${enc(owner)}/${enc(repo)}/commits${ref ? `?ref=${enc(ref)}` : ''}` : null,
+    (gh) => gh.listCommits(owner ?? '', repo ?? '', ref ? { ref } : {}),
   )
 }
 
@@ -79,6 +127,11 @@ export function useGitHubCommit(owner?: string, repo?: string, sha?: string) {
   return useGh<CommitSummary>(
     ['commit', owner, repo, sha?.toLowerCase()],
     owner && repo && sha ? `repos/${enc(owner)}/${enc(repo)}/commits/${enc(sha)}` : null,
+    async (gh) => {
+      // The backend looks commits up by their full SHA only.
+      if (!/^[0-9a-fA-F]{40}$/.test(sha ?? '')) throw new PineApiError('Paste the full 40-character commit SHA: Pine does not resolve short SHAs.', 400, 'bad_request')
+      return found(await gh.getCommit(owner ?? '', repo ?? '', sha ?? ''), `Commit ${sha} was not found in ${owner}/${repo}.`)
+    },
     { staleTime: sha && sha.length === 40 ? Number.POSITIVE_INFINITY : GH_STALE },
   )
 }

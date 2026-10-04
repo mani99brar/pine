@@ -1,17 +1,26 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClaimDraft, ComposerStage } from '@pine/core'
 import { formatDate } from '@pine/core'
-import { DEFAULT_SPENDING_LIMIT, defaultDeadline, defaultOracle, useAccount, useClaimComposer, usePine } from '@pine/react'
+import { DEFAULT_SPENDING_LIMIT, defaultDeadline, defaultOracle, isDraftFrozen, useAccount, useClaimComposer, usePine, type ClaimComposer } from '@pine/react'
 import { AnimatePresence, motion } from 'motion/react'
 import { Check, Lock } from 'lucide-react'
 import { CuttingBench, FacetRail, facetState } from './CuttingBench'
 import { stepIndex, issuesFor, UI_STEPS, type UiStep } from './shared'
 import { StageClaim, StageDeadlines, StageEnvironment, StagePolicy, StageSource } from './StagesA'
 import { StageFunding, StagePublish, StageReview } from './StagesB'
-import { Skeleton } from '@/components/ui/primitives'
+import { ApiComposerScope, useApiPublication } from './api/context'
+import { ApiStageSource } from './api/ApiSource'
+import { ApiStagePolicy } from './api/ApiPolicy'
+import { ApiStageDeadlines } from './api/ApiDeadlines'
+import { ApiStageFunding } from './api/ApiFunding'
+import { ApiStageReview } from './api/ApiReview'
+import { ApiStagePublish } from './api/ApiPublish'
+import { Button } from '@/components/ui/Button'
+import { Notice, Skeleton } from '@/components/ui/primitives'
 import { useReduceMotion } from '@/lib/hooks'
 
 const ACK_KEY = (id: string) => `pine-prism:ack:${id}`
@@ -33,15 +42,101 @@ function writeSession(key: string, v: string) {
   }
 }
 
+/** The draft changed or was deleted in another tab while it was open here. */
+function DraftConflictNotice({ c }: { c: ClaimComposer }) {
+  const router = useRouter()
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  if (!c.conflict) return null
+  if (c.conflict.kind === 'deleted') {
+    const keep = () => {
+      setBusy(true)
+      setFailed(false)
+      c.resolveDeleted(true).then(
+        () => setBusy(false),
+        () => {
+          setBusy(false)
+          setFailed(true)
+        },
+      )
+    }
+    const letGo = () => {
+      void c.resolveDeleted(false).then(() => router.push('/drafts'))
+    }
+    return (
+      <Notice
+        tone="caution"
+        role="alert"
+        title="This draft was deleted in another tab"
+        className="mt-6"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={keep} loading={busy}>
+              Keep this draft
+            </Button>
+            <Button size="sm" variant="ghost" onClick={letGo} disabled={busy}>
+              Let it go
+            </Button>
+          </div>
+        }
+      >
+        Nothing here is saved until you choose. Keep it to save it again as shown here, or let it go.
+        {failed && ' The draft could not be saved in this browser. Try again.'}
+      </Notice>
+    )
+  }
+  return (
+    <Notice
+      tone={c.conflict.editsDropped ? 'caution' : 'info'}
+      role="status"
+      title="This draft changed in another tab"
+      className="mt-6"
+      action={
+        <Button size="sm" variant="ghost" onClick={c.dismissConflict}>
+          Dismiss
+        </Button>
+      }
+    >
+      {c.conflict.editsDropped
+        ? 'It now shows the version saved there. Some of your unsaved edits were not kept: the other tab changed the same fields, or sealed the claim.'
+        : 'It now shows the version saved there, with your unsaved edits to other fields kept.'}
+    </Notice>
+  )
+}
+
 function stepFromStage(stage: ComposerStage, saved: string | null): UiStep {
   if (stage === 'claim' && saved === 'environment') return 'environment'
   return (UI_STEPS.find((s) => s.stage === stage)?.id ?? 'source') as UiStep
 }
 
-export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: { draftId: string; initialInput?: string; fromClaimId?: string; initialPolicy?: string }) {
-  const c = useClaimComposer(draftId)
+interface ComposerProps {
+  draftId: string
+  initialInput?: string
+  fromClaimId?: string
+  initialPolicy?: string
+}
+
+/**
+ * The claim composer. In api mode (Pine backend) the stages share the draft's backend publication (draft, verified
+ * preview, createClaim plan, status) and the source, policy, deadlines, funding, review and publish stages follow the
+ * backend's rules; demo mode is unchanged.
+ */
+export function Composer(props: ComposerProps) {
+  const c = useClaimComposer(props.draftId, { backendPolicy: true })
+  if (c.api) {
+    return (
+      <ApiComposerScope c={c} draftId={props.draftId}>
+        {(view) => <ComposerBody c={view} {...props} />}
+      </ApiComposerScope>
+    )
+  }
+  return <ComposerBody c={c} {...props} />
+}
+
+function ComposerBody({ c, draftId, initialInput, fromClaimId, initialPolicy }: ComposerProps & { c: ClaimComposer }) {
   const { data } = usePine()
   const reduce = useReduceMotion()
+  const pub = useApiPublication()
 
   // UI step: the core stage, plus "environment" (a sub-step of the claim stage) remembered per draft.
   const [step, setStepState] = useState<UiStep>(() => stepFromStage(c.draft.stage, readSession(STEP_KEY(draftId))))
@@ -79,7 +174,7 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
     prefilled.current = true
     void data.getClaim(fromClaimId).then((claim) => {
       if (!claim) return
-      const deadline = defaultDeadline()
+      const deadline = c.api ? c.api.defaultDeadline() : defaultDeadline()
       c.update((d: ClaimDraft) => ({
         ...d,
         stage: 'claim',
@@ -104,7 +199,7 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
     c.update((d: ClaimDraft) => ({ ...d, funding: { ...d.funding, spendingLimit: prefLimit } }))
   }, [prefLimit, c])
 
-  // Preselect a policy (from a policy page).
+  // Preselect a policy (from a policy page). In api mode the composer then takes the backend's latest version.
   const policySet = useRef(false)
   useEffect(() => {
     if (!initialPolicy || policySet.current || c.isLoading || c.draft.spec.policyId) return
@@ -164,12 +259,14 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
             </Link>
           </p>
         </div>
-        {c.frozen && (
+        {isDraftFrozen(c.draft) && (
           <p className="tag gap-1.5 px-3 py-1 text-[0.84375rem] text-lumen">
             <Lock size={13} aria-hidden /> Sealed: terms frozen
           </p>
         )}
       </div>
+
+      <DraftConflictNotice c={c} />
 
       <div ref={topRef} className="mt-7">
         <FacetRail step={step} furthest={furthest} onGo={go} blocked={blocked} frozen={c.frozen} />
@@ -195,14 +292,15 @@ export function Composer({ draftId, initialInput, fromClaimId, initialPolicy }: 
               exit={reduce ? undefined : { opacity: 0, y: -6, transition: { duration: 0.14 } }}
               transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
             >
-              {step === 'source' && <StageSource c={c} nav={nav} initialInput={initialInput} />}
-              {step === 'policy' && <StagePolicy c={c} nav={nav} />}
+              {step === 'source' && (pub ? <ApiStageSource c={c} nav={nav} initialInput={initialInput} /> : <StageSource c={c} nav={nav} initialInput={initialInput} />)}
+              {step === 'policy' && (pub ? <ApiStagePolicy c={c} nav={nav} /> : <StagePolicy c={c} nav={nav} />)}
               {step === 'claim' && <StageClaim c={c} nav={nav} />}
               {step === 'environment' && <StageEnvironment c={c} nav={nav} />}
-              {step === 'deadlines' && <StageDeadlines c={c} nav={nav} />}
-              {step === 'funding' && <StageFunding c={c} nav={nav} />}
-              {step === 'review' && <StageReview c={c} nav={nav} acknowledged={ack} setAcknowledged={setAck} />}
-              {step === 'publish' && <StagePublish c={c} nav={nav} acknowledged={ack} />}
+              {step === 'deadlines' && (pub ? <ApiStageDeadlines c={c} nav={nav} /> : <StageDeadlines c={c} nav={nav} />)}
+              {step === 'funding' && (pub ? <ApiStageFunding c={c} nav={nav} /> : <StageFunding c={c} nav={nav} />)}
+              {step === 'review' &&
+                (pub ? <ApiStageReview c={c} nav={nav} acknowledged={ack} setAcknowledged={setAck} /> : <StageReview c={c} nav={nav} acknowledged={ack} setAcknowledged={setAck} />)}
+              {step === 'publish' && (pub ? <ApiStagePublish c={c} nav={nav} acknowledged={ack} /> : <StagePublish c={c} nav={nav} acknowledged={ack} />)}
             </motion.div>
           </AnimatePresence>
         </div>

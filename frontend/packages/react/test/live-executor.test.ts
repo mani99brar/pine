@@ -4,6 +4,7 @@ import type { Config } from 'wagmi'
 import type { Hex, TxStep } from '@pine/core'
 
 const actions = vi.hoisted(() => ({
+  estimateGas: vi.fn(),
   getAccount: vi.fn(),
   getBytecode: vi.fn(),
   getTransaction: vi.fn(),
@@ -34,6 +35,7 @@ beforeEach(() => {
   progress.onSubmitted.mockReset()
   actions.getAccount.mockReturnValue({ address: TO, chainId: 100 })
   actions.getBytecode.mockResolvedValue('0x6080')
+  actions.estimateGas.mockResolvedValue(100_000n)
   actions.sendTransaction.mockResolvedValue(H1)
   actions.waitForTransactionReceipt.mockResolvedValue(receipt(H1))
 })
@@ -111,5 +113,86 @@ describe('live executor: checkPending', () => {
       return receipt(H2)
     })
     expect((await createLiveExecutor(config).checkPending(step(), H1, undefined)).status).toBe('failed')
+  })
+})
+
+describe('live executor: the plan account sends (SEC-AUTH-13)', () => {
+  const PLAN_ACCOUNT = '0x2222222222222222222222222222222222222222' as const
+  const bound = () => step({ request: { chainId: 100, to: TO, data: '0xabcdef', value: '0', from: PLAN_ACCOUNT } })
+
+  it('SEC-AUTH-13 refuses to simulate or send a step from another account than the plan’s', async () => {
+    actions.getAccount.mockReturnValue({ address: TO, chainId: 100 })
+    await expect(createLiveExecutor(config).execute(bound(), progress)).rejects.toThrow(/Switch back to the wallet that signed in .*Nothing was sent/)
+    expect(actions.estimateGas).not.toHaveBeenCalled()
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+  })
+
+  it('SEC-AUTH-13 refuses to send when the wallet switched accounts during the checks', async () => {
+    actions.getAccount.mockReturnValue({ address: PLAN_ACCOUNT, chainId: 100 })
+    actions.estimateGas.mockImplementation(async () => {
+      actions.getAccount.mockReturnValue({ address: TO, chainId: 100 })
+      return 100_000n
+    })
+    await expect(createLiveExecutor(config).execute(bound(), progress)).rejects.toThrow(/Switch back to the wallet that signed in/)
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+  })
+
+  it('simulates and sends as the plan account, naming it as the sender', async () => {
+    actions.getAccount.mockReturnValue({ address: PLAN_ACCOUNT, chainId: 100 })
+    await createLiveExecutor(config).execute(bound(), progress)
+    expect(actions.estimateGas).toHaveBeenCalledWith(config, { account: PLAN_ACCOUNT, to: TO, data: '0xabcdef', value: 0n, chainId: 100 })
+    expect(actions.sendTransaction).toHaveBeenCalledWith(config, { account: PLAN_ACCOUNT, to: TO, data: '0xabcdef', value: 0n, chainId: 100, gas: 120_000n })
+  })
+})
+
+describe('live executor: simulation and gas (SEC-TX-07)', () => {
+  it('SEC-TX-07 simulates before the wallet prompt and sends nothing when the call would revert', async () => {
+    actions.estimateGas.mockRejectedValue(Object.assign(new Error('execution reverted'), { shortMessage: 'Execution reverted: ClaimExists()' }))
+    const ex = createLiveExecutor(config)
+    await expect(ex.execute(step(), progress)).rejects.toThrow(/would fail on-chain \(Execution reverted: ClaimExists\(\)\)\. Nothing was sent/)
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+  })
+
+  it('sends with a 20% gas margin over the simulated estimate', async () => {
+    const ex = createLiveExecutor(config)
+    await ex.execute(step({ request: { chainId: 100, to: TO, data: '0xabcdef', value: '7' } }), progress)
+    expect(actions.estimateGas).toHaveBeenCalledWith(config, { account: TO, to: TO, data: '0xabcdef', value: 7n, chainId: 100 })
+    expect(actions.sendTransaction).toHaveBeenCalledWith(config, { to: TO, data: '0xabcdef', value: 7n, chainId: 100, gas: 120_000n })
+  })
+})
+
+describe('live executor: dev-fork send guard', () => {
+  it('SEC-TX-05 dev guard refuses to send when the wallet RPC is not the local fork, before any signature prompt', async () => {
+    const beforeSend = vi.fn(async () => {
+      throw new Error('Your wallet is on the REAL Gnosis network, not the local fork. Nothing was sent.')
+    })
+    const ex = createLiveExecutor(config, { sendGuard: { refuseChain: () => null, beforeSend } })
+    await expect(ex.execute(step(), progress)).rejects.toThrow(/REAL Gnosis.*Nothing was sent/)
+    expect(beforeSend).toHaveBeenCalledWith({ chainId: 100 })
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('refuses a chain the fork does not cover before any chain-switch prompt', async () => {
+    const beforeSend = vi.fn(async () => undefined)
+    const ex = createLiveExecutor(config, { sendGuard: { refuseChain: (id) => (id === 100 ? null : `chain ${id} is not forked. Nothing was sent.`), beforeSend } })
+    await expect(ex.execute(step({ request: { chainId: 1, to: TO, data: '0xabcdef', value: '0' } }), progress)).rejects.toThrow(/chain 1 is not forked/)
+    expect(actions.switchChain).not.toHaveBeenCalled()
+    expect(actions.estimateGas).not.toHaveBeenCalled()
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('sends when the guard passes', async () => {
+    const ex = createLiveExecutor(config, { sendGuard: { refuseChain: () => null, beforeSend: async () => undefined } })
+    await expect(ex.execute(step(), progress)).resolves.toMatchObject({ txHash: H1 })
+    expect(actions.sendTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('without a guard the behaviour is unchanged', async () => {
+    const ex = createLiveExecutor(config)
+    await expect(ex.execute(step(), progress)).resolves.toMatchObject({ txHash: H1 })
   })
 })

@@ -26,6 +26,12 @@ function str(v: string | undefined): string | undefined {
   return v && v.trim() !== '' ? v.trim() : undefined
 }
 
+function randomSecret(): string {
+  const bytes = new Uint8Array(32)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 export class PineConfigError extends Error {
   constructor(message: string) {
     super(message)
@@ -41,6 +47,11 @@ export function readServerEnv(): ServerEnv {
   const configured = str(process.env.AUTH_SECRET) ?? str(process.env.NEXTAUTH_SECRET)
   let authSecret = configured
   let usingDevSecret = false
+  if (!authSecret && env.dataSource === 'api') {
+    // api mode: identity is the Pine backend's SIWE session; Auth.js has no providers and its routes answer 404. A random
+    // per-process secret (never the public development one) means no next-auth cookie can ever be forged or replayed.
+    authSecret = randomSecret()
+  }
   if (!authSecret) {
     const githubConfigured = Boolean(githubClientId && githubClientSecret)
     if (production && (env.dataSource !== 'mock' || githubConfigured)) {
@@ -57,7 +68,8 @@ export function readServerEnv(): ServerEnv {
   }
   return {
     ...env,
-    githubOAuthConfigured: Boolean(githubClientId && githubClientSecret),
+    // api mode never signs in through Auth.js, even when GitHub OAuth variables are present.
+    githubOAuthConfigured: env.dataSource !== 'api' && Boolean(githubClientId && githubClientSecret),
     authSecret,
     usingDevSecret,
     githubClientId,
@@ -76,6 +88,8 @@ export function readServerEnv(): ServerEnv {
 export function demoAllowed(
   env: Pick<ServerEnv, 'dataSource' | 'githubOAuthConfigured' | 'demoWallet'> & { production?: boolean },
 ): boolean {
+  // api mode: the backend owns identity; no demo sign-in exists there.
+  if (env.dataSource === 'api') return false
   if (env.dataSource === 'mock') return true
   if (env.githubOAuthConfigured) return false
   return !(env.production && env.dataSource === 'rest')

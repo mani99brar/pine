@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useClaim } from '@pine/react'
 import type { ClaimDetail } from '@pine/core'
-import { formatClaimNumber, OUTCOME_META, shortHash, shortSha } from '@pine/core'
+import { OUTCOME_META, shortHash, shortSha } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { ArrowLeft } from 'lucide-react'
 import { ClaimCrystal } from '@/components/crystal/ClaimCrystal'
@@ -20,10 +20,13 @@ import { EvidenceFeed } from './EvidenceFeed'
 import { OraclePanel } from './OraclePanel'
 import { AgentBrief, ClaimActivity } from './AgentAndActivity'
 import { PositionPanel, PublishingRecovery } from './Actions'
+import { ApiClaimNotices } from './ApiNotices'
+import { ApiPriceSplit } from './ApiPriceSplit'
+import { ApiMarketPanel } from './ApiMarket'
 import { ButtonLink } from '@/components/ui/Button'
 import { Container, EmptyState, ErrorState, Skeleton } from '@/components/ui/primitives'
 import { FAMILY_VAR, OUTCOME_HEX } from '@/lib/crystal'
-import { isResolved } from '@/lib/claims'
+import { apiDetailFactsOf, apiStatusLabel, claimLabel, claimPolicyHref, isResolved, repoLabel, shortRepo } from '@/lib/claims'
 import { cn } from '@/lib/cn'
 
 const SECTIONS = [
@@ -144,6 +147,19 @@ export function ClaimView({ id }: { id: string }) {
   const unfinished = claim.status === 'publishing' || claim.status === 'failed'
   const prices = pricesFrom(claim)
   const fam = claim.policy.family
+  const api = apiDetailFactsOf(claim)
+  const repo = shortRepo(claim)
+  const repoUrl = repo ? `https://github.com/${encodeURIComponent(claim.source.owner)}/${encodeURIComponent(claim.source.repo)}` : null
+  const commitUrl = claim.manifest.source.commit.htmlUrl || null
+  const pull = claim.manifest.source.pullRequest
+    ? { number: claim.manifest.source.pullRequest.number, url: claim.manifest.source.pullRequest.htmlUrl }
+    : api && repoUrl && claim.source.prNumber
+      ? { number: claim.source.prNumber, url: `${repoUrl}/pull/${claim.source.prNumber}` }
+      : null
+  // Backend claims follow the backend's phase: new evidence only while the evidence window is open, reveals until the
+  // reveal deadline, and nothing for a moderated claim.
+  const canSubmit = api ? api.phase === 'evidence_open' && !api.hidden : claim.status === 'open'
+  const canReveal = api ? api.phase === 'reveal_open' && !api.hidden : false
 
   return (
     <Container wide className="pb-10">
@@ -160,27 +176,48 @@ export function ClaimView({ id }: { id: string }) {
         </div>
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="tnum text-[0.9375rem] font-semibold text-lumen-3">{formatClaimNumber(claim.number)}</span>
-            <Link href={`/policies/${claim.policy.id}`} className="tag hover:text-lumen">
-              <span style={{ color: FAMILY_VAR[fam] }}>
-                <FamilyIcon family={fam} size={13} />
+            <span className={cn('tnum text-[0.9375rem] font-semibold text-lumen-3', api && 't-code font-normal')} title={api ? `Market ${claim.marketAddress ?? claim.id}` : undefined}>
+              {claimLabel(claim)}
+            </span>
+            {claim.policy.unknown ? (
+              // The pinned policy matches no catalog entry and the claim is not verified: name it by its digest only.
+              <span className="tag text-ha" title={claim.policy.hash ? `Policy sha256 ${claim.policy.hash}` : undefined}>
+                Unknown policy{claim.policy.hash ? ` ${shortHash(claim.policy.hash)}` : ''}
               </span>
-              {claim.policy.id}@{claim.policy.version}
-            </Link>
-            <StatusBadge status={claim.status} outcome={claim.outcome} />
+            ) : (
+              <Link href={claimPolicyHref(claim)} className="tag hover:text-lumen">
+                <span style={{ color: FAMILY_VAR[fam] }}>
+                  <FamilyIcon family={fam} size={13} />
+                </span>
+                {claim.policy.id}
+                {claim.policy.version ? `@${claim.policy.version}` : ''}
+              </Link>
+            )}
+            <StatusBadge status={claim.status} outcome={claim.outcome} label={apiStatusLabel(claim)} />
             {claim.sponsored && <span className="tag">Sponsored</span>}
           </div>
           <h1 className="t-h1 chroma mt-3 max-w-[26ch] [overflow-wrap:anywhere]">{claim.title}</h1>
           <p className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[0.9rem] text-lumen-2">
-            <a className="link" href={`https://github.com/${claim.source.owner}/${claim.source.repo}`} target="_blank" rel="noopener noreferrer nofollow">
-              {claim.source.owner}/{claim.source.repo}
-            </a>
-            <a className="t-code link text-[0.8125rem]" href={claim.manifest.source.commit.htmlUrl} target="_blank" rel="noopener noreferrer nofollow" title={claim.source.commitSha}>
-              commit {shortSha(claim.source.commitSha)}
-            </a>
-            {claim.manifest.source.pullRequest && (
-              <a className="link" href={claim.manifest.source.pullRequest.htmlUrl} target="_blank" rel="noopener noreferrer nofollow">
-                PR #{claim.manifest.source.pullRequest.number}
+            {repoUrl ? (
+              <a className="link" href={repoUrl} target="_blank" rel="noopener noreferrer nofollow" title={claim.source.unverifiedName ? 'As stated in the claim document; Pine verifies the repository id, not this name.' : undefined}>
+                {repo}
+                {claim.source.unverifiedName && <span className="ml-1 text-[0.78rem] text-lumen-3">(as stated in the claim document)</span>}
+              </a>
+            ) : (
+              <span className="text-lumen-3">{repoLabel(claim)}</span>
+            )}
+            {commitUrl ? (
+              <a className="t-code link text-[0.8125rem]" href={commitUrl} target="_blank" rel="noopener noreferrer nofollow" title={claim.source.commitSha}>
+                commit {shortSha(claim.source.commitSha)}
+              </a>
+            ) : (
+              <span className="t-code text-[0.8125rem]" title={claim.source.commitSha}>
+                commit {shortSha(claim.source.commitSha)}
+              </span>
+            )}
+            {pull && (
+              <a className="link" href={pull.url} target="_blank" rel="noopener noreferrer nofollow">
+                PR #{pull.number}
               </a>
             )}
             <span className="text-lumen-3">
@@ -193,6 +230,8 @@ export function ClaimView({ id }: { id: string }) {
         </div>
       </header>
 
+      <ApiClaimNotices claim={claim} className="mt-8" />
+
       {/* Light split + next step */}
       <div className="mt-10 grid gap-6 lg:grid-cols-[minmax(0,1.65fr)_minmax(20rem,1fr)]">
         <div className="grid content-start gap-6">
@@ -204,9 +243,13 @@ export function ClaimView({ id }: { id: string }) {
                 <h2 id="split-title" className="t-h3">
                   {resolved ? 'Where the light settled' : 'The market, as light'}
                 </h2>
-                <p className="text-[0.8125rem] text-lumen-3">Beam widths are prices</p>
+                <p className="text-[0.8125rem] text-lumen-3">{api && !resolved ? 'Beam widths are pool prices' : 'Beam widths are prices'}</p>
               </div>
-              <PrismBeam prices={prices} outcome={resolved ? claim.outcome : undefined} noMarket={!claim.market} />
+              {api && !resolved ? (
+                <ApiPriceSplit claim={claim} />
+              ) : (
+                <PrismBeam prices={prices} outcome={resolved ? claim.outcome : undefined} noMarket={!claim.market} />
+              )}
               {resolved ? (
                 <p className="mt-4 text-[0.84375rem] text-lumen-2">The oracle answer is final, so the light shows only the settled outcome. Market prices no longer describe an open question.</p>
               ) : (
@@ -222,7 +265,8 @@ export function ClaimView({ id }: { id: string }) {
           <NextStepCard claim={claim} />
           {!unfinished && (
             <div className="flex flex-wrap gap-3">
-              {claim.status === 'open' && <ButtonLink href={`/claims/${claim.id}/evidence`}>Submit evidence</ButtonLink>}
+              {canSubmit && <ButtonLink href={`/claims/${claim.id}/evidence`}>Submit evidence</ButtonLink>}
+              {canReveal && <ButtonLink href={`/claims/${claim.id}/evidence`}>Reveal sealed evidence</ButtonLink>}
               {claim.market && (
                 <ButtonLink href={claim.market.seerUrl} external variant="glass">
                   {resolved ? 'View on Seer' : 'Trade on Seer'}
@@ -251,7 +295,9 @@ export function ClaimView({ id }: { id: string }) {
         <h2 id="market-title" className="t-h2 mb-6">
           Market
         </h2>
-        {claim.market ? (
+        {api ? (
+          <ApiMarketPanel claim={claim} />
+        ) : claim.market ? (
           <div className="grid gap-6">
             <div className="glass cut-xl p-5 sm:p-6">
               <PriceChart claimId={claim.id} evidence={claim.evidence} deadline={claim.evidenceDeadline} />

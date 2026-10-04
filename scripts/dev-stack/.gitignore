@@ -1,0 +1,2 @@
+# Runtime state of the local dev stack (logs, pids, generated dev-only secrets, env files, deployment record).
+.state/

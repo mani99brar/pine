@@ -1,18 +1,51 @@
 'use client'
 
 import Link from 'next/link'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import type { RepoSummary } from '@pine/core'
 import { formatAmount, formatRelative } from '@pine/core'
-import { useAccount, useClaims, useDebouncedValue, useGitHubRepoSearch, useGitHubViewerRepos } from '@pine/react'
-import { GitPullRequest, Lock, Search, Star } from 'lucide-react'
-import { ButtonLink } from '@/components/ui/Button'
-import { EmptyState, ErrorState, Skeleton } from '@/components/ui/primitives'
+import { useAccount, useClaims, useDebouncedValue, useGitHubRepoSearch, useGitHubViewerRepos, usePine } from '@pine/react'
+import { GitPullRequest, Link2, Lock, Search, Star } from 'lucide-react'
+import { ApiIdentityGate, identityReady, useApiIdentity, useIdentityActions } from '@/components/composer/api/identity'
+import { Button, ButtonLink } from '@/components/ui/Button'
+import { EmptyState, ErrorState, Notice, Skeleton } from '@/components/ui/primitives'
 import { useMounted, useNowMs } from '@/lib/hooks'
+import { cn } from '@/lib/cn'
 
 const SUGGESTIONS = ['kleros', 'acme-labs', 'northwind', 'tidewater', 'quarry']
 
-function RepoRow({ r, claims, now }: { r: RepoSummary; claims: number; now: number | null }) {
+/**
+ * api mode: Pine reads repositories through the linked GitHub account of the wallet's session. The next step to get
+ * there (sign in with the wallet, then link GitHub), as in the composer; nothing once both are done.
+ */
+export function ApiRepoGate({ reason, className }: { reason: ReactNode; className?: string }) {
+  const id = useApiIdentity()
+  // Busy and error come from the same useGitHubLink instance that links.
+  const { linkGitHub, github: gh } = useIdentityActions()
+  if (id.status !== 'signed_in' || id.github) return <ApiIdentityGate need="github" reason={reason} className={className} />
+  return (
+    <section className={cn('glass cut-lg p-5 sm:p-6', className)} aria-label="Link your GitHub account">
+      <h3 className="t-h4 flex items-center gap-2">
+        <Link2 size={18} aria-hidden className="text-hb" />
+        Link your GitHub account
+      </h3>
+      <div className="mt-2 max-w-[62ch] text-[0.9375rem] leading-[1.55] text-lumen-2">
+        <p>{reason}</p>
+        <p className="mt-2 text-[0.875rem] text-lumen-3">Pine reads public repositories through a GitHub app with no permissions, linked to your wallet. GitHub sends you back to Pine afterwards.</p>
+        <Button className="mt-4" onClick={linkGitHub} loading={gh.busy} icon={<Link2 size={15} aria-hidden />}>
+          Link GitHub
+        </Button>
+        {gh.error && (
+          <Notice tone="critical" role="alert" className="mt-4" title="GitHub could not be linked">
+            <span className="untrusted">{gh.error}</span>
+          </Notice>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function RepoRow({ r, claims, now, stars }: { r: RepoSummary; claims: number; now: number | null; stars: boolean }) {
   return (
     <li>
       <Link href={`/repos/${r.owner}/${r.name}`} className="group grid gap-2 px-4 py-4 transition-colors hover:bg-[rgba(255,236,220,0.03)] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
@@ -28,9 +61,11 @@ function RepoRow({ r, claims, now }: { r: RepoSummary; claims: number; now: numb
           {r.description && <p className="untrusted mt-0.5 line-clamp-1 text-[0.875rem] text-lumen-2 [white-space:normal]">{r.description}</p>}
           <p className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[0.8125rem] text-lumen-3">
             {r.language && <span>{r.language}</span>}
-            <span className="inline-flex items-center gap-1">
-              <Star size={12} aria-hidden /> {formatAmount(r.stars, { compact: true, maxDecimals: 1 })}
-            </span>
+            {stars && (
+              <span className="inline-flex items-center gap-1">
+                <Star size={12} aria-hidden /> {formatAmount(r.stars, { compact: true, maxDecimals: 1 })}
+              </span>
+            )}
             {r.openPullRequests !== undefined && (
               <span className="inline-flex items-center gap-1">
                 <GitPullRequest size={12} aria-hidden /> {r.openPullRequests} open
@@ -55,16 +90,22 @@ export function ReposView() {
   const viewer = useGitHubViewerRepos({ limit: 50 })
   const search = useGitHubRepoSearch(dq)
   const claims = useClaims({ limit: 200 })
+  // Claims are counted by the repository identity they pin (the numeric GitHub id) when the data source knows it; the
+  // owner/name a claim document states is only a fallback for sources without ids (demo data).
   const counts = useMemo(() => {
     const m = new Map<string, number>()
     for (const c of claims.data?.items ?? []) {
-      const k = `${c.source.owner}/${c.source.repo}`.toLowerCase()
+      const k = c.source.repoId !== undefined ? `id:${c.source.repoId}` : `${c.source.owner}/${c.source.repo}`.toLowerCase()
       m.set(k, (m.get(k) ?? 0) + 1)
     }
     return m
   }, [claims.data])
-  const count = (r: RepoSummary) => counts.get(r.fullName.toLowerCase()) ?? 0
+  const count = (r: RepoSummary) => counts.get(`id:${r.id}`) ?? counts.get(r.fullName.toLowerCase()) ?? 0
   const signedIn = account.status === 'signed_in'
+  // api mode: repositories are read through the session's linked GitHub account, which serves no star counts.
+  const api = usePine().env.dataSource === 'api'
+  const identity = useApiIdentity()
+  const gated = api && !identityReady(identity, 'github')
 
   return (
     <div>
@@ -91,7 +132,9 @@ export function ReposView() {
           <h2 id="results" className="t-h3">
             Results for “{dq}”
           </h2>
-          {search.isLoading ? (
+          {gated ? (
+            <p className="mt-3 text-[0.9rem] text-lumen-2">Searching needs your linked GitHub account. Sign in and link it under Your repositories below.</p>
+          ) : search.isLoading ? (
             <Skeleton className="mt-3 h-40 w-full" />
           ) : search.isError ? (
             <ErrorState className="mt-3" title="Search failed" error={search.error} onRetry={() => void search.refetch()} />
@@ -102,7 +145,7 @@ export function ReposView() {
           ) : (
             <ul className="glass cut-xl mt-3 divide-y divide-[var(--edge)] overflow-hidden">
               {search.data!.map((r) => (
-                <RepoRow key={r.id} r={r} claims={count(r)} now={now} />
+                <RepoRow key={r.id} r={r} claims={count(r)} now={now} stars={!api} />
               ))}
             </ul>
           )}
@@ -115,6 +158,8 @@ export function ReposView() {
         </h2>
         {!mounted || account.status === 'loading' ? (
           <Skeleton className="mt-4 h-40 w-full" />
+        ) : gated ? (
+          <ApiRepoGate className="mt-4" reason="Pine lists your public repositories, and finds others by owner/name, through your linked GitHub account." />
         ) : !signedIn ? (
           <EmptyState className="mt-4" title="Sign in to list your repositories" action={<ButtonLink href="/account">Sign in</ButtonLink>}>
             Pine uses GitHub&apos;s read-only <code className="t-code">read:user</code> scope. You can still search any public repository above.
@@ -130,7 +175,7 @@ export function ReposView() {
         ) : (
           <ul className="glass cut-xl mt-4 divide-y divide-[var(--edge)] overflow-hidden">
             {viewer.data!.items.map((r) => (
-              <RepoRow key={r.id} r={r} claims={count(r)} now={now} />
+              <RepoRow key={r.id} r={r} claims={count(r)} now={now} stars={!api} />
             ))}
           </ul>
         )}

@@ -1,0 +1,57 @@
+# The web app (Pine Prism, frontend/apps/prism): the Next.js server on 127.0.0.1:3004 behind the edge proxy, which routes
+# /api/*, /healthz, /readyz and /.well-known/pine.json to pine-api and everything else here (deploy/proxy). It holds no
+# secrets and no keys: every transaction is verified in the browser and sent by the user's own wallet. Server-side it
+# only reads public API routes (PINE_API_INTERNAL_URL) for page metadata, never forwarding a cookie.
+# Build first (NEXT_PUBLIC_* values are compiled into the bundle): deploy/README.md section 4a.
+# Runs as its own system user pine-web (SEC-OPS-10): it can read only /etc/pine/web.env (0640 root:pine-web).
+
+[Unit]
+Description=Pine web app (Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pine-web
+Group=pine-web
+WorkingDirectory=/opt/pine/current/frontend/apps/prism
+EnvironmentFile=/etc/pine/web.env
+Environment=NODE_ENV=production
+Environment=NEXT_TELEMETRY_DISABLED=1
+ExecStart=/usr/bin/node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3004
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+StandardOutput=journal
+StandardError=journal
+LimitNOFILE=65536
+# The release is read-only; Next.js writes its runtime cache (ISR) into .next/cache: a private writable state dir.
+StateDirectory=pine-web
+BindPaths=/var/lib/pine-web:/opt/pine/current/frontend/apps/prism/.next/cache
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/pine
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+UMask=0077
+# V8 needs writable+executable memory for its JIT: MemoryDenyWriteExecute stays off.
+
+[Install]
+WantedBy=multi-user.target

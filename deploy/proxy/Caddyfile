@@ -56,10 +56,12 @@ app.pine.example {
 		respond 404
 	}
 
+	# The web app (pine-web, Next.js on loopback); /api/* and the paths above never reach it.
 	handle {
-		root * /opt/pine/web
-		try_files {path} /index.html
-		file_server
+		reverse_proxy 127.0.0.1:3004 {
+			header_up X-Forwarded-For {remote_host}
+			header_up -X-Pine-Country
+		}
 	}
 }
 

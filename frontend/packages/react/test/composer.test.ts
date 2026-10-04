@@ -166,6 +166,15 @@ describe('deriveComposer', () => {
     expect(deriveComposer(published, { now: NOW }).frozen).toBe(true)
   })
 
+  it('frozen once the market is recorded, also without a confirmed step (adopted from ClaimRegistry after a reload)', () => {
+    const d = baseDraft()
+    const market = '0x565c000000000000000000000000000000b211' as const
+    const adopted = { ...d, publication: { steps: [], marketAddress: market, claimId: market } }
+    expect(isDraftFrozen(adopted)).toBe(true)
+    expect(deriveComposer(adopted, { now: NOW }).frozen).toBe(true)
+    expect(isDraftFrozen({ ...d, publication: { steps: [] } })).toBe(false)
+  })
+
   it('validation passes for a complete, valid draft', () => {
     const d = baseDraft()
     const parameters: Record<string, string | string[] | boolean> = {}

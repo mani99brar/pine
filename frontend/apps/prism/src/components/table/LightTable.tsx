@@ -2,11 +2,11 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
-import { useInfiniteClaims } from '@pine/react'
+import { useInfiniteClaims, usePine } from '@pine/react'
 import type { ClaimQuery, ClaimSort, PolicyFamilyId } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { Search, X } from 'lucide-react'
-import { Constellation, ConstellationLegend } from './Constellation'
+import { Constellation, ConstellationLegend, nothingPriced } from './Constellation'
 import { ClaimRow } from './ClaimRow'
 import { Segmented } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, Skeleton } from '@/components/ui/primitives'
@@ -26,6 +26,9 @@ const SORTS: { value: ClaimSort; label: string }[] = [
   { value: 'activity', label: 'Recent activity' },
 ]
 
+/** The Pine backend lists claims newest first (deadline order is applied per page); it has no liquidity, volume, price or activity data to sort by. */
+const API_SORTS: ClaimSort[] = ['deadline', 'newest']
+
 type View = 'constellation' | 'list'
 
 export function LightTable() {
@@ -35,16 +38,30 @@ export function LightTable() {
   const [, startTransition] = useTransition()
   const wide = useMediaQuery('(min-width: 768px)', true)
 
+  const { env } = usePine()
+  const backend = env.dataSource === 'api'
+  const sorts = backend ? SORTS.filter((s) => API_SORTS.includes(s.value)) : SORTS
   const groupParam = (params.get('status') ?? '').split(',').filter(Boolean) as StatusGroup['id'][]
   const family = (params.get('family') ?? '') as PolicyFamilyId | ''
-  const sort = (params.get('sort') as ClaimSort | null) ?? 'deadline'
+  const requestedSort = (params.get('sort') as ClaimSort | null) ?? 'deadline'
+  const sort = sorts.some((s) => s.value === requestedSort) ? requestedSort : 'deadline'
   const viewParam = params.get('view') as View | null
   const view: View = viewParam ?? (wide ? 'constellation' : 'list')
-  const [search, setSearch] = useState(params.get('q') ?? '')
+  const urlSearch = params.get('q') ?? ''
+  const [search, setSearch] = useState(urlSearch)
+  // The input follows the URL when it changes (a link to /claims clears it), so it never shows a search that is not applied.
+  const [syncedSearch, setSyncedSearch] = useState(urlSearch)
+  if (syncedSearch !== urlSearch) {
+    setSyncedSearch(urlSearch)
+    setSearch(urlSearch)
+  }
 
   const setParam = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString())
-    for (const [k, v] of Object.entries(patch)) {
+    // From the URL as it is now, not this render's snapshot: the search input's blur and a chip click in one gesture both
+    // write, and the second must not drop the first. A typed search that was not submitted goes with the change, so the
+    // results always match the input.
+    const next = new URLSearchParams(window.location.search)
+    for (const [k, v] of Object.entries({ q: search.trim() || null, ...patch })) {
       if (v === null || v === '') next.delete(k)
       else next.set(k, v)
     }
@@ -108,7 +125,7 @@ export function LightTable() {
             Sort
           </label>
           <select id="table-sort" className="field w-auto min-w-[12rem]" value={sort} onChange={(e) => setParam({ sort: e.target.value === 'deadline' ? null : e.target.value })}>
-            {SORTS.map((s) => (
+            {sorts.map((s) => (
               <option key={s.value} value={s.value}>
                 {s.label}
               </option>
@@ -164,7 +181,7 @@ export function LightTable() {
             </button>
           )}
           <p className="ml-auto text-[0.8125rem] text-lumen-3" aria-live="polite">
-            {q.isLoading ? 'Loading claims' : `${total ?? claims.length} claim${(total ?? claims.length) === 1 ? '' : 's'}`}
+            {q.isLoading ? 'Loading claims' : `${total ?? claims.length}${total === undefined && q.hasNextPage ? '+' : ''} claim${(total ?? claims.length) === 1 ? '' : 's'}`}
             {params.get('repo') ? ` in ${params.get('repo')}` : ''}
           </p>
         </div>
@@ -199,7 +216,10 @@ export function LightTable() {
                 <div className="grid gap-4 px-2 pb-1 pt-4">
                   <ConstellationLegend />
                   <p className="text-[0.8125rem] text-lumen-3">
-                    Height is the Yes price, the {COPY.priceLabel.toLowerCase()}. Size is liquidity. Left of the slit the evidence deadline has passed. {COPY.volumeCaveat}
+                    {nothingPriced(claims)
+                      ? 'Position is the time to the evidence deadline. Prices are not part of this list: open a claim to see its pool prices.'
+                      : `Height is the Yes price, the ${COPY.priceLabel.toLowerCase()}.`}{' '}
+                    {backend ? 'Liquidity is not indexed, so every crystal has the same size.' : 'Size is liquidity.'} Left of the slit the evidence deadline has passed. {COPY.volumeCaveat}
                   </p>
                 </div>
               </section>

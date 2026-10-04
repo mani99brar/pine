@@ -17,5 +17,7 @@ export const pineKeys = {
   drafts: (owner: string) => ['pine', 'drafts', owner] as const,
   draft: (id: string | undefined) => ['pine', 'draft', id] as const,
   account: () => ['pine', 'account'] as const,
+  /** `api` mode: the backend session (GET /api/v1/auth/session). */
+  session: () => ['pine', 'session'] as const,
   github: (...parts: (string | number | undefined)[]) => ['pine', 'github', ...parts] as const,
 }

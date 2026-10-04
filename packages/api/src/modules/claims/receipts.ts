@@ -38,7 +38,12 @@ export function claimCreatedMarkets(receipt: TransactionReceipt, registry: Addre
   return markets;
 }
 
-/** True when the receipt carries Seer's NewMarket for exactly this market from the configured factory (SEC-IDX-08). */
+/**
+ * True when the receipt carries Seer's NewMarket for exactly this market from the configured factory (SEC-IDX-08).
+ * `expected.questionId` is the Reality.eth question id the registry records (Market.questionsIds()[0]); in Seer's
+ * NewMarket it is the single entry of `questionsIds`. NewMarket's own `questionId` field is Seer's conditional-tokens
+ * question id (Market.questionId(), a hash over the questions), which differs from it on the real factory.
+ */
 export function hasMatchingNewMarket(
   receipt: TransactionReceipt,
   factory: Address,
@@ -49,11 +54,12 @@ export function hasMatchingNewMarket(
     if (lower(log.address) !== lower(factory)) continue;
     try {
       const decoded = decodeEventLog({ abi: seerMarketFactoryAbi, eventName: "NewMarket", data: log.data, topics: log.topics, strict: true });
-      const args = decoded.args as { market: string; marketName: string; conditionId: string; questionId: string };
+      const args = decoded.args as { market: string; marketName: string; conditionId: string; questionsIds: readonly string[] };
       if (
         lower(args.market) === lower(expected.market) &&
         lower(args.conditionId) === lower(expected.conditionId) &&
-        lower(args.questionId) === lower(expected.questionId) &&
+        args.questionsIds.length === 1 &&
+        lower(args.questionsIds[0]) === lower(expected.questionId) &&
         args.marketName === expected.marketName
       ) {
         return true;

@@ -5,8 +5,9 @@ import { useMemo } from 'react'
 import { usePathname, useRouter, useSearchParams } from 'next/navigation'
 import type { CommitSummary, PullSummary } from '@pine/core'
 import { formatAmount, formatRelative, shortSha } from '@pine/core'
-import { useClaims, useGitHubCommits, useGitHubPullCommits, useGitHubPulls, useGitHubRepo } from '@pine/react'
+import { useClaims, useGitHubCommits, useGitHubPullCommits, useGitHubPulls, useGitHubRepo, usePine } from '@pine/react'
 import { ArrowLeft, GitCommitHorizontal, GitPullRequest, Lock, Star } from 'lucide-react'
+import { identityReady, useApiIdentity } from '@/components/composer/api/identity'
 import { ButtonLink } from '@/components/ui/Button'
 import { Segmented } from '@/components/ui/interactive'
 import { EmptyState, ErrorState, Skeleton } from '@/components/ui/primitives'
@@ -14,6 +15,7 @@ import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
 import { ClaimRow } from '@/components/table/ClaimRow'
 import { useNowMs } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
+import { ApiRepoGate } from '../../ReposView'
 
 function CommitRow({ c, owner, repo, claimed, now }: { c: CommitSummary; owner: string; repo: string; claimed?: { id: string; number: number }; now: number | null }) {
   const first = c.message.split('\n')[0] ?? ''
@@ -49,7 +51,7 @@ function CommitRow({ c, owner, repo, claimed, now }: { c: CommitSummary; owner: 
   )
 }
 
-function PullRow({ p, active, onSelect }: { p: PullSummary; active: boolean; onSelect: () => void }) {
+function PullRow({ p, active, onSelect, stats }: { p: PullSummary; active: boolean; onSelect: () => void; stats: boolean }) {
   return (
     <li>
       <button
@@ -70,9 +72,11 @@ function PullRow({ p, active, onSelect }: { p: PullSummary; active: boolean; onS
         <span className="flex flex-wrap gap-x-3 pl-6 text-[0.8125rem] text-lumen-3">
           <span>{p.state}{p.draft ? ', draft' : ''}</span>
           <span>{p.author.login}</span>
-          <span className="tnum">
-            {p.commits} commits, +{p.additions} −{p.deletions}
-          </span>
+          {stats && (
+            <span className="tnum">
+              {p.commits} commits, +{p.additions} −{p.deletions}
+            </span>
+          )}
           {p.labels.slice(0, 3).map((l) => (
             <span key={l} className="untrusted">
               {l}
@@ -101,12 +105,20 @@ export function RepoView({ owner, repo }: { owner: string; repo: string }) {
   const pulls = useGitHubPulls(owner, repo, prState)
   const prCommits = useGitHubPullCommits(owner, repo, prNumber)
   const branch = useGitHubCommits(owner, repo)
-  const claimsQ = useClaims({ repo: `${owner}/${repo}`, limit: 50 })
+  // The backend's GitHub route resolved the repository: filter claims by its numeric id (the on-chain identity), not
+  // by the owner/name a claim document states.
+  const claimsQ = useClaims({ repo: `${owner}/${repo}`, repositoryId: repoQ.data?.id, limit: 50 })
   const claims = useMemo(() => claimsQ.data?.items ?? [], [claimsQ.data])
   const bySha = useMemo(() => new Map(claims.map((c) => [c.source.commitSha.toLowerCase(), { id: c.id, number: c.number }])), [claims])
   const r = repoQ.data
   const pr = pulls.data?.find((p) => p.number === prNumber)
+  // api mode: Pine reads GitHub through the session's linked account. It serves no stars, no pull request counts or
+  // line stats and no branch history, so those are left out rather than shown as zeros.
+  const api = usePine().env.dataSource === 'api'
+  const identity = useApiIdentity()
 
+  if (api && !identityReady(identity, 'github'))
+    return <ApiRepoGate className="mt-10" reason={`Pine reads ${owner}/${repo}, its pull requests and their commits through your linked GitHub account.`} />
   if (repoQ.isLoading) return <Skeleton className="mt-10 h-72 w-full" />
   if (repoQ.isError) {
     const msg = repoQ.error instanceof Error ? repoQ.error.message : String(repoQ.error ?? '')
@@ -148,9 +160,11 @@ export function RepoView({ owner, repo }: { owner: string; repo: string }) {
         {r.description && <p className="untrusted t-lead mt-3 max-w-[62ch] [white-space:normal]">{r.description}</p>}
         <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-[0.875rem] text-lumen-3">
           {r.language && <span>{r.language}</span>}
-          <span className="inline-flex items-center gap-1">
-            <Star size={13} aria-hidden /> {formatAmount(r.stars, { compact: true, maxDecimals: 1 })}
-          </span>
+          {!api && (
+            <span className="inline-flex items-center gap-1">
+              <Star size={13} aria-hidden /> {formatAmount(r.stars, { compact: true, maxDecimals: 1 })}
+            </span>
+          )}
           {r.license && <span>{r.license}</span>}
           <span>default branch {r.defaultBranch}</span>
           <a className="link" href={r.htmlUrl} target="_blank" rel="noopener noreferrer nofollow">
@@ -191,7 +205,7 @@ export function RepoView({ owner, repo }: { owner: string; repo: string }) {
             ) : (
               <ul className="glass cut-xl divide-y divide-[var(--edge)] overflow-hidden">
                 {pulls.data!.map((p) => (
-                  <PullRow key={p.number} p={p} active={p.number === prNumber} onSelect={() => setParam('pr', p.number === prNumber ? null : String(p.number))} />
+                  <PullRow key={p.number} p={p} stats={!api} active={p.number === prNumber} onSelect={() => setParam('pr', p.number === prNumber ? null : String(p.number))} />
                 ))}
               </ul>
             )}
@@ -200,7 +214,7 @@ export function RepoView({ owner, repo }: { owner: string; repo: string }) {
           <section aria-labelledby="commits-title" aria-live="polite">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
               <h2 id="commits-title" className="t-h3">
-                {pr ? `Commits in #${pr.number}` : `Recent commits on ${r.defaultBranch}`}
+                {pr ? `Commits in #${pr.number}` : api ? 'Commits' : `Recent commits on ${r.defaultBranch}`}
               </h2>
               {pr && (
                 <ButtonLink href={`/compose?source=${encodeURIComponent(`${owner}/${repo}/pull/${pr.number}`)}`} size="sm">
@@ -208,7 +222,9 @@ export function RepoView({ owner, repo }: { owner: string; repo: string }) {
                 </ButtonLink>
               )}
             </div>
-            {(pr ? prCommits : branch).isLoading ? (
+            {!pr && api ? (
+              <EmptyState title="Pick a pull request">Pine lists commits through pull requests. Choose one to see its commits and claim one of them.</EmptyState>
+            ) : (pr ? prCommits : branch).isLoading ? (
               <Skeleton className="h-60 w-full" />
             ) : (pr ? prCommits : branch).isError ? (
               <ErrorState error={(pr ? prCommits : branch).error} onRetry={() => void (pr ? prCommits : branch).refetch()} />

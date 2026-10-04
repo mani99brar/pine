@@ -43,6 +43,7 @@ export {
   type WalletState,
   type DemoWalletState,
 } from './wallet'
+export { useWalletRestoring } from './wallet/reconnect'
 
 // tx runner
 export { useTxRunner, __resetTxRunners, getTxMachine, type TxRunner, type UseTxRunnerOptions } from './tx/use-tx-runner'
@@ -64,7 +65,27 @@ export {
   type PendingCheck,
 } from './tx/machine'
 export { createDemoExecutor, setDemoTxDelays, DEMO_REJECTION_MESSAGE, type DemoExecutorOptions } from './tx/demo-executor'
-export { createLiveExecutor, type SerializedReceipt } from './tx/live-executor'
+export { createLiveExecutor, type SerializedReceipt, type SendGuard, type LiveExecutorOptions } from './tx/live-executor'
+
+// local dev-fork builds only (inert unless NEXT_PUBLIC_PINE_DEV_FORK_ORIGIN is a loopback origin)
+export { useDevForkWallet, DEV_FORK_RECHECK_MS, type DevForkWalletState, type UseDevForkWalletOptions } from './dev/use-dev-fork'
+export {
+  devForkConfig,
+  parseDevForkConfig,
+  checkWalletOnFork,
+  checkConnectorOnFork,
+  requestDevFunding,
+  forkStatusMessage,
+  forkFixHint,
+  walletRequestOf,
+  DEV_FORK_CHAIN_ID,
+  UNSUPPORTED_WALLET_MESSAGE,
+  type DevForkConfig,
+  type DevForkConnector,
+  type DevFundingResult,
+  type ForkWalletCheck,
+  type ForkWalletStatus,
+} from './dev/fork'
 
 // composer & drafts
 export { useDrafts, useDraftOwner, publishRunKey, LOCAL_DRAFT_OWNER } from './composer/drafts'
@@ -129,6 +150,37 @@ export {
   type UseAccountResult,
   type LinkWalletStatus,
 } from './account'
+
+// api mode (Pine backend): session, SIWE sign-in, GitHub linking
+export {
+  usePineSession,
+  useSiweSignIn,
+  useSignOut,
+  useGitHubLink,
+  checkSiweChallenge,
+  checkGitHubAuthorizationUrl,
+  githubConsentUrl,
+  pineSessionSchema,
+  SiweChallengeError,
+  SIWE_TERMS_STATEMENT,
+  type PineSession,
+  type PineSessionState,
+  type SiweStep,
+} from './api/session'
+export {
+  pinnedManifest,
+  buildPlanContext,
+  verifyWirePlan,
+  describePlanStep,
+  planToTxSteps,
+  planStepId,
+  planStepIdOf,
+  type RegistryReader,
+  type VerifyOptions,
+} from './api/plans'
+export { useApiPlanRunner, type ApiPlanSpec, type ApiPlanRunner, type ApiPlanPhase, type CreatedPlan } from './api/use-plan-runner'
+export * from './api/actions'
+export * from './api/identity'
 
 // misc
 export { useNow, useCopy, useHotkeys } from './misc'

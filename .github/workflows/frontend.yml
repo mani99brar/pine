@@ -1,0 +1,68 @@
+# Frontend CI: the self-contained frontend/ workspace (Pine Prism and its packages). Separate from ci.yml (the backend
+# workspace) so neither install affects the other. Checks that the vendored plan verifier (packages/core/src/pine-shared)
+# still equals packages/shared/src, then typecheck, unit tests, lint and a production build in api mode with
+# placeholder deployment values. Actions are pinned to full commit SHAs (the same as ci.yml); the token is read-only;
+# no secrets are used.
+
+name: frontend
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: frontend (verifier sync, typecheck, tests, lint, api-mode build)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - name: pnpm through corepack (frontend/package.json packageManager)
+        run: |
+          corepack enable
+          pnpm --version
+      - name: Backend workspace install (the verifier parity tests import packages/shared with its dependencies)
+        working-directory: .
+        run: pnpm install --frozen-lockfile
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+      - name: Vendored plan verifier equals packages/shared
+        run: node scripts/sync-shared.mjs --check
+      - name: Typecheck
+        run: pnpm typecheck
+      - name: Unit tests
+        run: pnpm test
+      - name: Lint
+        run: pnpm lint
+      - name: Production build (api mode, placeholder deployment)
+        env:
+          NEXT_PUBLIC_PINE_DATA_SOURCE: api
+          NEXT_PUBLIC_SITE_URL: https://app.pine.example
+          NEXT_PUBLIC_CHAIN_ID: "100"
+          NEXT_PUBLIC_PINE_CLAIM_REGISTRY: "0x0000000000000000000000000000000000000000"
+          NEXT_PUBLIC_PINE_EVIDENCE_REGISTRY: "0x0000000000000000000000000000000000000001"
+          NEXT_PUBLIC_PINE_DEPLOYMENT_BLOCK: "0"
+        # next/font downloads the Google fonts at build time; a transient fetch failure is retried twice.
+        run: |
+          for attempt in 1 2 3; do
+            pnpm -C apps/prism build && exit 0
+            echo "build attempt $attempt failed; retrying"
+            sleep 15
+          done
+          exit 1

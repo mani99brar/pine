@@ -108,6 +108,8 @@ export function ListEditor({
   placeholder,
   disabled,
   mono,
+  error,
+  maxLength,
 }: {
   id: string
   label: string
@@ -117,6 +119,10 @@ export function ListEditor({
   placeholder?: string
   disabled?: boolean
   mono?: boolean
+  /** Issue shown under the list (e.g. "List at least one in-scope component."). */
+  error?: string
+  /** Per-entry length cap. */
+  maxLength?: number
 }) {
   const [draft, setDraft] = useState('')
   const add = () => {
@@ -130,7 +136,11 @@ export function ListEditor({
       <label htmlFor={id} className="label">
         {label}
       </label>
-      {help && <p className="help -mt-1 mb-2">{help}</p>}
+      {help && (
+        <p id={`${id}-help`} className="help -mt-1 mb-2">
+          {help}
+        </p>
+      )}
       {items.length > 0 && (
         <ul className="mb-2 grid gap-1.5">
           {items.map((it, i) => (
@@ -138,6 +148,7 @@ export function ListEditor({
               <input
                 aria-label={`${label} ${i + 1}`}
                 value={it}
+                maxLength={maxLength}
                 disabled={disabled}
                 onChange={(e) => onChange(items.map((x, j) => (j === i ? e.target.value : x)))}
                 className={cn('min-w-0 flex-1 bg-transparent py-0.5 text-[0.9rem] text-lumen outline-none', mono && 't-code')}
@@ -159,7 +170,10 @@ export function ListEditor({
         <input
           id={id}
           value={draft}
+          maxLength={maxLength}
           disabled={disabled}
+          aria-invalid={Boolean(error) || undefined}
+          aria-describedby={error ? `${id}-error` : help ? `${id}-help` : undefined}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -174,6 +188,11 @@ export function ListEditor({
           Add
         </Button>
       </div>
+      {error && (
+        <p id={`${id}-error`} className="mt-1.5 text-[0.8125rem] font-medium text-ha">
+          {error}
+        </p>
+      )}
     </div>
   )
 }

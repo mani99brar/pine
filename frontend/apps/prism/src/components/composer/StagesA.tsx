@@ -2,92 +2,27 @@
 
 import Link from 'next/link'
 import { useMemo, useState } from 'react'
-import type { ClaimDraft, EnvironmentPin, PolicyParameterSpec, SourceRef } from '@pine/core'
+import type { ClaimDraft, EnvironmentPin, PolicyParameterSpec } from '@pine/core'
 import { formatDate, formatDuration, getEvidenceMechanism, isEvidenceMechanismEnabled, POLICIES, shortSha } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { COPY } from '@pine/core/copy'
 import { roundUpToHourUtc, toSourceRef, useGitHubPullCommits, usePine, useResolveGitHubInput, type ClaimComposer } from '@pine/react'
-import { GitBranch, GitCommitHorizontal, GitPullRequest, Lock, Search } from 'lucide-react'
-import { motion } from 'motion/react'
+import { Lock, Search } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { FormField, Notice } from '@/components/ui/primitives'
 import { HashChip } from '@/components/ui/interactive'
 import { FamilyIcon } from '@/components/icons'
 import { FAMILY_NAME, FAMILY_VAR } from '@/lib/crystal'
-import { useNowMs, useReduceMotion } from '@/lib/hooks'
+import { useNowMs } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 import { issueFor, KeyValueEditor, ListEditor, StageHeader, StageIssues, StageNav, type StepNav } from './shared'
+import { PinnedSha, SourceCard } from './SourceParts'
 
 const DEMO_EXAMPLES = ['kleros/gateway-balancer-bot/pull/47', 'acme-labs/fastparse#231', 'northwind/auth-gateway/pull/402']
 
 // ---------------------------------------------------------------------------
 // Source
 // ---------------------------------------------------------------------------
-
-/** The SHA settles into place character by character when pinned. */
-function PinnedSha({ sha, animate }: { sha: string; animate: boolean }) {
-  const reduce = useReduceMotion()
-  return (
-    <p className="t-code flex flex-wrap gap-x-[0.5em] gap-y-1 text-[1.02rem] leading-[1.4] sm:text-[1.12rem]" aria-label={`Commit ${sha}`}>
-      {(sha.match(/.{1,4}/g) ?? []).map((g, gi) => (
-        <span key={gi} className="whitespace-nowrap" aria-hidden>
-          {g.split('').map((ch, ci) => {
-            const idx = gi * 4 + ci
-            return (
-              <motion.span
-                key={ci}
-                className={cn('inline-block', idx < 7 ? 'font-semibold text-lumen' : 'text-lumen-2')}
-                initial={animate && !reduce ? { opacity: 0, y: -6, filter: 'blur(4px)' } : false}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                transition={{ delay: idx * 0.018, duration: 0.3 }}
-              >
-                {ch}
-              </motion.span>
-            )
-          })}
-        </span>
-      ))}
-    </p>
-  )
-}
-
-function SourceCard({ source, children }: { source: SourceRef; children?: React.ReactNode }) {
-  const first = (source.commit.message ?? '').split('\n')[0] ?? ''
-  return (
-    <div className="glass cut-lg overflow-hidden">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-edge px-4 py-3 text-[0.875rem]">
-        <span className="inline-flex items-center gap-1.5 font-semibold text-lumen">
-          <GitBranch size={15} aria-hidden /> {source.owner}/{source.repo}
-        </span>
-        {source.license && <span className="text-lumen-3">{source.license}</span>}
-        {source.pullRequest && (
-          <span className="inline-flex min-w-0 items-center gap-1.5 text-lumen-2">
-            <GitPullRequest size={14} aria-hidden />
-            <span className="untrusted line-clamp-1 [white-space:normal]">
-              #{source.pullRequest.number} {source.pullRequest.title}
-            </span>
-          </span>
-        )}
-      </div>
-      <div className="px-4 py-4">
-        <p className="flex items-start gap-2 text-[0.9375rem] text-lumen">
-          <GitCommitHorizontal size={16} aria-hidden className="mt-0.5 shrink-0 text-lumen-3" />
-          {/* Commit messages are untrusted text */}
-          <span className="untrusted min-w-0 font-semibold [white-space:normal]">{first || '(no commit message)'}</span>
-        </p>
-        <p className="mt-1 pl-6 text-[0.8125rem] text-lumen-3">
-          {source.commit.author} committed {formatDate(source.commit.committedAt, 'long')}
-        </p>
-        <div className="mt-4">{children}</div>
-        {source.baseCommit && (
-          <p className="mt-3 text-[0.8125rem] text-lumen-3">
-            Base commit <code className="t-code text-lumen-2">{shortSha(source.baseCommit.sha)}</code> is pinned too, for regression-only claims.
-          </p>
-        )}
-      </div>
-    </div>
-  )
-}
 
 export function StageSource({ c, nav, initialInput }: { c: ClaimComposer; nav: StepNav; initialInput?: string }) {
   const { demo } = usePine()
@@ -336,7 +271,22 @@ export function StagePolicy({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
 // Claim
 // ---------------------------------------------------------------------------
 
-function ParamField({ p, value, onChange, disabled, error }: { p: PolicyParameterSpec; value: string | string[] | boolean | undefined; onChange: (v: string | string[] | boolean) => void; disabled?: boolean; error?: string }) {
+function ParamField({
+  p,
+  value,
+  onChange,
+  disabled,
+  error,
+  apiMode,
+}: {
+  p: PolicyParameterSpec
+  value: string | string[] | boolean | undefined
+  onChange: (v: string | string[] | boolean) => void
+  disabled?: boolean
+  error?: string
+  /** api mode: free-text lists show their issue inline and cap each entry at the schema's length. */
+  apiMode?: boolean
+}) {
   const id = `param-${p.key}`
   const label = (
     <>
@@ -385,7 +335,19 @@ function ParamField({ p, value, onChange, disabled, error }: { p: PolicyParamete
     )
   }
   if (p.kind === 'list' || p.kind === 'multiselect') {
-    return <ListEditor id={id} label={p.label} help={p.help} items={Array.isArray(value) ? value : []} onChange={onChange} disabled={disabled} placeholder={typeof p.example === 'string' ? p.example : p.placeholder} />
+    return (
+      <ListEditor
+        id={id}
+        label={p.label}
+        help={p.help || undefined}
+        items={Array.isArray(value) ? value : []}
+        onChange={onChange}
+        disabled={disabled}
+        maxLength={apiMode ? p.maxLength : undefined}
+        error={apiMode ? error : undefined}
+        placeholder={typeof p.example === 'string' ? p.example : p.placeholder}
+      />
+    )
   }
   if (p.kind === 'boolean') {
     return (
@@ -428,35 +390,145 @@ function ParamField({ p, value, onChange, disabled, error }: { p: PolicyParamete
   )
 }
 
+/** In api mode, values the chosen backend policy does not define (left from another policy); Pine refuses them. */
+function UnknownParameters({ c }: { c: ClaimComposer }) {
+  const policy = c.policy
+  if (!c.api || !policy) return null
+  const known = new Set(policy.parameters.map((p) => p.key))
+  const unknown = Object.entries(c.draft.spec.parameters ?? {}).filter(([k, v]) => !known.has(k) && !(v === '' || (Array.isArray(v) && v.length === 0)))
+  if (unknown.length === 0) return null
+  const remove = (key: string) =>
+    c.update((d: ClaimDraft) => ({ ...d, spec: { ...d.spec, parameters: Object.fromEntries(Object.entries(d.spec.parameters ?? {}).filter(([k]) => k !== key)) } }))
+  return (
+    <Notice tone="caution" title={`Not parameters of ${policy.id}@${policy.version}`} role="status">
+      <p>Pine refuses parameters the policy does not define. These are left from another policy:</p>
+      <ul className="mt-1.5 grid gap-1.5">
+        {unknown.map(([k]) => (
+          <li key={k} className="flex flex-wrap items-center gap-2">
+            <code className="t-code text-lumen">{k}</code>
+            <Button size="sm" variant="ghost" disabled={c.frozen} onClick={() => remove(k)}>
+              Remove {k}
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Notice>
+  )
+}
+
+/** The question box: the local question in demo mode; in api mode the registry's question with the document part elided. */
+function QuestionPreview({ c }: { c: ClaimComposer }) {
+  if (!c.api) {
+    return (
+      <div className="cut-lg well p-4">
+        <p className="text-[0.8125rem] text-lumen-3">The question, as the market will read it</p>
+        <p className="mt-2 text-[0.96875rem] leading-[1.6] text-lumen [overflow-wrap:anywhere]">{c.question?.text ?? 'Pin a commit and choose a policy to see the question.'}</p>
+      </div>
+    )
+  }
+  const sketch = c.api.questionSketch
+  const pending = !c.draft.source || !c.policy
+  return (
+    <div className="cut-lg well p-4">
+      <p className="text-[0.8125rem] text-lumen-3">The question, as Pine&apos;s claim registry will compose it</p>
+      <p className="mt-2 text-[0.96875rem] leading-[1.6] text-lumen [overflow-wrap:anywhere]">
+        {sketch ?? (pending ? 'Pin a commit and choose a policy to see the question.' : 'Write a valid title to see the question.')}
+      </p>
+      {sketch && (
+        <p className="mt-2 text-[0.78rem] text-lumen-3">
+          Only the title is yours; the rest is fixed text, digests and times. ipfs://… and sha256 … stand for the claim document, which Pine freezes when you
+          request the preview. The times assume you preview now.
+        </p>
+      )}
+    </div>
+  )
+}
+
 export function StageClaim({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
   const spec = c.draft.spec
   const dis = c.frozen
+  const api = Boolean(c.api)
   const setSpec = (patch: Partial<ClaimDraft['spec']>) => c.update((d: ClaimDraft) => ({ ...d, spec: { ...d.spec, ...patch } }))
   const policy = c.policy
+  // api mode shows the backend's field rules next to the fields; demo mode keeps its stage summary only.
+  const apiIssue = (path: string) => (api ? issueFor(c, path) : undefined)
   return (
     <div>
       <StageHeader step="claim">
         One exact requirement, and the violation a counterexample must demonstrate. Blanket statements about the whole codebase cannot be resolved. {COPY.boundedClaim}
       </StageHeader>
       <div className="grid gap-6">
-        <FormField id="title" label="Title" help="A short, specific name shown on the light table (90 characters or fewer)." error={issueFor(c, 'spec.title')}>
-          <input id="title" className="field" maxLength={90} value={spec.title ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { title: e.target.value } })} placeholder="Reporter deposits never draw principal from arbitration or gas reserves" />
+        <FormField
+          id="title"
+          label="Title"
+          help={
+            api
+              ? 'A short, specific name (90 characters or fewer). It is written into the on-chain question, so use printable ASCII only, without " \\ [ or ].'
+              : 'A short, specific name shown on the light table (90 characters or fewer).'
+          }
+          error={issueFor(c, 'spec.title')}
+        >
+          <input
+            id="title"
+            className="field"
+            maxLength={90}
+            value={spec.title ?? ''}
+            disabled={dis}
+            aria-invalid={apiIssue('spec.title') ? true : undefined}
+            onChange={(e) => c.update({ spec: { title: e.target.value } })}
+            placeholder="Reporter deposits never draw principal from arbitration or gas reserves"
+          />
         </FormField>
         <FormField id="requirement" label="Requirement" help="The one behavior the code must have, in plain words." error={issueFor(c, 'spec.requirement')}>
-          <textarea id="requirement" className="field" rows={3} value={spec.requirement ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { requirement: e.target.value } })} />
+          <textarea id="requirement" className="field" rows={3} maxLength={api ? 4000 : undefined} value={spec.requirement ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { requirement: e.target.value } })} />
         </FormField>
-        <FormField id="violation" label="Violation" help="Completes the question: “Was a reproducible counterexample demonstrating … against commit …”" error={issueFor(c, 'spec.violation')}>
-          <textarea id="violation" className="field" rows={2} value={spec.violation ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { violation: e.target.value } })} placeholder="that reporter-deposit principal can be funded from the arbitration allocation" />
+        <FormField
+          id="violation"
+          label="Violation"
+          help={
+            api
+              ? 'What a counterexample must demonstrate. It goes into the claim document, which the question pins by its digest.'
+              : 'Completes the question: “Was a reproducible counterexample demonstrating … against commit …”'
+          }
+          error={issueFor(c, 'spec.violation')}
+        >
+          <textarea
+            id="violation"
+            className="field"
+            rows={2}
+            maxLength={api ? 4000 : undefined}
+            value={spec.violation ?? ''}
+            disabled={dis}
+            onChange={(e) => c.update({ spec: { violation: e.target.value } })}
+            placeholder="that reporter-deposit principal can be funded from the arbitration allocation"
+          />
         </FormField>
 
-        <div className="cut-lg well p-4">
-          <p className="text-[0.8125rem] text-lumen-3">The question, as the market will read it</p>
-          <p className="mt-2 text-[0.96875rem] leading-[1.6] text-lumen [overflow-wrap:anywhere]">{c.question?.text ?? 'Pin a commit and choose a policy to see the question.'}</p>
-        </div>
+        <QuestionPreview c={c} />
 
         <div className="grid gap-6 md:grid-cols-2">
-          <ListEditor id="in-scope" label="In scope" items={spec.scope?.inScope ?? []} disabled={dis} onChange={(v) => setSpec({ scope: { inScope: v, outOfScope: spec.scope?.outOfScope ?? [] } })} placeholder="src/funding/reporter-planner.ts" />
-          <ListEditor id="out-scope" label="Out of scope" items={spec.scope?.outOfScope ?? []} disabled={dis} onChange={(v) => setSpec({ scope: { inScope: spec.scope?.inScope ?? [], outOfScope: v } })} placeholder="Live bridge integrations" />
+          <ListEditor
+            id="in-scope"
+            label="In scope"
+            help={api ? 'At least one component, at most 50, each up to 300 characters.' : undefined}
+            maxLength={api ? 300 : undefined}
+            error={apiIssue('spec.scope.inScope')}
+            items={spec.scope?.inScope ?? []}
+            disabled={dis}
+            onChange={(v) => setSpec({ scope: { inScope: v, outOfScope: spec.scope?.outOfScope ?? [] } })}
+            placeholder="src/funding/reporter-planner.ts"
+          />
+          <ListEditor
+            id="out-scope"
+            label="Out of scope"
+            help={api ? 'Optional, at most 50, each up to 300 characters.' : undefined}
+            maxLength={api ? 300 : undefined}
+            error={apiIssue('spec.scope.outOfScope')}
+            items={spec.scope?.outOfScope ?? []}
+            disabled={dis}
+            onChange={(v) => setSpec({ scope: { inScope: spec.scope?.inScope ?? [], outOfScope: v } })}
+            placeholder="Live bridge integrations"
+          />
         </div>
 
         {policy && policy.parameters.length > 0 && (
@@ -471,36 +543,66 @@ export function StageClaim({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
                 value={spec.parameters?.[p.key]}
                 disabled={dis}
                 error={issueFor(c, `spec.parameters.${p.key}`)}
+                apiMode={api}
                 onChange={(v) => c.update((d: ClaimDraft) => ({ ...d, spec: { ...d.spec, parameters: { ...(d.spec.parameters ?? {}), [p.key]: v } } }))}
               />
             ))}
           </fieldset>
         )}
+        <UnknownParameters c={c} />
 
         <FormField
           id="fault-model"
           label={policy?.parameters.some((x) => x.key === 'faultModel') ? 'Fault model details' : 'Fault model'}
-          optional
+          optional={!api}
           help={
-            policy?.parameters.some((x) => x.key === 'faultModel')
-              ? `Anything the ${policy.id} fault list above does not say, for example limits on retries or timing. Do not silently assume arbitrary corruption.`
-              : 'Allowed faults, for example process crash or timeout. Do not silently assume arbitrary corruption.'
+            api
+              ? 'Which failures count, for example a process crash or an RPC timeout. Do not silently assume arbitrary corruption.'
+              : policy?.parameters.some((x) => x.key === 'faultModel')
+                ? `Anything the ${policy.id} fault list above does not say, for example limits on retries or timing. Do not silently assume arbitrary corruption.`
+                : 'Allowed faults, for example process crash or timeout. Do not silently assume arbitrary corruption.'
           }
+          error={apiIssue('spec.faultModel')}
         >
-          <textarea id="fault-model" className="field" rows={2} value={spec.faultModel ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { faultModel: e.target.value || undefined } })} />
+          <textarea id="fault-model" className="field" rows={2} maxLength={api ? 4000 : undefined} value={spec.faultModel ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { faultModel: e.target.value || undefined } })} />
         </FormField>
-        <FormField id="allowed-inputs" label="Allowed inputs" optional>
-          <input id="allowed-inputs" className="field" value={spec.allowedInputs ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { allowedInputs: e.target.value || undefined } })} />
+        <FormField
+          id="allowed-inputs"
+          label="Allowed inputs"
+          optional={!api}
+          help={api ? 'The inputs an investigator may use, for example any configuration of the bot, or only its public API.' : undefined}
+          error={apiIssue('spec.allowedInputs')}
+        >
+          <input id="allowed-inputs" className="field" maxLength={api ? 4000 : undefined} value={spec.allowedInputs ?? ''} disabled={dis} onChange={(e) => c.update({ spec: { allowedInputs: e.target.value || undefined } })} />
         </FormField>
         <div className="grid gap-6 md:grid-cols-2">
-          <ListEditor id="assumptions" label="Assumptions" items={spec.assumptions ?? []} disabled={dis} onChange={(v) => setSpec({ assumptions: v })} />
-          <ListEditor id="exclusions" label="Exclusions" items={spec.exclusions ?? []} disabled={dis} onChange={(v) => setSpec({ exclusions: v })} />
+          <ListEditor
+            id="assumptions"
+            label="Assumptions"
+            help={api ? 'Optional, at most 50, each up to 1,000 characters.' : undefined}
+            maxLength={api ? 1000 : undefined}
+            error={apiIssue('spec.assumptions')}
+            items={spec.assumptions ?? []}
+            disabled={dis}
+            onChange={(v) => setSpec({ assumptions: v })}
+          />
+          <ListEditor
+            id="exclusions"
+            label="Exclusions"
+            help={api ? 'Optional, at most 50, each up to 1,000 characters.' : undefined}
+            maxLength={api ? 1000 : undefined}
+            error={apiIssue('spec.exclusions')}
+            items={spec.exclusions ?? []}
+            disabled={dis}
+            onChange={(v) => setSpec({ exclusions: v })}
+          />
         </div>
         <label className="flex items-start gap-3">
           <input type="checkbox" className="facet-check" checked={spec.regressionOnly ?? false} disabled={dis} onChange={(e) => c.update({ spec: { regressionOnly: e.target.checked } })} />
           <span>
             <span className="block text-[0.9rem] font-semibold text-lumen">Only regressions relative to the base commit qualify</span>
             <span className="help block">{c.draft.source?.baseCommit ? `Base commit ${shortSha(c.draft.source.baseCommit.sha)} is pinned.` : 'Needs a pinned base commit (pin a pull request to get one).'}</span>
+            {apiIssue('source.baseCommit') && <span className="mt-1 block text-[0.8125rem] font-medium text-ha">{apiIssue('source.baseCommit')}</span>}
           </span>
         </label>
       </div>
@@ -517,15 +619,24 @@ export function StageClaim({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
 export function StageEnvironment({ c, nav }: { c: ClaimComposer; nav: StepNav }) {
   const env = c.spec.environment
   const dis = c.frozen
+  const api = Boolean(c.api)
   const setEnv = (patch: Partial<EnvironmentPin>) =>
     c.update((d: ClaimDraft) => ({ ...d, spec: { ...d.spec, environment: { ...(d.spec.environment ?? env), ...patch } as EnvironmentPin } }))
+  // api mode: the lockfile and the dependency notes become the claim document's dependencies (one of them is required).
+  const exact = (path: string) => (api ? c.validation.issues.find((i) => i.path === path)?.message : undefined)
   return (
     <div>
-      <StageHeader step="environment">Pin everything an investigator needs to reproduce the behavior. The configuration and environment hashes update as you type and go into the question.</StageHeader>
-      <div className="mb-6 flex flex-wrap gap-2">
-        <HashChip value={env.envHash} label="Environment hash" />
-        <HashChip value={env.configHash} label="Configuration hash" />
-      </div>
+      <StageHeader step="environment">
+        {api
+          ? 'Pin everything an investigator needs to reproduce the behavior. It all goes into the claim document, which the market question pins by its digest.'
+          : 'Pin everything an investigator needs to reproduce the behavior. The configuration and environment hashes update as you type and go into the question.'}
+      </StageHeader>
+      {!api && (
+        <div className="mb-6 flex flex-wrap gap-2">
+          <HashChip value={env.envHash} label="Environment hash" />
+          <HashChip value={env.configHash} label="Configuration hash" />
+        </div>
+      )}
       <div className="grid gap-6">
         <div className="grid gap-6 md:grid-cols-2">
           <FormField id="runtime" label="Runtime" help="For example node 22.14.0 or python 3.12.4." error={issueFor(c, 'spec.environment.runtime')}>
@@ -546,7 +657,13 @@ export function StageEnvironment({ c, nav }: { c: ClaimComposer; nav: StepNav })
               placeholder="pnpm-lock.yaml"
             />
           </FormField>
-          <FormField id="lock-hash" label="Lockfile hash" optional help="keccak256 or sha256 as 0x-prefixed hex." error={issueFor(c, 'spec.environment.dependencyLock')}>
+          <FormField
+            id="lock-hash"
+            label="Lockfile hash"
+            optional
+            help="keccak256 or sha256 as 0x-prefixed hex."
+            error={api ? issueFor(c, 'spec.environment.dependencyLock.hash') ?? issueFor(c, 'spec.environment.dependencyLock.path') : issueFor(c, 'spec.environment.dependencyLock')}
+          >
             <input
               id="lock-hash"
               className="field t-code"
@@ -566,16 +683,28 @@ export function StageEnvironment({ c, nav }: { c: ClaimComposer; nav: StepNav })
           <FormField id="container" label="Container image" optional help="image@sha256:… for an exact build.">
             <input id="container" className="field t-code" value={env.containerImage ?? ''} disabled={dis} onChange={(e) => setEnv({ containerImage: e.target.value || undefined })} />
           </FormField>
-          <FormField id="external" label="External state" optional help="For example a block snapshot, or none.">
-            <input id="external" className="field" value={env.externalState ?? ''} disabled={dis} onChange={(e) => setEnv({ externalState: e.target.value || undefined })} placeholder="none" />
+          <FormField
+            id="external"
+            label="External state"
+            optional={!api}
+            help={api ? 'What the reproduction needs outside the repository, for example a chain snapshot. Write “none” if it needs none.' : 'For example a block snapshot, or none.'}
+            error={exact('spec.environment.externalState')}
+          >
+            <input id="external" className="field" maxLength={api ? 4000 : undefined} value={env.externalState ?? ''} disabled={dis} onChange={(e) => setEnv({ externalState: e.target.value || undefined })} placeholder="none" />
           </FormField>
         </div>
         <FormField id="repro" label="Reproduction command" help="The command an investigator runs against the pinned commit." error={issueFor(c, 'spec.environment.reproductionCommand')}>
-          <input id="repro" className="field t-code" value={env.reproductionCommand} disabled={dis} onChange={(e) => setEnv({ reproductionCommand: e.target.value })} placeholder="pnpm vitest run test/reporter-funding.spec.ts" />
+          <input id="repro" className="field t-code" maxLength={api ? 2000 : undefined} value={env.reproductionCommand} disabled={dis} onChange={(e) => setEnv({ reproductionCommand: e.target.value })} placeholder="pnpm vitest run test/reporter-funding.spec.ts" />
         </FormField>
-        <ListEditor id="setup" label="Setup steps" items={env.setupSteps} disabled={dis} onChange={(setupSteps) => setEnv({ setupSteps })} placeholder="pnpm install --frozen-lockfile" mono />
-        <FormField id="env-notes" label="Notes" optional>
-          <textarea id="env-notes" className="field" rows={2} value={env.notes ?? ''} disabled={dis} onChange={(e) => setEnv({ notes: e.target.value || undefined })} />
+        <ListEditor id="setup" label="Setup steps" error={exact('spec.environment.setupSteps')} items={env.setupSteps} disabled={dis} onChange={(setupSteps) => setEnv({ setupSteps })} placeholder="pnpm install --frozen-lockfile" mono />
+        <FormField
+          id="env-notes"
+          label={api ? 'Dependency notes' : 'Notes'}
+          optional={!api}
+          help={api ? 'How the dependencies are installed or pinned. Required unless you pin a lockfile above; published with it as the claim document’s dependencies.' : undefined}
+          error={exact('spec.environment.dependencyLock') ?? exact('spec.environment.notes')}
+        >
+          <textarea id="env-notes" className="field" rows={2} maxLength={api ? 4000 : undefined} value={env.notes ?? ''} disabled={dis} onChange={(e) => setEnv({ notes: e.target.value || undefined })} />
         </FormField>
       </div>
       <StageIssues c={c} step="environment" className="mt-6" />
