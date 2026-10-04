@@ -1,14 +1,16 @@
 'use client'
 
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useSyncExternalStore } from 'react'
-import { WagmiContext } from 'wagmi'
+import { WagmiContext, type Config } from 'wagmi'
+import { getAccount } from 'wagmi/actions'
 import type { DecimalString, Hex, TxStep, TxStepId } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { usePine } from '../providers/context'
 import { getBrowserStorage, type KeyValueStorage } from '../internal/storage'
 import { demoWalletStore } from '../wallet/demo-store'
 import { createDemoExecutor, type DemoExecutorOptions } from './demo-executor'
-import { createLiveExecutor } from './live-executor'
+import { createLiveExecutor, type SendGuard } from './live-executor'
+import { createDevForkSendGuard, devForkConfig, walletRequestOf } from '../dev/fork'
 import {
   TxMachine,
   isManualStep,
@@ -74,6 +76,13 @@ const missingExecutor: TxExecutor = {
   },
 }
 
+/** Local dev-fork builds only (undefined otherwise): the wallet must be on the local fork before anything is sent. */
+function devSendGuard(config: Config): SendGuard | undefined {
+  const fork = devForkConfig()
+  if (!fork) return undefined
+  return createDevForkSendGuard(fork, () => walletRequestOf(getAccount(config).connector))
+}
+
 function defaultLimitCurrency(steps: TxStep[]): string | undefined {
   const chainId = steps.find((s) => s.request)?.request?.chainId
   return getChainOrDefault(chainId).collateral.symbol
@@ -105,7 +114,9 @@ export function useTxMachine(key: string, steps: TxStep[], opts: UseTxRunnerOpti
     if (pine.demo) {
       return createDemoExecutor({ wallet: demoWalletStore, collateralSymbol: limitCurrency, delays: opts.demoDelays })
     }
-    return wagmiConfig ? createLiveExecutor(wagmiConfig) : missingExecutor
+    if (!wagmiConfig) return missingExecutor
+    const sendGuard = devSendGuard(wagmiConfig)
+    return createLiveExecutor(wagmiConfig, sendGuard ? { sendGuard } : undefined)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opts.executor, pine.demo, wagmiConfig, limitCurrency, demoDelaysKey])
 

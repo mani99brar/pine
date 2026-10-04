@@ -65,7 +65,24 @@ export {
   type PendingCheck,
 } from './tx/machine'
 export { createDemoExecutor, setDemoTxDelays, DEMO_REJECTION_MESSAGE, type DemoExecutorOptions } from './tx/demo-executor'
-export { createLiveExecutor, type SerializedReceipt } from './tx/live-executor'
+export { createLiveExecutor, type SerializedReceipt, type SendGuard, type LiveExecutorOptions } from './tx/live-executor'
+
+// local dev-fork builds only (inert unless NEXT_PUBLIC_PINE_DEV_FORK_ORIGIN is a loopback origin)
+export { useDevForkWallet, DEV_FORK_RECHECK_MS, type DevForkWalletState, type UseDevForkWalletOptions } from './dev/use-dev-fork'
+export {
+  devForkConfig,
+  parseDevForkConfig,
+  checkWalletOnFork,
+  requestDevFunding,
+  forkStatusMessage,
+  forkFixHint,
+  walletRequestOf,
+  DEV_FORK_CHAIN_ID,
+  type DevForkConfig,
+  type DevFundingResult,
+  type ForkWalletCheck,
+  type ForkWalletStatus,
+} from './dev/fork'
 
 // composer & drafts
 export { useDrafts, useDraftOwner, publishRunKey, LOCAL_DRAFT_OWNER } from './composer/drafts'

@@ -60,8 +60,22 @@ function requireSender(config: Config, from: Hex | undefined): void {
   }
 }
 
+/**
+ * Extra checks before a send (local dev-fork builds only, see `src/dev/fork.ts`). `refuseChain` runs before any chain
+ * switch prompt; `beforeSend` right before the wallet's signature prompt. Either one stops the step, unsent.
+ */
+export interface SendGuard {
+  refuseChain(chainId: number): string | null
+  beforeSend(req: { chainId: number }): Promise<void>
+}
+
+export interface LiveExecutorOptions {
+  receiptTimeoutMs?: number
+  sendGuard?: SendGuard
+}
+
 /** Real wallet executor: wagmi `sendTransaction` + `waitForTransactionReceipt`. */
-export function createLiveExecutor(config: Config, opts?: { receiptTimeoutMs?: number }): TxExecutor {
+export function createLiveExecutor(config: Config, opts?: LiveExecutorOptions): TxExecutor {
   const timeout = opts?.receiptTimeoutMs ?? 10 * 60_000
   return {
     kind: 'live',
@@ -82,6 +96,8 @@ export function createLiveExecutor(config: Config, opts?: { receiptTimeoutMs?: n
       const account = getAccount(config)
       if (!account.address) throw new Error('Connect a wallet to continue.')
       requireSender(config, req.from)
+      const chainRefusal = opts?.sendGuard?.refuseChain(req.chainId)
+      if (chainRefusal) throw new Error(chainRefusal)
       if (account.chainId !== req.chainId) {
         await switchChain(config, { chainId: req.chainId })
         if (getAccount(config).chainId !== req.chainId) {
@@ -107,6 +123,8 @@ export function createLiveExecutor(config: Config, opts?: { receiptTimeoutMs?: n
       // The wallet may have switched accounts during the checks above. With `account` the request also names its
       // sender, so the wallet cannot sign it from another account.
       requireSender(config, req.from)
+      // Dev-fork builds: the wallet's own RPC must be the local fork, or the wallet would broadcast to the real network.
+      if (opts?.sendGuard) await opts.sendGuard.beforeSend({ chainId: req.chainId })
       progress.onAwaitingSignature()
       const hash = await sendTransaction(config, {
         ...(req.from ? { account: req.from } : {}),

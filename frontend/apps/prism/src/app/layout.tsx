@@ -4,6 +4,7 @@ import './globals.css'
 import { Providers } from './providers'
 import { SiteHeader } from '@/components/shell/SiteHeader'
 import { DemoBanner } from '@/components/shell/DemoBanner'
+import { DevForkGuard } from '@/components/shell/DevForkGuard'
 import { SiteFooter } from '@/components/shell/SiteFooter'
 import { RouteProgress } from '@/components/shell/RouteProgress'
 import { APP_DESCRIPTION, APP_NAME, siteUrl } from '@/lib/site'
@@ -64,6 +65,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <RouteProgress />
           <div className="relative z-[1] flex min-h-dvh flex-col">
             <DemoBanner />
+            <DevForkGuard />
             <SiteHeader />
             <main id="main" className="flex-1" tabIndex={-1}>
               {children}

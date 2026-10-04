@@ -163,3 +163,36 @@ describe('live executor: simulation and gas (SEC-TX-07)', () => {
     expect(actions.sendTransaction).toHaveBeenCalledWith(config, { to: TO, data: '0xabcdef', value: 7n, chainId: 100, gas: 120_000n })
   })
 })
+
+describe('live executor: dev-fork send guard', () => {
+  it('SEC-TX-05 dev guard refuses to send when the wallet RPC is not the local fork, before any signature prompt', async () => {
+    const beforeSend = vi.fn(async () => {
+      throw new Error('Your wallet is on the REAL Gnosis network, not the local fork. Nothing was sent.')
+    })
+    const ex = createLiveExecutor(config, { sendGuard: { refuseChain: () => null, beforeSend } })
+    await expect(ex.execute(step(), progress)).rejects.toThrow(/REAL Gnosis.*Nothing was sent/)
+    expect(beforeSend).toHaveBeenCalledWith({ chainId: 100 })
+    expect(progress.onAwaitingSignature).not.toHaveBeenCalled()
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('refuses a chain the fork does not cover before any chain-switch prompt', async () => {
+    const beforeSend = vi.fn(async () => undefined)
+    const ex = createLiveExecutor(config, { sendGuard: { refuseChain: (id) => (id === 100 ? null : `chain ${id} is not forked. Nothing was sent.`), beforeSend } })
+    await expect(ex.execute(step({ request: { chainId: 1, to: TO, data: '0xabcdef', value: '0' } }), progress)).rejects.toThrow(/chain 1 is not forked/)
+    expect(actions.switchChain).not.toHaveBeenCalled()
+    expect(actions.estimateGas).not.toHaveBeenCalled()
+    expect(actions.sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('sends when the guard passes', async () => {
+    const ex = createLiveExecutor(config, { sendGuard: { refuseChain: () => null, beforeSend: async () => undefined } })
+    await expect(ex.execute(step(), progress)).resolves.toMatchObject({ txHash: H1 })
+    expect(actions.sendTransaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('without a guard the behaviour is unchanged', async () => {
+    const ex = createLiveExecutor(config)
+    await expect(ex.execute(step(), progress)).resolves.toMatchObject({ txHash: H1 })
+  })
+})
