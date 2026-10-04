@@ -5,6 +5,9 @@
  * - Guard: MetaMask's built-in Gnosis network points at the REAL Gnosis RPC. The app reads and estimates through the fork,
  *   but the wallet would sign and broadcast on real Gnosis (real gas, contracts that exist only on the fork). The guard
  *   asks the WALLET's own provider (never the app transport) whether it is on the fork, and refuses to send otherwise.
+ *   Only browser-extension (injected) wallets can be checked that way: a WalletConnect connector answers reads from the
+ *   app's own transports (the fork) while the phone wallet broadcasts on its own network, so every other connector type
+ *   is blocked here (fail closed).
  *
  * Everything here is inert unless the build sets NEXT_PUBLIC_PINE_DEV_FORK_ORIGIN (written only by
  * scripts/dev-stack/up.sh) to a loopback http(s) origin, the fork RPC (NEXT_PUBLIC_RPC_URL_100) is loopback too, and the
@@ -25,6 +28,8 @@ export interface DevForkConfig {
   claimRegistry: Address
   /** Pine's deployment block: mined by anvil, so its hash differs from real Gnosis at the same height. */
   checkBlock: bigint
+  /** The app's own origin (NEXT_PUBLIC_SITE_URL, loopback only): the one origin the faucet accepts. Null when unknown. */
+  appOrigin: string | null
 }
 
 export interface DevForkEnv {
@@ -34,6 +39,7 @@ export interface DevForkEnv {
   claimRegistry?: string
   deploymentBlock?: string
   dataSource?: string
+  appOrigin?: string
 }
 
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
@@ -68,6 +74,7 @@ export function parseDevForkConfig(env: DevForkEnv): DevForkConfig | null {
     chainId: DEV_FORK_CHAIN_ID,
     claimRegistry: getAddress(env.claimRegistry.toLowerCase()),
     checkBlock: BigInt(env.deploymentBlock),
+    appOrigin: loopbackUrl(env.appOrigin, true)?.origin ?? null,
   }
 }
 
@@ -89,6 +96,7 @@ export function devForkConfig(): DevForkConfig | null {
     claimRegistry: read(() => process.env.NEXT_PUBLIC_PINE_CLAIM_REGISTRY),
     deploymentBlock: read(() => process.env.NEXT_PUBLIC_PINE_DEPLOYMENT_BLOCK),
     dataSource: read(() => process.env.NEXT_PUBLIC_PINE_DATA_SOURCE)?.toLowerCase(),
+    appOrigin: read(() => process.env.NEXT_PUBLIC_SITE_URL),
   })
 }
 
@@ -97,7 +105,11 @@ export function devForkConfig(): DevForkConfig | null {
 /** An EIP-1193 `request`. */
 export type Eip1193Request = (args: { method: string; params?: readonly unknown[] }) => Promise<unknown>
 
-export type ForkWalletStatus = 'fork' | 'wrong_chain' | 'not_fork' | 'unknown'
+/**
+ * - `unsupported_wallet`: the connector is not a browser-extension (injected) wallet, so its reads cannot be trusted to
+ *   come from the network it broadcasts on (WalletConnect reads through the app's transports). Always blocked.
+ */
+export type ForkWalletStatus = 'fork' | 'wrong_chain' | 'not_fork' | 'unsupported_wallet' | 'unknown'
 
 export interface ForkWalletCheck {
   status: ForkWalletStatus
@@ -172,6 +184,29 @@ export async function walletRequestOf(connector: { getProvider(): Promise<unknow
   return (args) => (request as Eip1193Request).call(provider, args)
 }
 
+/** The parts of a wagmi connector the fork check uses. */
+export interface DevForkConnector {
+  /** wagmi's connector type: 'injected' for browser-extension wallets (EIP-1193 provider in the page). */
+  readonly type?: unknown
+  getProvider(): Promise<unknown>
+}
+
+/** The only connector type whose own provider is the wallet's network: a browser-extension wallet. */
+export const CHECKABLE_CONNECTOR_TYPE = 'injected'
+
+/**
+ * The fork check for a wagmi connector: fails closed (`unsupported_wallet`) for anything but a browser-extension
+ * (injected) wallet, without asking its provider anything; otherwise `checkWalletOnFork` through its own provider.
+ */
+export async function checkConnectorOnFork(connector: DevForkConnector | null | undefined, fork: Eip1193Request, cfg: DevForkConfig): Promise<ForkWalletCheck> {
+  if (!connector) return { status: 'unknown' }
+  if (connector.type !== CHECKABLE_CONNECTOR_TYPE) return { status: 'unsupported_wallet' }
+  const wallet = await walletRequestOf(connector).catch(() => null)
+  return wallet ? checkWalletOnFork(wallet, fork, cfg) : { status: 'unknown' }
+}
+
+export const UNSUPPORTED_WALLET_MESSAGE = 'Only a browser-extension wallet can be checked on the local fork; this wallet is blocked here.'
+
 export function forkStatusMessage(check: ForkWalletCheck, cfg: DevForkConfig): string {
   switch (check.status) {
     case 'fork':
@@ -180,13 +215,18 @@ export function forkStatusMessage(check: ForkWalletCheck, cfg: DevForkConfig): s
       return `Your wallet is on chain ${check.walletChainId ?? '?'}, not the local Gnosis fork (chain ${cfg.chainId}).`
     case 'not_fork':
       return 'Your wallet is on the REAL Gnosis network, not the local fork.'
+    case 'unsupported_wallet':
+      return UNSUPPORTED_WALLET_MESSAGE
     default:
       return 'Could not confirm that your wallet is on the local fork.'
   }
 }
 
-/** The fix shown with the guard: point the wallet's Gnosis network at the fork's RPC. */
-export function forkFixHint(cfg: DevForkConfig): string {
+/** The fix shown with the guard: point the wallet's Gnosis network at the fork's RPC (or use an extension wallet). */
+export function forkFixHint(cfg: DevForkConfig, status?: ForkWalletStatus | null): string {
+  if (status === 'unsupported_wallet') {
+    return `Disconnect it and connect a browser-extension wallet (MetaMask, Rabby) whose Gnosis network points at ${new URL(cfg.rpcUrl).origin}.`
+  }
   return `Point your wallet's Gnosis network (chain ${cfg.chainId}) at ${new URL(cfg.rpcUrl).origin}: in MetaMask, Networks → Gnosis → RPC URLs → Add RPC URL, then select it.`
 }
 
@@ -200,11 +240,12 @@ export class DevForkSendRefused extends Error {
 
 /**
  * The dev-fork send guard for the live executor: refuses any chain that is not the fork (chain 1 is not forked, so an
- * arbitration step would hit real Ethereum) and any wallet whose own RPC is not the fork.
+ * arbitration step would hit real Ethereum), any wallet whose own RPC is not the fork, and any connector that is not a
+ * browser-extension wallet (see `checkConnectorOnFork`).
  */
 export function createDevForkSendGuard(
   cfg: DevForkConfig,
-  wallet: () => Promise<Eip1193Request | null>,
+  connector: () => DevForkConnector | null | undefined,
   fork: Eip1193Request = forkRpc(cfg),
 ): { refuseChain(chainId: number): string | null; beforeSend(req: { chainId: number }): Promise<void> } {
   const refuseChain = (chainId: number): string | null =>
@@ -216,10 +257,14 @@ export function createDevForkSendGuard(
     async beforeSend(req) {
       const chainRefusal = refuseChain(req.chainId)
       if (chainRefusal) throw new DevForkSendRefused(chainRefusal)
-      const request = await wallet().catch(() => null)
-      const check: ForkWalletCheck = request ? await checkWalletOnFork(request, fork, cfg) : { status: 'unknown' }
+      let check: ForkWalletCheck
+      try {
+        check = await checkConnectorOnFork(connector(), fork, cfg)
+      } catch {
+        check = { status: 'unknown' }
+      }
       if (check.status !== 'fork') {
-        throw new DevForkSendRefused(`${forkStatusMessage(check, cfg)} Nothing was sent. ${forkFixHint(cfg)}`)
+        throw new DevForkSendRefused(`${forkStatusMessage(check, cfg)} Nothing was sent. ${forkFixHint(cfg, check.status)}`)
       }
     },
   }
@@ -254,8 +299,26 @@ function parseFunding(value: unknown): DevFundingResult | null {
   return { address: getAddress(v.address), funded: v.funded, balanceWei, previousBalanceWei, targetWei, delegatedTo, ...(warning ? { warning } : {}) }
 }
 
-/** Asks the dev control server to top the wallet up on the fork. Throws a short message on any failure. */
-export async function requestDevFunding(cfg: DevForkConfig, address: string, fetchImpl: typeof fetch = fetch): Promise<DevFundingResult> {
+function currentPageOrigin(): string | null {
+  try {
+    return typeof window === 'undefined' ? null : window.location.origin
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Asks the dev control server to top the wallet up on the fork. Throws a short message on any failure; when the page is
+ * not on the app origin the faucet accepts (`cfg.appOrigin`), the message says so instead of blaming the stack.
+ */
+export async function requestDevFunding(
+  cfg: DevForkConfig,
+  address: string,
+  fetchImpl: typeof fetch = fetch,
+  pageOrigin: string | null = currentPageOrigin(),
+): Promise<DevFundingResult> {
+  const wrongOrigin = cfg.appOrigin !== null && pageOrigin !== null && pageOrigin !== cfg.appOrigin
+  const originMessage = `Open Prism at ${cfg.appOrigin ?? ''}; the local faucet only accepts it.`
   let response: Response
   try {
     response = await fetchImpl(`${cfg.controlOrigin}/dev/fund`, {
@@ -268,6 +331,7 @@ export async function requestDevFunding(cfg: DevForkConfig, address: string, fet
       referrerPolicy: 'no-referrer',
     })
   } catch {
+    if (wrongOrigin) throw new Error(originMessage)
     throw new Error(`The local dev faucet (${cfg.controlOrigin}) could not be reached. Is scripts/dev-stack/up.sh running?`)
   }
   let body: unknown = null
@@ -277,6 +341,7 @@ export async function requestDevFunding(cfg: DevForkConfig, address: string, fet
     body = null
   }
   if (!response.ok) {
+    if (wrongOrigin) throw new Error(originMessage)
     const error = typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string' ? (body as { error: string }).error.slice(0, 200) : `HTTP ${response.status}`
     throw new Error(`The local dev faucet refused: ${error}`)
   }
@@ -285,47 +350,27 @@ export async function requestDevFunding(cfg: DevForkConfig, address: string, fet
   return parsed
 }
 
-/** Once per address per tab session: sessionStorage (per tab) plus memory when storage is unavailable. */
-export function createFundingTracker(storage: () => Pick<Storage, 'getItem' | 'setItem'> | null, key = 'pine:dev-fork:funded') {
-  const memory = new Set<string>()
+/**
+ * In-memory, per-page dedupe of faucet calls: at most one call per address in flight. Nothing is persisted, so a drained
+ * wallet or a restarted fork is topped up again on the next connect, load or move to the fork (the faucet is idempotent
+ * and rate-limited).
+ */
+export function createInFlightDedupe() {
   const inFlight = new Set<string>()
-  const readStored = (): string[] => {
-    try {
-      const raw = storage()?.getItem(key)
-      const list: unknown = raw ? JSON.parse(raw) : []
-      return Array.isArray(list) ? list.filter((x): x is string => typeof x === 'string') : []
-    } catch {
-      return []
-    }
-  }
-  const has = (address: string) => memory.has(address.toLowerCase()) || readStored().includes(address.toLowerCase())
   return {
-    has,
-    /** True when the caller should fund now (not done in this tab, not in flight); marks it in flight. */
+    /** True when the caller may call now (no call for this address in flight); marks it in flight. */
     claim(address: string): boolean {
       const a = address.toLowerCase()
-      if (inFlight.has(a) || has(a)) return false
+      if (inFlight.has(a)) return false
       inFlight.add(a)
       return true
     },
-    done(address: string): void {
-      const a = address.toLowerCase()
-      inFlight.delete(a)
-      memory.add(a)
-      try {
-        const list = readStored()
-        if (!list.includes(a)) storage()?.setItem(key, JSON.stringify([...list, a].slice(-50)))
-      } catch {
-        /* storage unavailable: memory only */
-      }
-    },
-    /** A failed attempt: may be retried on the next connect or account switch. */
-    release(address: string): void {
+    /** The call finished (either way). */
+    settle(address: string): void {
       inFlight.delete(address.toLowerCase())
     },
-    /** Tests: forget everything in memory (storage is the caller's). */
+    /** Tests: forget everything. */
     reset(): void {
-      memory.clear()
       inFlight.clear()
     },
   }

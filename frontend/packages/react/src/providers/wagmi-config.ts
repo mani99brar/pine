@@ -11,6 +11,7 @@ import { createConfig, http, type Config } from 'wagmi'
 import type { Chain } from 'viem'
 import { gnosis, mainnet, sepolia } from 'viem/chains'
 import { SUPPORTED_CHAIN_IDS } from '@pine/core/chains'
+import { devForkConfig } from '../dev/fork'
 
 const VIEM_CHAINS: Record<number, Chain> = {
   100: gnosis,
@@ -50,8 +51,15 @@ export function pineViemChains(defaultChainId: number): [Chain, ...Chain[]] {
  * Without a WalletConnect project id, only wallets that never need WalletConnect are listed
  * (RainbowKit throws for WalletConnect-backed wallets without a project id); EIP-6963 discovery
  * still shows every installed browser wallet, MetaMask included.
+ *
+ * In a local dev-fork build (`devForkConfig()` non-null) only browser-extension wallets backed by wagmi's `injected`
+ * connector are listed: WalletConnect answers reads from the app's transports (the fork) while the phone wallet
+ * broadcasts on its own network, RainbowKit's `metaMaskWallet` uses the MetaMask SDK connector (or WalletConnect), and
+ * Safe is an iframe connector; none of them can be checked against the fork (the dev send guard blocks them anyway).
+ * EIP-6963 discovery still shows an installed MetaMask as an injected wallet.
  */
-export function pineWalletList(projectId: string | undefined) {
+export function pineWalletList(projectId: string | undefined, devFork: boolean = devForkConfig() !== null) {
+  if (devFork) return [{ groupName: 'Installed', wallets: [injectedWallet, rabbyWallet] }]
   return projectId
     ? [
         { groupName: 'Installed', wallets: [injectedWallet, metaMaskWallet, rabbyWallet] },

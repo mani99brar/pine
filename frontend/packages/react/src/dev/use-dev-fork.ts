@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAccount } from 'wagmi'
 import {
-  checkWalletOnFork,
-  createFundingTracker,
+  checkConnectorOnFork,
+  createInFlightDedupe,
   devForkConfig,
   forkRpc,
   requestDevFunding,
@@ -19,13 +19,8 @@ import {
 /** Re-check interval: a wallet can change its RPC for the same chain id without telling the page. */
 export const DEV_FORK_RECHECK_MS = 15_000
 
-const tracker = createFundingTracker(() => {
-  try {
-    return typeof window === 'undefined' ? null : window.sessionStorage
-  } catch {
-    return null
-  }
-})
+/** Page-wide: one faucet call per address in flight (memory only; nothing persisted). */
+const faucetDedupe = createInFlightDedupe()
 
 export interface DevForkWalletState {
   /** False in every build that is not a local dev-fork build: the hook then does nothing at all. */
@@ -34,8 +29,10 @@ export interface DevForkWalletState {
   /** null while disconnected or not yet checked. */
   status: ForkWalletStatus | null
   check: ForkWalletCheck | null
-  /** Asks the connected wallet to add the fork's RPC for its chain (wallet_addEthereumChain). Throws when it refuses. */
+  /** Asks the connected wallet to add the fork's RPC for its chain (wallet_addEthereumChain), then re-checks. Throws when it refuses. */
   addForkNetwork(): Promise<void>
+  /** Re-checks now (coalesced: never two checks at once). */
+  recheck(): void
 }
 
 export interface UseDevForkWalletOptions {
@@ -48,9 +45,11 @@ const BALANCE_KEYS = new Set(['balance', 'readContract', 'readContracts'])
 
 /**
  * LOCAL DEVELOPMENT ONLY (inert unless `devForkConfig()` is non-null). Checks through the wallet's own provider that it
- * is on the local fork, on connect, account or chain change and every 15 s; when it is, asks the dev faucet once per
- * address per tab session to top the wallet up, then refreshes the balances wagmi shows. Never funds a wallet that is
- * not on the fork.
+ * is on the local fork: on connect, account or chain change, page load, window focus, the tab becoming visible, after
+ * `addForkNetwork`, and every 15 s. Only browser-extension (injected) wallets can pass. Whenever the wallet is newly on
+ * the fork (connect, account switch, load, or a move from another status to 'fork') it asks the dev faucet to top it up
+ * (the faucet is idempotent and rate-limited), then refreshes the balances wagmi shows. Never funds a wallet that is not
+ * on the fork.
  */
 export function useDevForkWallet(opts: UseDevForkWalletOptions = {}): DevForkWalletState {
   const config = useMemo(() => devForkConfig(), [])
@@ -62,39 +61,82 @@ export function useDevForkWallet(opts: UseDevForkWalletOptions = {}): DevForkWal
     optsRef.current = opts
   })
   const fork = useMemo(() => (config ? forkRpc(config) : null), [config])
+  const recheckRef = useRef<(() => void) | null>(null)
 
   useEffect(() => {
     if (!config || !fork || !isConnected || !address || !connector) {
       setCheck(null)
+      recheckRef.current = null
       return
     }
     let cancelled = false
-    // One faucet attempt per connect / account / chain change (a failure is retried on the next one, not every 15 s).
-    let attempted = false
-    const run = async () => {
-      const wallet = await walletRequestOf(connector).catch(() => null)
-      const result: ForkWalletCheck = wallet ? await checkWalletOnFork(wallet, fork, config) : { status: 'unknown' }
-      if (cancelled) return
-      setCheck((prev) => (prev && prev.status === result.status && prev.walletChainId === result.walletChainId ? prev : result))
-      if (result.status !== 'fork' || attempted || !tracker.claim(address)) return
-      attempted = true
+    // The last status seen in this effect run: a fresh run (connect / account / chain / load) starts from null, so the
+    // first 'fork' asks the faucet; later 'fork' results ask again only after another status in between.
+    let lastStatus: ForkWalletStatus | null = null
+    let running = false
+    let again = false
+
+    const fund = async () => {
+      if (!faucetDedupe.claim(address)) return
       try {
         const funding = await requestDevFunding(config, address)
-        tracker.done(address)
         await queryClient.invalidateQueries({ predicate: (q) => BALANCE_KEYS.has(String(q.queryKey[0])) })
-        optsRef.current.onFunded?.(funding)
+        if (!cancelled) optsRef.current.onFunded?.(funding)
       } catch (e) {
-        tracker.release(address)
-        optsRef.current.onFundingFailed?.(e instanceof Error ? e.message : 'The local dev faucet failed.')
+        if (!cancelled) optsRef.current.onFundingFailed?.(e instanceof Error ? e.message : 'The local dev faucet failed.')
+      } finally {
+        faucetDedupe.settle(address)
       }
     }
-    void run()
-    const timer = setInterval(() => void run(), DEV_FORK_RECHECK_MS)
+
+    const checkOnce = async () => {
+      const result = await checkConnectorOnFork(connector, fork, config).catch((): ForkWalletCheck => ({ status: 'unknown' }))
+      if (cancelled) return
+      setCheck((prev) => (prev && prev.status === result.status && prev.walletChainId === result.walletChainId ? prev : result))
+      const becameFork = result.status === 'fork' && lastStatus !== 'fork'
+      lastStatus = result.status
+      if (becameFork) await fund()
+    }
+
+    // Never two checks at once: a request during a run schedules exactly one more run after it.
+    const run = () => {
+      if (cancelled) return
+      if (running) {
+        again = true
+        return
+      }
+      running = true
+      void (async () => {
+        try {
+          do {
+            again = false
+            await checkOnce()
+          } while (again && !cancelled)
+        } finally {
+          running = false
+        }
+      })()
+    }
+    recheckRef.current = run
+
+    const onFocus = () => run()
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') run()
+    }
+    window.addEventListener('focus', onFocus)
+    document.addEventListener('visibilitychange', onVisibility)
+    run()
+    const timer = setInterval(run, DEV_FORK_RECHECK_MS)
     return () => {
       cancelled = true
+      if (recheckRef.current === run) recheckRef.current = null
       clearInterval(timer)
+      window.removeEventListener('focus', onFocus)
+      document.removeEventListener('visibilitychange', onVisibility)
     }
   }, [config, fork, isConnected, address, chainId, connector, queryClient])
+
+  const recheck = useCallback(() => recheckRef.current?.(), [])
 
   // Here rather than in the app: wagmi's hooks must come from the same wagmi copy as the provider (@pine/react's).
   const addForkNetwork = useCallback(async () => {
@@ -112,10 +154,11 @@ export function useDevForkWallet(opts: UseDevForkWalletOptions = {}): DevForkWal
         },
       ],
     })
+    recheckRef.current?.()
   }, [config, connector])
 
-  return { enabled: config !== null, config, status: check?.status ?? null, check, addForkNetwork }
+  return { enabled: config !== null, config, status: check?.status ?? null, check, addForkNetwork, recheck }
 }
 
-/** Test helper: the per-tab tracker. */
-export const __devForkFundingTracker = tracker
+/** Test helper: the page-wide in-flight faucet dedupe. */
+export const __devForkFaucetDedupe = faucetDedupe

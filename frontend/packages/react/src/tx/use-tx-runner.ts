@@ -10,7 +10,7 @@ import { getBrowserStorage, type KeyValueStorage } from '../internal/storage'
 import { demoWalletStore } from '../wallet/demo-store'
 import { createDemoExecutor, type DemoExecutorOptions } from './demo-executor'
 import { createLiveExecutor, type SendGuard } from './live-executor'
-import { createDevForkSendGuard, devForkConfig, walletRequestOf } from '../dev/fork'
+import { createDevForkSendGuard, devForkConfig } from '../dev/fork'
 import {
   TxMachine,
   isManualStep,
@@ -80,7 +80,7 @@ const missingExecutor: TxExecutor = {
 function devSendGuard(config: Config): SendGuard | undefined {
   const fork = devForkConfig()
   if (!fork) return undefined
-  return createDevForkSendGuard(fork, () => walletRequestOf(getAccount(config).connector))
+  return createDevForkSendGuard(fork, () => getAccount(config).connector)
 }
 
 function defaultLimitCurrency(steps: TxStep[]): string | undefined {
