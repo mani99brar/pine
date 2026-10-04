@@ -3,8 +3,7 @@
 import { useCallback, useState } from 'react'
 import { toast } from 'sonner'
 import { formatUnits } from 'viem'
-import { useAccount } from 'wagmi'
-import { forkFixHint, forkStatusMessage, useDevForkWallet, walletRequestOf, type DevFundingResult } from '@pine/react'
+import { forkFixHint, forkStatusMessage, useDevForkWallet, type DevFundingResult } from '@pine/react'
 import { shortAddress } from './wallet-display'
 
 function fundedToast(result: DevFundingResult) {
@@ -25,7 +24,6 @@ function fundedToast(result: DevFundingResult) {
  * own network is not the fork: sending is then blocked by the transaction runner.
  */
 export function DevForkGuard() {
-  const { connector } = useAccount()
   const fork = useDevForkWallet({
     onFunded: fundedToast,
     onFundingFailed: (message) => toast.warning('Local dev faucet unavailable', { description: message }),
@@ -37,26 +35,14 @@ export function DevForkGuard() {
     if (!config) return
     setAdding(true)
     try {
-      const request = await walletRequestOf(connector)
-      if (!request) throw new Error('No wallet provider is connected.')
-      await request({
-        method: 'wallet_addEthereumChain',
-        params: [
-          {
-            chainId: `0x${config.chainId.toString(16)}`,
-            chainName: 'Gnosis (local fork)',
-            nativeCurrency: { name: 'xDAI', symbol: 'XDAI', decimals: 18 },
-            rpcUrls: [new URL(config.rpcUrl).origin],
-          },
-        ],
-      })
+      await fork.addForkNetwork()
       toast('Wallet network updated', { description: 'If your wallet kept its existing Gnosis RPC, select the local one by hand.' })
     } catch (e) {
       toast.warning('Your wallet did not add the fork RPC', { description: `${e instanceof Error ? e.message.slice(0, 160) : 'Rejected.'} ${forkFixHint(config)}` })
     } finally {
       setAdding(false)
     }
-  }, [config, connector])
+  }, [config, fork])
 
   if (!config || !fork.check || fork.status === 'fork') return null
   return (

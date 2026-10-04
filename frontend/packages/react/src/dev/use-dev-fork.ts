@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAccount } from 'wagmi'
 import {
@@ -34,6 +34,8 @@ export interface DevForkWalletState {
   /** null while disconnected or not yet checked. */
   status: ForkWalletStatus | null
   check: ForkWalletCheck | null
+  /** Asks the connected wallet to add the fork's RPC for its chain (wallet_addEthereumChain). Throws when it refuses. */
+  addForkNetwork(): Promise<void>
 }
 
 export interface UseDevForkWalletOptions {
@@ -94,7 +96,25 @@ export function useDevForkWallet(opts: UseDevForkWalletOptions = {}): DevForkWal
     }
   }, [config, fork, isConnected, address, chainId, connector, queryClient])
 
-  return { enabled: config !== null, config, status: check?.status ?? null, check }
+  // Here rather than in the app: wagmi's hooks must come from the same wagmi copy as the provider (@pine/react's).
+  const addForkNetwork = useCallback(async () => {
+    if (!config) return
+    const request = await walletRequestOf(connector)
+    if (!request) throw new Error('No wallet provider is connected.')
+    await request({
+      method: 'wallet_addEthereumChain',
+      params: [
+        {
+          chainId: `0x${config.chainId.toString(16)}`,
+          chainName: 'Gnosis (local fork)',
+          nativeCurrency: { name: 'xDAI', symbol: 'XDAI', decimals: 18 },
+          rpcUrls: [new URL(config.rpcUrl).origin],
+        },
+      ],
+    })
+  }, [config, connector])
+
+  return { enabled: config !== null, config, status: check?.status ?? null, check, addForkNetwork }
 }
 
 /** Test helper: the per-tab tracker. */
