@@ -5,6 +5,9 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAccount } from 'wagmi'
 import {
   checkConnectorOnFork,
+  DEV_FORK_TIMEOUT_MS,
+  DevFaucetRateLimitedError,
+  withTimeout,
   createInFlightDedupe,
   devForkConfig,
   forkRpc,
@@ -83,6 +86,8 @@ export function useDevForkWallet(opts: UseDevForkWalletOptions = {}): DevForkWal
         await queryClient.invalidateQueries({ predicate: (q) => BALANCE_KEYS.has(String(q.queryKey[0])) })
         if (!cancelled) optsRef.current.onFunded?.(funding)
       } catch (e) {
+        // Rate-limited is not a failure: the wallet was topped up moments ago, and the next move onto the fork asks again.
+        if (e instanceof DevFaucetRateLimitedError) return
         if (!cancelled) optsRef.current.onFundingFailed?.(e instanceof Error ? e.message : 'The local dev faucet failed.')
       } finally {
         faucetDedupe.settle(address)
@@ -90,12 +95,14 @@ export function useDevForkWallet(opts: UseDevForkWalletOptions = {}): DevForkWal
     }
 
     const checkOnce = async () => {
-      const result = await checkConnectorOnFork(connector, fork, config).catch((): ForkWalletCheck => ({ status: 'unknown' }))
+      const unknown: ForkWalletCheck = { status: 'unknown' }
+      const result = await withTimeout(checkConnectorOnFork(connector, fork, config), DEV_FORK_TIMEOUT_MS, unknown)
       if (cancelled) return
       setCheck((prev) => (prev && prev.status === result.status && prev.walletChainId === result.walletChainId ? prev : result))
       const becameFork = result.status === 'fork' && lastStatus !== 'fork'
       lastStatus = result.status
-      if (becameFork) await fund()
+      // Not awaited: a faucet that never answers must not hold up later checks (the dedupe stops duplicate calls).
+      if (becameFork) void fund()
     }
 
     // Never two checks at once: a request during a run schedules exactly one more run after it.

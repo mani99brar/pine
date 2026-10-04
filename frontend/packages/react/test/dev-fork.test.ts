@@ -12,8 +12,7 @@ import {
   requestDevFunding,
   type DevForkConfig,
   type DevForkEnv,
-  type Eip1193Request,
-} from '../src/dev/fork'
+  type Eip1193Request, DevFaucetRateLimitedError } from '../src/dev/fork'
 
 const REGISTRY = '0x4Af9f320fE64C09a59572B6F687B308278367D61'
 const USER = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
@@ -213,8 +212,11 @@ describe('faucet request', () => {
       throw new TypeError('Failed to fetch')
     }) as unknown as typeof fetch
     await expect(requestDevFunding(CFG, USER, down, APP)).rejects.toThrow(/could not be reached/)
-    const refused = (async () => new Response(JSON.stringify({ error: 'too many faucet requests' }), { status: 429 })) as unknown as typeof fetch
-    await expect(requestDevFunding(CFG, USER, refused, APP)).rejects.toThrow(/refused: too many/)
+    const refused = (async () => new Response(JSON.stringify({ error: 'this address holds contract code' }), { status: 422 })) as unknown as typeof fetch
+    await expect(requestDevFunding(CFG, USER, refused, APP)).rejects.toThrow(/refused: this address holds contract code/)
+    // Rate-limited is its own outcome, not a failure to report (the next connect asks again).
+    const limited = (async () => new Response(JSON.stringify({ error: 'too many faucet requests' }), { status: 429 })) as unknown as typeof fetch
+    await expect(requestDevFunding(CFG, USER, limited, APP)).rejects.toBeInstanceOf(DevFaucetRateLimitedError)
     const odd = (async () => new Response(JSON.stringify({ ...ok, balanceWei: 1e21 }), { status: 200 })) as unknown as typeof fetch
     await expect(requestDevFunding(CFG, USER, odd, APP)).rejects.toThrow(/unexpected answer/)
     const other = (async () => new Response(JSON.stringify({ ...ok, address: REGISTRY }), { status: 200 })) as unknown as typeof fetch

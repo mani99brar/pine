@@ -37,11 +37,13 @@ function stubDevEnv() {
 }
 
 /** fetch: the fork RPC (block hash) and the dev faucet. */
-function stubFetch(faucetOk = true, funded = true) {
+function stubFetch(faucetOk = true, funded = true, faucet: 'normal' | 'hang' | 'limited' = 'normal') {
   const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
     if (url === 'http://127.0.0.1:8545/') return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: { hash: FORK_HASH } }))
     if (url === 'http://127.0.0.1:3999/dev/fund') {
       if (!faucetOk) throw new TypeError('Failed to fetch')
+      if (faucet === 'hang') return new Promise<Response>(() => undefined)
+      if (faucet === 'limited') return new Response(JSON.stringify({ error: 'too many faucet requests for this address; try again shortly' }), { status: 429 })
       const { address } = JSON.parse(String(init?.body)) as { address: string }
       return new Response(JSON.stringify({ address, chainId: 100, funded, balanceWei: '1000000000000000000000', previousBalanceWei: '0', thresholdWei: '1', targetWei: '1000000000000000000000', delegatedTo: null, tokens: [] }))
     }
@@ -271,6 +273,38 @@ describe('useDevForkWallet', () => {
     await waitFor(() => expect(onFunded).toHaveBeenCalledTimes(1))
     expect(faucetCalls(fetchMock)).toHaveLength(1)
     next.unmount()
+  })
+
+  it('a faucet that never answers does not stop later re-checks', async () => {
+    stubDevEnv()
+    stubFetch(true, true, 'hang')
+    const p = provider(true)
+    account.current = { address: A, chainId: 100, isConnected: true, connector: p.connector }
+    const view = mount()
+    await waitFor(() => expect(view.state.current?.status).toBe('fork'))
+    // The faucet call is still pending; the wallet moves back to the real network and the user returns to the tab.
+    p.state.onFork = false
+    await act(async () => {
+      window.dispatchEvent(new Event('focus'))
+    })
+    await waitFor(() => expect(view.state.current?.status).toBe('not_fork'))
+    view.unmount()
+  })
+
+  it('a rate-limited faucet (429) is not reported as a failure', async () => {
+    stubDevEnv()
+    const fetchMock = stubFetch(true, true, 'limited')
+    const p = provider(true)
+    account.current = { address: A, chainId: 100, isConnected: true, connector: p.connector }
+    const onFundingFailed = vi.fn()
+    const view = mount({ onFundingFailed })
+    await waitFor(() => expect(faucetCalls(fetchMock)).toHaveLength(1))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 50))
+    })
+    expect(onFundingFailed).not.toHaveBeenCalled()
+    expect(view.state.current?.status).toBe('fork')
+    view.unmount()
   })
 
   it('does nothing while disconnected', async () => {

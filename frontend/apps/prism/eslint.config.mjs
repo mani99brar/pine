@@ -29,6 +29,14 @@ const config = [
           ],
         },
       ],
+      // The same copies reached at run time: import('wagmi') or require('wagmi') escapes no-restricted-imports.
+      'no-restricted-syntax': [
+        'error',
+        { selector: "ImportExpression[source.value=/^wagmi(\\/|$)/]", message: WAGMI_MESSAGE },
+        { selector: "CallExpression[callee.name='require'][arguments.0.value=/^wagmi(\\/|$)/]", message: WAGMI_MESSAGE },
+        { selector: "ImportExpression[source.value=/^@rainbow-me\\/rainbowkit(\\/|$)/]", message: RAINBOWKIT_MESSAGE },
+        { selector: "CallExpression[callee.name='require'][arguments.0.value=/^@rainbow-me\\/rainbowkit(\\/|$)/]", message: RAINBOWKIT_MESSAGE },
+      ],
     },
   },
 ]

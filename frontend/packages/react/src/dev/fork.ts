@@ -198,6 +198,26 @@ export const CHECKABLE_CONNECTOR_TYPE = 'injected'
  * The fork check for a wagmi connector: fails closed (`unsupported_wallet`) for anything but a browser-extension
  * (injected) wallet, without asking its provider anything; otherwise `checkWalletOnFork` through its own provider.
  */
+/** Upper bound for one wallet check or faucet call: a stuck wallet, fork or faucet never freezes the dev checks. */
+export const DEV_FORK_TIMEOUT_MS = 10_000
+
+/** Resolves to `fallback` when `p` does not settle within `ms` (or rejects). */
+export function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(fallback), ms)
+    p.then(
+      (value) => {
+        clearTimeout(timer)
+        resolve(value)
+      },
+      () => {
+        clearTimeout(timer)
+        resolve(fallback)
+      },
+    )
+  })
+}
+
 export async function checkConnectorOnFork(connector: DevForkConnector | null | undefined, fork: Eip1193Request, cfg: DevForkConfig): Promise<ForkWalletCheck> {
   if (!connector) return { status: 'unknown' }
   if (connector.type !== CHECKABLE_CONNECTOR_TYPE) return { status: 'unsupported_wallet' }
@@ -259,7 +279,8 @@ export function createDevForkSendGuard(
       if (chainRefusal) throw new DevForkSendRefused(chainRefusal)
       let check: ForkWalletCheck
       try {
-        check = await checkConnectorOnFork(connector(), fork, cfg)
+        // A wallet that never answers counts as not proven on the fork: sending stays blocked.
+        check = await withTimeout(checkConnectorOnFork(connector(), fork, cfg), DEV_FORK_TIMEOUT_MS, { status: 'unknown' })
       } catch {
         check = { status: 'unknown' }
       }
@@ -311,6 +332,18 @@ function currentPageOrigin(): string | null {
  * Asks the dev control server to top the wallet up on the fork. Throws a short message on any failure; when the page is
  * not on the app origin the faucet accepts (`cfg.appOrigin`), the message says so instead of blaming the stack.
  */
+/** The faucet's per-address rate limit answered (429): nothing is wrong, and the next move onto the fork asks again. */
+export class DevFaucetRateLimitedError extends Error {
+  constructor() {
+    super('The local dev faucet is rate-limited for this address; it is asked again on the next connect.')
+    this.name = 'DevFaucetRateLimitedError'
+  }
+}
+
+function timeoutSignal(ms: number): AbortSignal | undefined {
+  return typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(ms) : undefined
+}
+
 export async function requestDevFunding(
   cfg: DevForkConfig,
   address: string,
@@ -329,6 +362,7 @@ export async function requestDevFunding(
       mode: 'cors',
       redirect: 'error',
       referrerPolicy: 'no-referrer',
+      signal: timeoutSignal(DEV_FORK_TIMEOUT_MS),
     })
   } catch {
     if (wrongOrigin) throw new Error(originMessage)
@@ -342,6 +376,7 @@ export async function requestDevFunding(
   }
   if (!response.ok) {
     if (wrongOrigin) throw new Error(originMessage)
+    if (response.status === 429) throw new DevFaucetRateLimitedError()
     const error = typeof body === 'object' && body !== null && typeof (body as { error?: unknown }).error === 'string' ? (body as { error: string }).error.slice(0, 200) : `HTTP ${response.status}`
     throw new Error(`The local dev faucet refused: ${error}`)
   }
