@@ -47,11 +47,21 @@ export function LightTable() {
   const sort = sorts.some((s) => s.value === requestedSort) ? requestedSort : 'deadline'
   const viewParam = params.get('view') as View | null
   const view: View = viewParam ?? (wide ? 'constellation' : 'list')
-  const [search, setSearch] = useState(params.get('q') ?? '')
+  const urlSearch = params.get('q') ?? ''
+  const [search, setSearch] = useState(urlSearch)
+  // The input follows the URL when it changes (a link to /claims clears it), so it never shows a search that is not applied.
+  const [syncedSearch, setSyncedSearch] = useState(urlSearch)
+  if (syncedSearch !== urlSearch) {
+    setSyncedSearch(urlSearch)
+    setSearch(urlSearch)
+  }
 
   const setParam = (patch: Record<string, string | null>) => {
-    const next = new URLSearchParams(params.toString())
-    for (const [k, v] of Object.entries(patch)) {
+    // From the URL as it is now, not this render's snapshot: the search input's blur and a chip click in one gesture both
+    // write, and the second must not drop the first. A typed search that was not submitted goes with the change, so the
+    // results always match the input.
+    const next = new URLSearchParams(window.location.search)
+    for (const [k, v] of Object.entries({ q: search.trim() || null, ...patch })) {
       if (v === null || v === '') next.delete(k)
       else next.set(k, v)
     }

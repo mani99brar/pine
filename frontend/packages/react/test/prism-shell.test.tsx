@@ -215,3 +215,69 @@ describe('the mobile navigation drawer', () => {
   })
 })
 
+describe('the claims list search', () => {
+  async function renderTable() {
+    const { LightTable } = await prism<{ LightTable: ComponentType }>('components/table/LightTable.tsx')
+    return render(<LightTable />)
+  }
+  /** Next applies router.replace after the transition commits: until then the URL and useSearchParams are unchanged. */
+  function recordReplaces(): string[] {
+    const urls: string[] = []
+    state.replace = (url) => urls.push(url)
+    return urls
+  }
+  function navigate(url: string, rerender: (ui: ReactElement) => void, ui: ReactElement) {
+    window.history.replaceState(null, '', url)
+    const u = new URL(url, 'http://localhost')
+    state.pathname = u.pathname
+    state.params = new URLSearchParams(u.search)
+    rerender(ui)
+  }
+
+  it('keeps a typed search when a filter chip is clicked, with or without the blur', async () => {
+    const urls = recordReplaces()
+    await renderTable()
+    const input = screen.getByRole('searchbox', { name: 'Search claims' })
+    fireEvent.change(input, { target: { value: 'zzz-nothing' } })
+    fireEvent.blur(input)
+    fireEvent.click(screen.getByRole('button', { name: /FUNC/ }))
+    const last = new URL(urls.at(-1) ?? '', 'http://localhost')
+    expect(last.searchParams.get('family')).toBe('FUNC')
+    expect(last.searchParams.get('q')).toBe('zzz-nothing')
+  })
+
+  it('keeps a typed search when the sort or a status changes', async () => {
+    const urls = recordReplaces()
+    await renderTable()
+    fireEvent.change(screen.getByRole('searchbox', { name: 'Search claims' }), { target: { value: 'zzz-nothing' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sort' }), { target: { value: 'newest' } })
+    expect(new URL(urls.at(-1) ?? '', 'http://localhost').search).toBe('?q=zzz-nothing&sort=newest')
+    fireEvent.click(screen.getByRole('button', { name: 'Open for evidence' }))
+    expect(new URL(urls.at(-1) ?? '', 'http://localhost').search).toBe('?q=zzz-nothing&status=open')
+  })
+
+  it('keeps the other filters already in the URL', async () => {
+    const urls = recordReplaces()
+    window.history.replaceState(null, '', '/claims?repo=acme%2Fwidgets&family=BOT')
+    state.params = new URLSearchParams('repo=acme%2Fwidgets&family=BOT')
+    await renderTable()
+    fireEvent.change(screen.getByRole('combobox', { name: 'Sort' }), { target: { value: 'newest' } })
+    expect(new URL(urls.at(-1) ?? '', 'http://localhost').search).toBe('?repo=acme%2Fwidgets&family=BOT&sort=newest')
+  })
+
+  it('empties the input when a link leads to /claims without a search, and tabbing through does not bring it back', async () => {
+    const urls = recordReplaces()
+    window.history.replaceState(null, '', '/claims?q=zzz-nothing')
+    state.params = new URLSearchParams('q=zzz-nothing')
+    const { LightTable } = await prism<{ LightTable: ComponentType }>('components/table/LightTable.tsx')
+    const view = render(<LightTable />)
+    const input = screen.getByRole<HTMLInputElement>('searchbox', { name: 'Search claims' })
+    expect(input.value).toBe('zzz-nothing')
+    navigate('/claims', view.rerender, <LightTable />)
+    expect(input.value).toBe('')
+    fireEvent.focus(input)
+    fireEvent.blur(input)
+    expect(urls).toEqual([])
+  })
+})
+
