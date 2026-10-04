@@ -244,7 +244,11 @@ export class TxMachine {
     this.defs = steps
     this.defsSignature = sig
     if (!this.running && this.state === 'done' && !this.allComplete()) this.state = 'paused'
+    // Hydrated before the steps were known (an api plan is verified again after a reload): the state derived then had no
+    // steps to look at, so derive it again from the persisted progress (failed, paused or done; never runs anything).
+    if (!this.running && this.hydrated && !this.hydrating && this.state === 'idle') this.state = this.deriveState()
     this.emit()
+    if (this.state === 'done') void this.finish()
   }
 
   getSteps(): TxStep[] {
