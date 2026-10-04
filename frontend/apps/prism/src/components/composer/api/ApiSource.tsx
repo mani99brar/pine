@@ -6,7 +6,7 @@ import type { RepoSummary, SourceRef } from '@pine/core'
 import { shortSha } from '@pine/core'
 import { COPY } from '@pine/core/copy'
 import { GIT_BRANCH_PATTERN } from '@pine/data'
-import { toSourceRef, useGitHubLink, useGitHubPullCommits, useGitHubPulls, useResolveGitHubInput, type ClaimComposer } from '@pine/react'
+import { toSourceRef, useGitHubPullCommits, useGitHubPulls, useResolveGitHubInput, type ClaimComposer } from '@pine/react'
 import { GitBranch, GitPullRequest, Lock, Search } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { FormField, Notice, Skeleton } from '@/components/ui/primitives'
@@ -131,8 +131,8 @@ function RepoPicker({ repo, onPull, onCommit }: { repo: RepoSummary; onPull: (n:
 
 export function ApiStageSource({ c, nav, initialInput }: { c: ClaimComposer; nav: StepNav; initialInput?: string }) {
   const id = useApiIdentity()
-  const gh = useGitHubLink()
   const identity = useIdentityActions(c.saveNow)
+  const gh = identity.github
   const ready = identityReady(id, 'github')
   const pinned = c.draft.source
   const [input, setInput] = useState(initialInput ?? '')
@@ -320,6 +320,11 @@ export function ApiStageSource({ c, nav, initialInput }: { c: ClaimComposer; nav
               >
                 {/* The backend's own message (platform text), shown as plain text. */}
                 <span className="untrusted">{resolved.reason}</span>
+                {gh.error && (
+                  <span className="mt-1 block" role="alert">
+                    GitHub could not be linked: <span className="untrusted">{gh.error}</span>
+                  </span>
+                )}
               </Notice>
             ) : (
               <Notice

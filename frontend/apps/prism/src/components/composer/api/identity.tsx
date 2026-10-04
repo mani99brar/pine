@@ -75,9 +75,14 @@ function GatePanel({ title, icon, children, className }: { title: string; icon: 
 
 /**
  * Sign-in replaces the per-user query cache (the draft being composed among it) and linking GitHub leaves the page, so
- * pending draft edits are saved first.
+ * pending draft edits are saved first. `github` is the state of the same link that `linkGitHub` runs: show its busy
+ * and error state from here (a second useGitHubLink() never sees them).
  */
-export function useIdentityActions(saveDraft?: () => Promise<void>): { signIn(): void; linkGitHub(): void } {
+export function useIdentityActions(saveDraft?: () => Promise<void>): {
+  signIn(): void
+  linkGitHub(): void
+  github: { busy: boolean; error: string | null }
+} {
   const a = useAccount()
   const gh = useGitHubLink()
   const save = async () => {
@@ -85,7 +90,9 @@ export function useIdentityActions(saveDraft?: () => Promise<void>): { signIn():
   }
   return {
     signIn: () => void save().then(() => a.signIn()).catch(() => undefined),
+    // The failure is shown from `github.error`.
     linkGitHub: () => void save().then(() => gh.link()).catch(() => undefined),
+    github: { busy: gh.busy, error: gh.error },
   }
 }
 
@@ -96,9 +103,9 @@ export function useIdentityActions(saveDraft?: () => Promise<void>): { signIn():
 export function ApiIdentityGate({ need, reason, className, saveDraft }: { need: IdentityNeed; reason: ReactNode; className?: string; saveDraft?: () => Promise<void> }) {
   const a = useAccount()
   const w = useWallet()
-  const gh = useGitHubLink()
   const id = useApiIdentity()
   const actions = useIdentityActions(saveDraft)
+  const gh = actions.github
   const siwe = a.backend?.siwe
   const step: SiweStep = siwe?.step ?? 'idle'
   const signing = step === 'challenge' || step === 'signing' || step === 'verifying'
