@@ -1,10 +1,10 @@
 'use client'
 
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query'
 import { useSession } from 'next-auth/react'
 import type { ClaimDraft } from '@pine/core'
-import { anyBodySchema, PineBackendError, PineWriteApi, seg, type DraftStore } from '@pine/data'
+import { anyBodySchema, DRAFT_KEY_PREFIX, PineBackendError, PineWriteApi, seg, type DraftStore } from '@pine/data'
 import { usePine } from '../providers/context'
 import { pineKeys } from '../queries/keys'
 import { usePineSession } from '../api/session'
@@ -72,8 +72,8 @@ export function useDrafts(): {
   create(partial?: Partial<ClaimDraft>): ClaimDraft
   save(d: ClaimDraft): Promise<ClaimDraft>
   /**
-   * Deletes a draft. In api mode it rejects, deleting nothing, when the stored draft's market exists or its publication
-   * may still land (Pine does not report it failed or expired).
+   * Deletes a draft. It rejects, deleting nothing, when the stored draft's market exists, and in api mode when its
+   * publication may still land (Pine does not report it failed or expired).
    */
   remove(id: string): Promise<void>
   isLoading: boolean
@@ -88,6 +88,17 @@ export function useDrafts(): {
     queryFn: () => listDrafts(store, owner),
     staleTime: 10_000,
   })
+
+  // Another tab saved or deleted a draft (`storage` fires in the other tabs only).
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== null && !e.key.startsWith(DRAFT_KEY_PREFIX)) return
+      void qc.invalidateQueries({ queryKey: pineKeys.drafts(owner) })
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [qc, owner])
 
   const create = useCallback(
     (partial?: Partial<ClaimDraft>) => {
@@ -123,14 +134,14 @@ export function useDrafts(): {
 
   const remove = useCallback(
     async (id: string) => {
+      // Checked on the draft as stored now (a list shown earlier, or another tab, may be stale): a draft whose market
+      // exists, or (api mode) whose publication may still land, is kept with its recovery data.
+      const stored = await store.get(id)
+      const publication = stored?.publication
+      if (publication?.marketAddress || publication?.steps?.some((s) => s.id === 'create_market' && s.status === 'confirmed')) {
+        throw new Error('This draft’s market exists: its terms are on-chain, so the draft cannot be deleted.')
+      }
       if (api) {
-        // api mode, checked on the draft as stored now (a list shown earlier, or another tab, may be stale): a draft
-        // whose market exists, or whose publication may still land, is kept with its recovery data.
-        const stored = await store.get(id)
-        const publication = stored?.publication
-        if (publication?.marketAddress || publication?.steps?.some((s) => s.id === 'create_market' && s.status === 'confirmed')) {
-          throw new Error('This draft’s market exists: its terms are on-chain, so the draft cannot be deleted.')
-        }
         if (publication?.backend?.publicationId) {
           const state = await new PineWriteApi(api).getPublication(publication.backend.publicationId).then(
             (view) => view.state,

@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ClaimDraft, ComposerStage } from '@pine/core'
 import { formatDate } from '@pine/core'
@@ -18,7 +19,8 @@ import { ApiStageDeadlines } from './api/ApiDeadlines'
 import { ApiStageFunding } from './api/ApiFunding'
 import { ApiStageReview } from './api/ApiReview'
 import { ApiStagePublish } from './api/ApiPublish'
-import { Skeleton } from '@/components/ui/primitives'
+import { Button } from '@/components/ui/Button'
+import { Notice, Skeleton } from '@/components/ui/primitives'
 import { useReduceMotion } from '@/lib/hooks'
 
 const ACK_KEY = (id: string) => `pine-prism:ack:${id}`
@@ -38,6 +40,68 @@ function writeSession(key: string, v: string) {
   } catch {
     /* storage unavailable: lasts for this view */
   }
+}
+
+/** The draft changed or was deleted in another tab while it was open here. */
+function DraftConflictNotice({ c }: { c: ClaimComposer }) {
+  const router = useRouter()
+  const [busy, setBusy] = useState(false)
+  const [failed, setFailed] = useState(false)
+  if (!c.conflict) return null
+  if (c.conflict.kind === 'deleted') {
+    const keep = () => {
+      setBusy(true)
+      setFailed(false)
+      c.resolveDeleted(true).then(
+        () => setBusy(false),
+        () => {
+          setBusy(false)
+          setFailed(true)
+        },
+      )
+    }
+    const letGo = () => {
+      void c.resolveDeleted(false).then(() => router.push('/drafts'))
+    }
+    return (
+      <Notice
+        tone="caution"
+        role="alert"
+        title="This draft was deleted in another tab"
+        className="mt-6"
+        action={
+          <div className="flex flex-wrap gap-2">
+            <Button size="sm" onClick={keep} loading={busy}>
+              Keep this draft
+            </Button>
+            <Button size="sm" variant="ghost" onClick={letGo} disabled={busy}>
+              Let it go
+            </Button>
+          </div>
+        }
+      >
+        Nothing here is saved until you choose. Keep it to save it again as shown here, or let it go.
+        {failed && ' The draft could not be saved in this browser. Try again.'}
+      </Notice>
+    )
+  }
+  return (
+    <Notice
+      tone={c.conflict.editsDropped ? 'caution' : 'info'}
+      role="status"
+      title="This draft changed in another tab"
+      className="mt-6"
+      action={
+        <Button size="sm" variant="ghost" onClick={c.dismissConflict}>
+          Dismiss
+        </Button>
+      }
+    >
+      {c.conflict.editsDropped
+        ? 'It now shows the version saved there. Some of your unsaved edits were not kept: the other tab changed the same fields, or sealed the claim.'
+        : 'It now shows the version saved there, with your unsaved edits to other fields kept.'}
+    </Notice>
+  )
 }
 
 function stepFromStage(stage: ComposerStage, saved: string | null): UiStep {
@@ -201,6 +265,8 @@ function ComposerBody({ c, draftId, initialInput, fromClaimId, initialPolicy }: 
           </p>
         )}
       </div>
+
+      <DraftConflictNotice c={c} />
 
       <div ref={topRef} className="mt-7">
         <FacetRail step={step} furthest={furthest} onGo={go} blocked={blocked} frozen={c.frozen} />
