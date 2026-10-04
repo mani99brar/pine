@@ -6,12 +6,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { useMutation, useQuery, type QueryClient } from '@tanstack/react-query'
+import { createSiweMessage } from 'viem/siwe'
 import { PineApiClient, anyBodySchema, type PineSession } from '@pine/data'
 import { PineProviders, createPineQueryClient } from '../src/providers'
 import { pineKeys } from '../src/queries/keys'
 import { useAccount } from '../src/account'
 import { useGitHubLink, usePineSession, useSignOut } from '../src/api/session'
-import { __resetIdentityState } from '../src/api/identity'
+import { __resetIdentityState, useWalletSessionGuard, useWalletSwitchNotice } from '../src/api/identity'
 
 const fake = vi.hoisted(() => ({
   wallet: { address: undefined as `0x${string}` | undefined, chainId: 100 as number | undefined, isConnected: false, isReconnecting: false },
@@ -362,5 +363,81 @@ describe('tabs of this browser share the session', () => {
       await result.current.signOut()
     })
     expect(result.current.account.status).toBe('signed_out')
+  })
+})
+
+describe('the wallet-switch notice (SEC-AUTH-13)', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(NOW)
+  })
+
+  it('SEC-AUTH-13 clears the wallet-switch notice once the user signs in again, so a later manual sign-out does not repeat it', async () => {
+    let session: PineSession | null = sessionView(A)
+    backend((c) => {
+      if (c.path === SESSION_PATH) return session ? json(200, session) : unauthenticated()
+      if (c.path === '/api/v1/auth/logout') {
+        session = null
+        return new Response(null, { status: 204 })
+      }
+      if (c.path === '/api/v1/auth/siwe/challenge') {
+        const message = createSiweMessage({
+          domain: window.location.host,
+          address: B,
+          statement: `Sign in to Pine. I accept the terms with sha256 ${TERMS}.`,
+          uri: window.location.origin,
+          version: '1',
+          chainId: 100,
+          nonce: NONCE,
+          issuedAt: NOW,
+          expirationTime: new Date(NOW.getTime() + 10 * 60_000),
+        })
+        return json(200, { message, nonce: NONCE, expiresAt: '2026-10-04T12:10:00.000Z' })
+      }
+      if (c.path === '/api/v1/auth/siwe/verify') {
+        session = sessionView(B)
+        return json(200, session)
+      }
+      return undefined
+    })
+    fake.sign.mockResolvedValue(`0x${'11'.repeat(65)}`)
+    connect(A)
+    const { result, rerender } = render(() => ({ guard: useWalletSessionGuard(), notice: useWalletSwitchNotice(), account: useAccount() }))
+    await waitFor(() => expect(result.current.account.status).toBe('signed_in'))
+    connect(B)
+    rerender()
+    await waitFor(() => expect(result.current.notice.notice?.state).toBe('signed_out'))
+
+    await act(async () => {
+      await result.current.account.signIn()
+    })
+    expect(result.current.account.status).toBe('signed_in')
+    expect(result.current.notice.notice).toBeNull()
+
+    await act(async () => {
+      await result.current.account.signOut()
+    })
+    expect(result.current.account.status).toBe('signed_out')
+    expect(result.current.notice.notice).toBeNull()
+  })
+
+  it('SEC-AUTH-13 keeps the notice while the user stays signed out', async () => {
+    let session: PineSession | null = sessionView(A)
+    backend((c) => {
+      if (c.path === SESSION_PATH) return session ? json(200, session) : unauthenticated()
+      if (c.path === '/api/v1/auth/logout') {
+        session = null
+        return new Response(null, { status: 204 })
+      }
+      return undefined
+    })
+    connect(A)
+    const { result, rerender } = render(() => ({ guard: useWalletSessionGuard(), notice: useWalletSwitchNotice(), account: useAccount() }))
+    await waitFor(() => expect(result.current.account.status).toBe('signed_in'))
+    connect(B)
+    rerender()
+    await waitFor(() => expect(result.current.notice.notice?.state).toBe('signed_out'))
+    rerender()
+    expect(result.current.notice.notice).toMatchObject({ from: A.toLowerCase(), to: B.toLowerCase(), state: 'signed_out' })
   })
 })

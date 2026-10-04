@@ -17,7 +17,7 @@ import {
 import { useSessionReplacement } from '../account'
 import { usePine } from '../providers/context'
 import { useWallet } from '../wallet'
-import { SIWE_TERMS_STATEMENT, handleSessionGone, usePineSession, useSignOut } from './session'
+import { SIWE_TERMS_STATEMENT, handleSessionGone, setWalletSwitch, usePineSession, useSignOut, walletSwitchStore, type WalletSwitch } from './session'
 
 // `api` mode identity support on top of ./session: the signed-in user's notifications, the terms digest of the sign-in
 // message being signed, and the wallet-switch guard (SEC-AUTH-13).
@@ -182,41 +182,18 @@ export function usePendingSiweTerms(): Hex | null {
   return pending.findLast((d): d is Hex => d !== null) ?? null
 }
 
+export type { WalletSwitch } from './session'
 export { announceSessionChange } from './session'
 
-/** An automatic sign-out caused by the wallet switching accounts. */
-export interface WalletSwitch {
-  /** Increases with every switch, so each one is announced once. */
-  seq: number
-  /** The session wallet that was signed out (lowercase). */
-  from: Address
-  /** The wallet's newly selected account (lowercase). */
-  to: Address
-  state: 'signing_out' | 'signed_out' | 'failed'
-}
-
-let lastSwitch: WalletSwitch | null = null
 let switchSeq = 0
-const switchListeners = new Set<() => void>()
 const signingOut = new Set<string>()
+const setSwitch = setWalletSwitch
+const switchStore = walletSwitchStore
 
-function setSwitch(next: WalletSwitch | null): void {
-  lastSwitch = next
-  switchListeners.forEach((l) => l())
-}
-
-const switchStore = {
-  subscribe(cb: () => void): () => void {
-    switchListeners.add(cb)
-    return () => {
-      switchListeners.delete(cb)
-    }
-  },
-  get: (): WalletSwitch | null => lastSwitch,
-  server: (): WalletSwitch | null => null,
-}
-
-/** The last wallet-switch sign-out (SEC-AUTH-13) until dismissed; shared by every component that shows it. */
+/**
+ * The last wallet-switch sign-out (SEC-AUTH-13) until dismissed or until the user signs in again; shared by every
+ * component that shows it.
+ */
 export function useWalletSwitchNotice(): { notice: WalletSwitch | null; dismiss(): void } {
   const notice = useSyncExternalStore(switchStore.subscribe, switchStore.get, switchStore.server)
   const dismiss = useCallback(() => setSwitch(null), [])

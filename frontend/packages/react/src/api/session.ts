@@ -247,6 +247,37 @@ function subscribeSessionSync(qc: QueryClient): () => void {
   }
 }
 
+/** An automatic sign-out caused by the wallet switching accounts (SEC-AUTH-13, see ./identity). */
+export interface WalletSwitch {
+  /** Increases with every switch, so each one is announced once. */
+  seq: number
+  /** The session wallet that was signed out (lowercase). */
+  from: Address
+  /** The wallet's newly selected account (lowercase). */
+  to: Address
+  state: 'signing_out' | 'signed_out' | 'failed'
+}
+
+let lastSwitch: WalletSwitch | null = null
+const switchListeners = new Set<() => void>()
+
+/** The last wallet-switch sign-out, until dismissed or until the user signs in again (it no longer explains the state). */
+export function setWalletSwitch(next: WalletSwitch | null): void {
+  lastSwitch = next
+  switchListeners.forEach((l) => l())
+}
+
+export const walletSwitchStore = {
+  subscribe(cb: () => void): () => void {
+    switchListeners.add(cb)
+    return () => {
+      switchListeners.delete(cb)
+    }
+  },
+  get: (): WalletSwitch | null => lastSwitch,
+  server: (): WalletSwitch | null => null,
+}
+
 export interface PineSessionState {
   /**
    * `disabled` outside `api` mode. `error`: Pine could not be asked (5xx, network error) and nothing is known yet, so the
@@ -330,6 +361,7 @@ export function useSiweSignIn(): { signIn(): Promise<PineSession>; step: SiweSte
       const session = await client.post('/api/v1/auth/siwe/verify', pineSessionSchema, { message: challenge.message, signature })
       qc.removeQueries({ predicate: (query) => isUserQuery(query.queryKey) })
       qc.setQueryData(pineKeys.session(), session)
+      setWalletSwitch(null)
       announceSessionChange()
       setStep('done')
       return session
