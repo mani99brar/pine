@@ -35,7 +35,8 @@ function backendSource(api: PineApiClient): GitHubSource {
 
 function hookError(err: unknown): PineApiError {
   if (err instanceof PineApiError) return err
-  if (err instanceof PineBackendError) return new PineApiError(err.message, err.status, err.code, err.retryAfter)
+  // Pine's own error stays the cause, so a 401 still ends the cached session (handleSessionGone).
+  if (err instanceof PineBackendError) return Object.assign(new PineApiError(err.message, err.status, err.code, err.retryAfter), { cause: err })
   if (err instanceof PineDataError) return new PineApiError(err.message, err.code === 'not_found' ? 404 : 502, err.code)
   return new PineApiError('GitHub request failed.', 0, 'network')
 }

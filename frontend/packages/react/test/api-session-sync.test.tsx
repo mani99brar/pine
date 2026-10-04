@@ -12,6 +12,7 @@ import { PineProviders, createPineQueryClient } from '../src/providers'
 import { pineKeys } from '../src/queries/keys'
 import { useAccount } from '../src/account'
 import { useGitHubLink, usePineSession, useSignOut } from '../src/api/session'
+import { useGitHubRepo } from '../src/github'
 import { __resetIdentityState, useWalletSessionGuard, useWalletSwitchNotice } from '../src/api/identity'
 
 const fake = vi.hoisted(() => ({
@@ -214,6 +215,17 @@ describe('a backend 401 means there is no session', () => {
     await waitFor(() => expect(result.current.status).toBe('signed_out'))
     expect(qc.getQueryData(pineKeys.session())).toBeNull()
     expect(qc.getQueryData(['pine', 'notifications', 'all'])).toBeUndefined()
+  })
+
+  it('a 401 from a GitHub read (wrapped for its callers) does too', async () => {
+    const { end } = signedIn((c) => (c.path.startsWith('/api/v1/github/') ? unauthenticated() : undefined))
+    const { result, qc } = render(() => useAccount())
+    await waitFor(() => expect(result.current.status).toBe('signed_in'))
+    end()
+    const repo = render(() => useGitHubRepo('pine-labs', 'keeper-bot'), qc)
+    await waitFor(() => expect(repo.result.current.isError).toBe(true))
+    await waitFor(() => expect(result.current.status).toBe('signed_out'))
+    expect(qc.getQueryData(pineKeys.session())).toBeNull()
   })
 
   it('a 401 from a mutation does too', async () => {

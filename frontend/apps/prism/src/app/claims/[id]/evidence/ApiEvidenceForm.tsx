@@ -208,6 +208,7 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
   const reqs = policyQ.data?.evidenceRequirements ?? []
   const badFiles = files.some((f) => fileProblem(f) !== null)
   const action = ev.action
+  const pendingTitle = action ? ev.seals.find((s) => s.contentSha256 === action.contentSha256)?.title : undefined
   const done = runState === 'done' && action !== null && action.kind !== 'reveal'
   const stopped = runState === 'failed' || ev.runner.phase === 'error'
   // Where `ev.error` belongs: the reveal the user last started (it may fail before its plan replaces the stored commit
@@ -509,6 +510,18 @@ export function ApiEvidenceForm({ claim, api }: { claim: ClaimDetail; api: ApiCl
 
             {!revealErrors && <WriteErrorNotice error={ev.error} />}
             {action?.kind !== 'reveal' && <PlanProgress runner={ev.runner} chainId={claim.chainId} />}
+            {action && action.kind !== 'reveal' && (stopped || ev.runner.canResume) && (
+              // The plan is pinned to the evidence it was made for: say so, or edits in the form would look committed.
+              <p className="text-[0.84375rem] text-lumen-2">
+                {action.kind === 'commit' ? 'Try again commits' : 'Try again publishes'} the evidence you submitted before
+                {pendingTitle ? (
+                  <>
+                    , <span className="untrusted">“{pendingTitle}”</span>
+                  </>
+                ) : null}
+                , not what is in the form now. To submit the form instead, choose Start over first.
+              </p>
+            )}
             <div className="flex flex-wrap items-center gap-3 border-t border-edge pt-5">
               {ready ? (
                 <>

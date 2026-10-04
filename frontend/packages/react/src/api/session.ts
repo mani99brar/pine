@@ -176,7 +176,9 @@ function dropSession(qc: QueryClient): void {
 
 /** A 401 from Pine other than a step-up request: the session cookie is missing, expired or was ended elsewhere. */
 export function isSessionGone(error: unknown): boolean {
-  return error instanceof PineBackendError && error.status === 401 && error.apiCode !== 'STEP_UP_REQUIRED'
+  // Hooks that wrap Pine's error for their callers (the GitHub reads) keep it as the cause.
+  const e = error instanceof Error && error.cause instanceof PineBackendError ? error.cause : error
+  return e instanceof PineBackendError && e.status === 401 && e.apiCode !== 'STEP_UP_REQUIRED'
 }
 
 /**

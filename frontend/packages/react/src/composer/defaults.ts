@@ -163,8 +163,11 @@ export function createDefaultDraft(input: CreateDraftInput): ClaimDraft {
   )
 }
 
-/** Terms are frozen once `create_market` confirmed (spec §10). */
+/** Terms are frozen once `create_market` confirmed (spec §10), or once the claim's market is recorded. */
 export function isDraftFrozen(draft: ClaimDraft | undefined): boolean {
+  // A recorded market is on chain too, also when its createClaim confirmation never reached this page (adopted from
+  // ClaimRegistry after a reload).
+  if (draft?.publication?.marketAddress) return true
   return Boolean(draft?.publication?.steps?.some((s) => s.id === 'create_market' && s.status === 'confirmed'))
 }
 
