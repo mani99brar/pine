@@ -1,6 +1,7 @@
 /** Oracle, funding and exit actions: plan checks before the wallet, exact values, exact reports. */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import { QueryClient } from '@tanstack/react-query'
 import { PlanVerificationError, type Address, type Hex32 } from '@pine/core/pine-shared'
 import { useWallet, demoWalletStore } from '../src/wallet'
 import { __resetTxRunners } from '../src/tx/use-tx-runner'
@@ -726,6 +727,31 @@ describe('useApiFunding', () => {
     act(() => result.current.funding.discardQuote())
     expect(result.current.funding.invalid).toEqual({ budget: false, lowerPrice: false, upperPrice: false })
     expect(fake.of(/\/funding\/plans\/ladder$/)).toEqual([])
+  })
+
+  it('refreshes holdings when the ladder is done, and again once Pine’s 10 s positions cache has expired', async () => {
+    const invalidate = vi.spyOn(QueryClient.prototype, 'invalidateQueries')
+    const portfolioRefreshes = () => invalidate.mock.calls.filter(([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(['pine', 'portfolio'])).length
+    // A fake clock for the waits: polling goes on at once, the long waits are held until the test lets them pass.
+    const held: { ms: number; pass(): void }[] = []
+    const sleep = (ms: number) => (ms < 10_000 ? Promise.resolve() : new Promise<void>((pass) => held.push({ ms, pass })))
+    const { result } = renderHook(() => ({ funding: useApiFunding(MARKET, { sleep, pollIntervalMs: 1, now: () => clock }), wallet: useWallet() }), { wrapper })
+    const quote = await quoted(result)
+    expect(portfolioRefreshes()).toBe(0)
+    await act(async () => {
+      void result.current.funding.fund({ quote, spendingLimitWei: 200n * XDAI })
+    })
+    await waitFor(() => expect(result.current.funding.plan?.state).toBe('confirmed'))
+    const early = portfolioRefreshes()
+    expect(early).toBeGreaterThanOrEqual(1)
+    // Each early refresh may still be answered from Pine's cache: one more follows after the cache's lifetime.
+    expect(held.length).toBeGreaterThanOrEqual(1)
+    expect(held.every((h) => h.ms > 10_000)).toBe(true)
+    await act(async () => {
+      for (const h of held.splice(0)) h.pass()
+    })
+    await waitFor(() => expect(portfolioRefreshes()).toBeGreaterThan(early))
+    invalidate.mockRestore()
   })
 
   it('refuses a budget above the spending limit without asking Pine', async () => {

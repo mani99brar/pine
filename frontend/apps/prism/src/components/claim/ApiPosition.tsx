@@ -1,7 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { formatUnits, parseUnits } from 'viem'
 import type { Address, ClaimDetail, LiquidityPosition, OutcomePosition, Portfolio } from '@pine/core'
 import { formatAmount, formatPriceCents } from '@pine/core'
@@ -14,7 +14,6 @@ import {
   useApiFunding,
   usePine,
   useWallet,
-  type ApiPlanRunner,
   type LadderQuote,
 } from '@pine/react'
 import { Wallet } from 'lucide-react'
@@ -39,17 +38,6 @@ function useMarketPortfolio(address: Address | undefined, market: Address | unde
     enabled: Boolean(provider && address && market),
     staleTime: 15_000,
   })
-}
-
-/** Refreshes holdings once a plan's wallet steps are done. */
-function useRefreshWhenDone(runner: ApiPlanRunner) {
-  const qc = useQueryClient()
-  const state = runner.runner.state
-  const prev = useRef(state)
-  useEffect(() => {
-    if (prev.current !== 'done' && state === 'done') void qc.invalidateQueries({ queryKey: ['pine', 'portfolio'] })
-    prev.current = state
-  }, [state, qc])
 }
 
 function units(wei: string, maxDecimals = 4): string {
@@ -107,8 +95,8 @@ function LiquidityRow({ l, onWithdraw, busy, canAct }: { l: LiquidityPosition; o
 /** Exits: withdraw an LP position, merge full sets back to xDAI, redeem winning tokens. */
 function Exits({ claim, positions, lps, resolved }: { claim: ClaimDetail; positions: OutcomePosition[]; lps: LiquidityPosition[]; resolved: boolean }) {
   const market = (claim.marketAddress ?? claim.id) as Address
+  // Holdings refresh themselves after a plan (useFundingPlanFlow), past Pine's positions cache.
   const exits = useApiExits(market)
-  useRefreshWhenDone(exits.runner)
   const [amount, setAmount] = useState('')
   const balance = (o: 'yes' | 'no' | 'invalid') => weiOf(positions.find((p) => p.outcome === o)?.balance ?? '0')
   const sets = [balance('yes'), balance('no'), balance('invalid')].reduce((a, b) => (b < a ? b : a))
@@ -197,7 +185,6 @@ function Figure({ label, children }: { label: string; children: React.ReactNode 
 function Ladder({ claim }: { claim: ClaimDetail }) {
   const market = (claim.marketAddress ?? claim.id) as Address
   const funding = useApiFunding(market)
-  useRefreshWhenDone(funding.runner)
   const [budget, setBudget] = useState('')
   const [lower, setLower] = useState('')
   const [upper, setUpper] = useState('')

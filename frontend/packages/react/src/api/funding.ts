@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { toScaled } from '@pine/core'
 import { planFromWire, PlanVerificationError, type Address, type DeploymentManifest, type TxPlan } from '@pine/core/pine-shared'
 import {
@@ -16,6 +17,7 @@ import {
   type LadderRiskFigures,
   type WriteErrorInfo,
 } from '@pine/data'
+import { sleep } from '../internal/util'
 import { useWallet } from '../wallet'
 import type { ApiPlanRunner } from './use-plan-runner'
 import { getSqrtRatioAtTick, isValidTick, MAX_SQRT_RATIO, MIN_SQRT_RATIO, Q192 } from './tick-math'
@@ -225,6 +227,12 @@ export interface FundingFlowContext {
   now: number
 }
 
+/**
+ * Pine serves a wallet's positions from a cache of this lifetime (packages/api funding POSITIONS_CACHE_TTL_MS, 10 s),
+ * plus a second of margin: a refresh after a plan is repeated once this has passed.
+ */
+const POSITIONS_REFRESH_AFTER_MS = 11_000
+
 /** The earliest deadline (ms since the epoch) of a plan's position calls (mint, decreaseLiquidity), if any. */
 function positionDeadlineMs(wire: unknown): number | undefined {
   let earliest: bigint | undefined
@@ -275,11 +283,13 @@ export function useFundingPlanFlow(
   const checkRef = useRef(check)
   const onErrorRef = useRef(onCreateError)
   const clockRef = useRef(options.now)
+  const sleepRef = useRef(options.sleep)
   const latest = useRef({ action, account, claim, manifest })
   useEffect(() => {
     checkRef.current = check
     onErrorRef.current = onCreateError
     clockRef.current = options.now
+    sleepRef.current = options.sleep
     latest.current = { action, account, claim, manifest }
   })
   const nowMs = useCallback(() => (clockRef.current?.() ?? new Date()).getTime(), [])
@@ -336,6 +346,24 @@ export function useFundingPlanFlow(
     intervalMs: options.pollIntervalMs ?? 10_000,
     sleep: options.sleep ? (ms) => options.sleep?.(ms) ?? Promise.resolve() : undefined,
   })
+
+  // Holdings change with the plan: refresh them when the wallet steps are done and when Pine's view of the plan is
+  // final, and once more after Pine's positions cache has expired, since the first refresh may still be answered from it.
+  const qc = useQueryClient()
+  const walletDone = runner.runner.state === 'done'
+  const final = view !== null && FINAL_PLAN_STATES.includes(view.state)
+  useEffect(() => {
+    if (!walletDone && !final) return
+    let cancelled = false
+    const refresh = () => void qc.invalidateQueries({ queryKey: ['pine', 'portfolio'] })
+    refresh()
+    void (sleepRef.current ?? sleep)(POSITIONS_REFRESH_AFTER_MS).then(() => {
+      if (!cancelled) refresh()
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [walletDone, final, qc])
 
   const inFlight = useCallback(() => runnerIsBusy(runner) || runner.runner.steps.some((s) => s.status === 'pending' || s.status === 'awaiting_signature'), [runner])
 
