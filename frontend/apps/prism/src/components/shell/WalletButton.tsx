@@ -14,6 +14,16 @@ import { walletNetworkName } from './wallet-display'
 function PineSessionLine({ address }: { address: string }) {
   const session = usePineSession()
   if (session.status === 'loading' || session.status === 'disabled') return null
+  if (session.status === 'error') {
+    return (
+      <p className="mt-3 text-[0.8125rem] text-lumen-2">
+        Pine could not check your sign-in.{' '}
+        <button type="button" className="link" onClick={() => void session.refresh()}>
+          Try again
+        </button>
+      </p>
+    )
+  }
   if (!session.session) {
     return (
       <p className="mt-3 text-[0.8125rem] text-lumen-2">

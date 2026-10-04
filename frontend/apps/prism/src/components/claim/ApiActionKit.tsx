@@ -6,7 +6,7 @@ import { parseUnits } from 'viem'
 import { shortHash } from '@pine/core'
 import { formatWait, type WriteErrorInfo } from '@pine/data'
 import { usePineSession, useSiweSignIn, useWallet, type ApiPlanRunner } from '@pine/react'
-import { ShieldCheck, Wallet } from 'lucide-react'
+import { RotateCw, ShieldCheck, Wallet } from 'lucide-react'
 import { TxSteps } from '@/components/tx/TxSteps'
 import { Button } from '@/components/ui/Button'
 import { Notice, Skeleton } from '@/components/ui/primitives'
@@ -54,6 +54,17 @@ export function ApiSessionGate({ children, purpose, className }: { children?: Re
         <p className="text-[0.9rem] text-lumen-2">Connect a wallet to {purpose}.</p>
         <Button variant="glass" size="sm" className="mt-3" onClick={() => wallet.connect()} icon={<Wallet size={14} aria-hidden />}>
           Connect wallet
+        </Button>
+      </div>
+    )
+  }
+  if (session.status === 'error') {
+    // Unknown, not signed out: offering a sign-in here would start a second session.
+    return (
+      <div className={className}>
+        <p className="text-[0.9rem] text-lumen-2">Pine could not check your session, so it cannot {purpose} yet.</p>
+        <Button variant="glass" size="sm" className="mt-3" onClick={() => void session.refresh()} icon={<RotateCw size={14} aria-hidden />}>
+          Try again
         </Button>
       </div>
     )

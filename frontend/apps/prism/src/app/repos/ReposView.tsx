@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { useMemo, useState, type ReactNode } from 'react'
 import type { RepoSummary } from '@pine/core'
 import { formatAmount, formatRelative } from '@pine/core'
-import { useAccount, useClaims, useDebouncedValue, useGitHubLink, useGitHubRepoSearch, useGitHubViewerRepos, usePine } from '@pine/react'
+import { useAccount, useClaims, useDebouncedValue, useGitHubRepoSearch, useGitHubViewerRepos, usePine } from '@pine/react'
 import { GitPullRequest, Link2, Lock, Search, Star } from 'lucide-react'
 import { ApiIdentityGate, identityReady, useApiIdentity, useIdentityActions } from '@/components/composer/api/identity'
 import { Button, ButtonLink } from '@/components/ui/Button'
@@ -20,8 +20,8 @@ const SUGGESTIONS = ['kleros', 'acme-labs', 'northwind', 'tidewater', 'quarry']
  */
 export function ApiRepoGate({ reason, className }: { reason: ReactNode; className?: string }) {
   const id = useApiIdentity()
-  const gh = useGitHubLink()
-  const { linkGitHub } = useIdentityActions()
+  // Busy and error come from the same useGitHubLink instance that links.
+  const { linkGitHub, github: gh } = useIdentityActions()
   if (id.status !== 'signed_in' || id.github) return <ApiIdentityGate need="github" reason={reason} className={className} />
   return (
     <section className={cn('glass cut-lg p-5 sm:p-6', className)} aria-label="Link your GitHub account">

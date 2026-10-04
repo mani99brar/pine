@@ -2,7 +2,6 @@
 
 import { useState, type ReactNode } from 'react'
 import type { WriteErrorInfo } from '@pine/data'
-import { useGitHubLink } from '@pine/react'
 import { Button } from '@/components/ui/Button'
 import { Notice } from '@/components/ui/primitives'
 import { useNowMs } from '@/lib/hooks'
@@ -49,7 +48,6 @@ export function WriteErrorNotice(props: WriteErrorNoticeProps) {
 }
 
 function ErrorNotice({ error, onRetry, onRepreview, saveDraft, className }: WriteErrorNoticeProps) {
-  const gh = useGitHubLink()
   const identity = useIdentityActions(saveDraft)
   const left = useCountdown(error.action === 'retry_later' ? error.retryAfter : undefined)
   let action: ReactNode = null
@@ -61,7 +59,7 @@ function ErrorNotice({ error, onRetry, onRepreview, saveDraft, className }: Writ
     )
   } else if (error.action === 'link_github') {
     action = (
-      <Button size="sm" onClick={identity.linkGitHub} loading={gh.busy}>
+      <Button size="sm" onClick={identity.linkGitHub} loading={identity.github.busy}>
         Link GitHub again
       </Button>
     )
@@ -96,6 +94,9 @@ function ErrorNotice({ error, onRetry, onRepreview, saveDraft, className }: Writ
           <summary className="cursor-pointer">Details from Pine</summary>
           <span className="untrusted [white-space:normal]">{error.detail}</span>
         </details>
+      )}
+      {error.action === 'link_github' && identity.github.error && (
+        <span className="untrusted mt-1.5 block text-[0.84375rem]">GitHub could not be linked: {identity.github.error}</span>
       )}
     </Notice>
   )

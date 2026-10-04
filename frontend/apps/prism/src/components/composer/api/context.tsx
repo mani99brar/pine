@@ -17,6 +17,8 @@ export function useApiPublication(): ApiPublish | null {
 
 /** Terms are locked once a createClaim transaction may land, until Pine reports that the publication failed or expired. */
 export function publicationLocked(pub: ApiPublish): boolean {
+  // ClaimRegistry already records this document for this creator (adopted after a reload): the terms are on chain.
+  if (pub.market !== null) return true
   const state = pub.publication?.state
   if (state === 'submitted' || state === 'mined' || state === 'confirmed') return true
   if (state === 'failed' || state === 'expired') return false
