@@ -11,7 +11,7 @@ import { Initials } from '@/components/shell/SiteHeader'
 import { Button, ExternalLink } from '@/components/ui/Button'
 import { Dialog, HashChip } from '@/components/ui/interactive'
 import { FormField, Notice, Panel, Skeleton } from '@/components/ui/primitives'
-import { checksummed, shortAddress } from '@/components/shell/wallet-display'
+import { checksummed, shortAddress, walletNetworkName } from '@/components/shell/wallet-display'
 import { useMounted } from '@/lib/hooks'
 import { ApiSignIn, SessionCheckFailed } from './ApiSignIn'
 import { focusAfter, takeFocus } from './focus'
@@ -92,7 +92,7 @@ function WalletPanel({ a, backend, session }: { a: UseAccountResult; backend: Ba
         </Notice>
       ) : wallet.chainId !== undefined && wallet.chainId !== chain.id ? (
         <p className="help mt-4">
-          Your wallet is on {getChainOrDefault(wallet.chainId).name}. It is asked to switch to {chain.name} when you sign a transaction.
+          Your wallet is on another network: {walletNetworkName(wallet.chainId)}. It is asked to switch to {chain.name} when you sign a transaction.
         </p>
       ) : null}
 

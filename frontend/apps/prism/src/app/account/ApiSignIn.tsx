@@ -4,13 +4,12 @@ import Link from 'next/link'
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { SiweStep } from '@pine/react'
 import { useAccount, usePendingSiweTerms, useWallet, useWalletRestoring, useWalletSwitchNotice } from '@pine/react'
-import { getChainOrDefault } from '@pine/core/chains'
 import { Check, LogIn, ShieldCheck, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
 import { HashChip } from '@/components/ui/interactive'
 import { Notice } from '@/components/ui/primitives'
 import { CrystalGlyph } from '@/components/crystal/CrystalGlyph'
-import { checksummed, shortAddress } from '@/components/shell/wallet-display'
+import { checksummed, shortAddress, walletNetworkName } from '@/components/shell/wallet-display'
 import { cn } from '@/lib/cn'
 import { focusAfter, takeFocus } from './focus'
 
@@ -132,7 +131,7 @@ export function ApiSignIn() {
             {address ? (
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <HashChip value={checksummed(address)} display={shortAddress(address)} name="Connected wallet" />
-                <span className="text-[0.84375rem] text-lumen-3">{getChainOrDefault(wallet.chainId).name}</span>
+                <span className="text-[0.84375rem] text-lumen-3">{walletNetworkName(wallet.chainId)}</span>
               </div>
             ) : restoring ? (
               <p className="help mt-1" role="status">

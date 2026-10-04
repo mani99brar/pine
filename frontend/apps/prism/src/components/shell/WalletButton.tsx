@@ -4,11 +4,11 @@ import Link from 'next/link'
 import { Popover } from 'radix-ui'
 import { usePine, usePineSession, useWallet, useWalletRestoring } from '@pine/react'
 import { formatAmount, shortHash } from '@pine/core'
-import { getChainOrDefault } from '@pine/core/chains'
 import { Wallet } from 'lucide-react'
 import { useMounted } from '@/lib/hooks'
 import { cn } from '@/lib/cn'
 import { HashChip } from '@/components/ui/interactive'
+import { walletNetworkName } from './wallet-display'
 
 /** `api` mode: whether this wallet is the one signed in to Pine (connecting a wallet does not sign in). */
 function PineSessionLine({ address }: { address: string }) {
@@ -65,7 +65,6 @@ export function WalletButton({ className, block, beforeModal }: { className?: st
       </button>
     )
   }
-  const chain = getChainOrDefault(w.chainId)
   return (
     <Popover.Root>
       <Popover.Trigger asChild>
@@ -90,7 +89,7 @@ export function WalletButton({ className, block, beforeModal }: { className?: st
               <dd className="tnum mt-0.5 text-lumen">{w.nativeBalance ? `${formatAmount(w.nativeBalance.amount, { maxDecimals: 3 })} ${w.nativeBalance.symbol}` : 'Unknown'}</dd>
             </div>
           </dl>
-          <p className="mt-3 text-[0.8125rem] text-lumen-3">Network: {chain.name}</p>
+          <p className="mt-3 text-[0.8125rem] text-lumen-3">Network: {walletNetworkName(w.chainId)}</p>
           {env.dataSource === 'api' && <PineSessionLine address={w.address} />}
           <button type="button" onClick={() => w.disconnect()} className="btn btn-ghost btn-sm mt-3 w-full">
             Disconnect

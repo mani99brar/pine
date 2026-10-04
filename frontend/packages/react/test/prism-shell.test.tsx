@@ -135,6 +135,25 @@ afterEach(() => {
   document.body.removeAttribute('style')
 })
 
+describe('the wallet network label', () => {
+  it('names a configured network and never calls an unsupported one Gnosis', async () => {
+    const { walletNetworkName } = await prism<{ walletNetworkName: (chainId: number | undefined) => string }>('components/shell/wallet-display.ts')
+    expect(walletNetworkName(100)).toBe('Gnosis')
+    expect(walletNetworkName(1)).toBe('Ethereum')
+    expect(walletNetworkName(137)).toBe('Unsupported network (chain id 137)')
+    expect(walletNetworkName(undefined)).toBe('Unknown network')
+  })
+
+  it('the header wallet popover says a Polygon wallet is on an unsupported network', async () => {
+    state.wallet = { ...state.wallet, address: A, chainId: 137, isConnected: true }
+    const { WalletButton } = await prism<{ WalletButton: ComponentType }>('components/shell/WalletButton.tsx')
+    render(<WalletButton />)
+    fireEvent.click(screen.getByRole('button', { name: `Wallet ${A}` }))
+    expect(screen.getByText('Network: Unsupported network (chain id 137)')).toBeTruthy()
+    expect(screen.queryByText(/Gnosis/)).toBeNull()
+  })
+})
+
 describe('the mobile navigation drawer', () => {
   async function openDrawer() {
     const { SiteHeader } = await prism<{ SiteHeader: ComponentType }>('components/shell/SiteHeader.tsx')
