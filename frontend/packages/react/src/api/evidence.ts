@@ -510,6 +510,15 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
     [storage, m],
   )
 
+  // Seals written by another tab of this browser (a commit or a reveal there) show here too.
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === null || e.key.startsWith(SEAL_PREFIX) || e.key.startsWith(SEAL_INDEX_PREFIX)) setSealVersion((v) => v + 1)
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
   const recordPlan = useCallback(
     (planId: string) => {
       const current = latest.current.action

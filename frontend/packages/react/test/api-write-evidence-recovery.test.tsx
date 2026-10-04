@@ -243,3 +243,22 @@ describe('a commit whose confirmation this browser never saw', () => {
     expect(result.current.ev.runner.runner.steps.every((s) => !s.txHash)).toBe(true)
   })
 })
+
+describe('seals of another tab', () => {
+  it('show without a reload, and so does their reveal', async () => {
+    const { result } = render()
+    await connect(result)
+    expect(result.current.ev.seals).toEqual([])
+    // Another tab commits: it writes the seal, and this tab hears a 'storage' event.
+    const seal = await startedSeal({ committedAt: new Date(NOW).toISOString(), submissionId: '7' })
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: sealStorageKey(MARKET, seal.contentSha256, ACCOUNT) }))
+    })
+    expect(result.current.ev.seals[0]?.state).toBe('committed')
+    writeSeal(getBrowserStorage(), { ...seal, committedAt: new Date(NOW).toISOString(), submissionId: '7', revealTxHash: MINED_TX as `0x${string}`, revealedAt: new Date(NOW).toISOString() })
+    act(() => {
+      window.dispatchEvent(new StorageEvent('storage', { key: sealStorageKey(MARKET, seal.contentSha256, ACCOUNT) }))
+    })
+    expect(result.current.ev.seals[0]?.state).toBe('revealed')
+  })
+})
