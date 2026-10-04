@@ -10,7 +10,8 @@ import { useMounted } from '@/lib/hooks'
 
 /**
  * Where the backend's GitHub callback lands (`/settings?github=linked|error`): the outcome, read back from the session
- * (the callback rotated the session cookie), then on to the account page.
+ * (the callback rotated the session cookie), then on to the account page. The query only says how the callback ended:
+ * without a session the page cannot confirm a link (it may have been removed since, on Back or reload), so it says so.
  */
 export function GitHubLinkOutcome({ outcome }: { outcome: 'linked' | 'error' }) {
   const mounted = useMounted()
@@ -35,12 +36,16 @@ export function GitHubLinkOutcome({ outcome }: { outcome: 'linked' | 'error' }) 
     announceSessionChange()
   }, [read])
 
+  let title = outcome === 'linked' ? 'GitHub link' : 'GitHub was not linked'
   let detail: string
   if (loading) detail = 'Checking your session.'
+  else if (a.status === 'error') detail = 'Pine could not check your session, so the GitHub link cannot be confirmed here. Your account page shows the current state.'
   else if (outcome === 'linked') {
-    if (signedIn && login) detail = `Your wallet ${wallet ?? ''} is linked to GitHub as @${login}.`
-    else if (signedIn) detail = 'GitHub confirmed the link, but your session does not show it yet. Your account page shows the current state.'
-    else detail = 'Your Pine session has ended. Sign in with your wallet on your account page; the GitHub link is kept.'
+    if (signedIn && login) {
+      title = 'GitHub linked'
+      detail = `Your wallet ${wallet ?? ''} is linked to GitHub as @${login}.`
+    } else if (signedIn) detail = 'GitHub confirmed the link, but your session does not show it yet. Your account page shows the current state.'
+    else detail = 'You are not signed in to Pine, so the GitHub link cannot be confirmed here. Sign in with your wallet on your account page to see it.'
   } else if (signedIn && login) {
     detail = `Nothing changed: your wallet is still linked to GitHub as @${login}.`
   } else {
@@ -52,7 +57,7 @@ export function GitHubLinkOutcome({ outcome }: { outcome: 'linked' | 'error' }) 
     <div className="grid items-center gap-10 py-12 sm:py-16 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
       <div className="glass cut-xl p-6 sm:p-8">
         <h1 ref={heading} tabIndex={-1} className="t-h2 focus:outline-none">
-          {outcome === 'linked' ? 'GitHub linked' : 'GitHub was not linked'}
+          {title}
         </h1>
         <p className="mt-3 max-w-[60ch] text-lumen-2" role="status" aria-live="polite">
           {detail}
