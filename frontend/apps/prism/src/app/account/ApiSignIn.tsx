@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect, useRef, type ReactNode } from 'react'
 import type { SiweStep } from '@pine/react'
-import { useAccount, usePendingSiweTerms, useWallet, useWalletSwitchNotice } from '@pine/react'
+import { useAccount, usePendingSiweTerms, useWallet, useWalletRestoring, useWalletSwitchNotice } from '@pine/react'
 import { getChainOrDefault } from '@pine/core/chains'
 import { Check, LogIn, ShieldCheck, Wallet } from 'lucide-react'
 import { Button } from '@/components/ui/Button'
@@ -63,6 +63,7 @@ function Step({ n, done, title, children }: { n: number; done: boolean; title: s
 export function ApiSignIn() {
   const a = useAccount()
   const wallet = useWallet()
+  const restoring = useWalletRestoring()
   const pendingTerms = usePendingSiweTerms()
   const { notice, dismiss } = useWalletSwitchNotice()
   const siwe = a.backend?.siwe
@@ -114,6 +115,10 @@ export function ApiSignIn() {
                 <HashChip value={checksummed(address)} display={shortAddress(address)} name="Connected wallet" />
                 <span className="text-[0.84375rem] text-lumen-3">{getChainOrDefault(wallet.chainId).name}</span>
               </div>
+            ) : restoring ? (
+              <p className="help mt-1" role="status">
+                Reconnecting the wallet you used before…
+              </p>
             ) : (
               <>
                 <p className="help mt-1">A wallet that signs with its own key. Smart-contract wallets cannot sign in.</p>

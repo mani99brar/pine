@@ -4,13 +4,14 @@
  * else is ever connected. Each "page load" is a new wagmi config over the same storage, as in a browser.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, render, screen } from '@testing-library/react'
 import { createConfig, createStorage, http, type Config } from 'wagmi'
 import { injected } from 'wagmi/connectors'
 import { connect, disconnect } from 'wagmi/actions'
 import { gnosis } from 'viem/chains'
 import type { EIP1193Provider } from 'viem'
 import { PineProviders, createPineQueryClient } from '../src/providers'
+import { useWalletRestoring } from '../src/wallet/reconnect'
 
 const A = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' as const
 const PROMPTS = ['eth_requestAccounts', 'wallet_requestPermissions']
@@ -68,31 +69,45 @@ function pageConfig(storage: ReturnType<typeof memoryStorage>, provider: EIP1193
     transports: { [gnosis.id]: http('http://127.0.0.1:1') },
     storage,
     multiInjectedProviderDiscovery: false,
+    // As in createPineWagmiConfig: wagmi restores the persisted connection after mount.
+    ssr: true,
   })
+}
+
+function Restoring() {
+  return <output data-testid="restoring">{String(useWalletRestoring())}</output>
 }
 
 function load(config: Config) {
   render(
     <PineProviders appName="Pine test" env={{ dataSource: 'api', demoWallet: false }} wagmiConfig={config} queryClient={createPineQueryClient()}>
-      <div />
+      <Restoring />
     </PineProviders>,
   )
 }
 
-/** Connects on a first page load, as the user did before reloading. */
+const restoring = () => screen.getByTestId('restoring').textContent
+
+/** Connects on a first page load (left open), as the user did before reloading. */
 async function connectedBefore(storage: ReturnType<typeof memoryStorage>, provider: EIP1193Provider): Promise<Config> {
   const first = pageConfig(storage, provider)
+  load(first)
+  await advance(50)
   const [connector] = first.connectors
   if (!connector) throw new Error('no connector')
-  await connect(first, { connector })
+  await act(async () => void (await connect(first, { connector })))
   expect(first.state.status).toBe('connected')
   return first
 }
+
+/** Leaves the page: the next load() is a reload. */
+const leave = () => cleanup()
 
 const advance = (ms: number) => act(async () => void (await vi.advanceTimersByTimeAsync(ms)))
 
 beforeEach(() => {
   vi.useFakeTimers()
+  window.localStorage.clear()
 })
 
 afterEach(() => {
@@ -105,6 +120,7 @@ describe('WalletReconnect', () => {
     const storage = memoryStorage()
     const wallet = extensionWallet()
     await connectedBefore(storage, wallet.provider)
+    leave()
 
     wallet.state.ready = false
     const callsAtReload = wallet.state.calls.length
@@ -125,6 +141,7 @@ describe('WalletReconnect', () => {
     const storage = memoryStorage()
     const wallet = extensionWallet()
     await connectedBefore(storage, wallet.provider)
+    leave()
 
     wallet.state.ready = false
     const page = pageConfig(storage, wallet.provider)
@@ -140,6 +157,7 @@ describe('WalletReconnect', () => {
     const storage = memoryStorage()
     const wallet = extensionWallet()
     await connectedBefore(storage, wallet.provider)
+    leave()
 
     wallet.state.ready = false
     const page = pageConfig(storage, wallet.provider)
@@ -152,10 +170,11 @@ describe('WalletReconnect', () => {
     expect(page.state.status).toBe('connected')
 
     // A wallet locked through every retry, unlocked later: focus brings it back.
+    leave()
     const locked = extensionWallet()
     const otherStorage = memoryStorage()
     await connectedBefore(otherStorage, locked.provider)
-    cleanup()
+    leave()
     locked.state.ready = false
     const later = pageConfig(otherStorage, locked.provider)
     load(later)
@@ -171,7 +190,8 @@ describe('WalletReconnect', () => {
     const storage = memoryStorage()
     const wallet = extensionWallet()
     const first = await connectedBefore(storage, wallet.provider)
-    await disconnect(first)
+    await act(async () => void (await disconnect(first)))
+    leave()
 
     const page = pageConfig(storage, wallet.provider)
     load(page)
@@ -193,5 +213,50 @@ describe('WalletReconnect', () => {
     await advance(50)
     expect(wallet.state.calls.slice(settled)).toEqual([])
     expect(wallet.state.calls.filter((m) => PROMPTS.includes(m))).toEqual([])
+  })
+
+  describe('useWalletRestoring', () => {
+    it('says "restoring" while a wallet connected before the reload wakes up, and stops once it is back', async () => {
+      const storage = memoryStorage()
+      const wallet = extensionWallet()
+      await connectedBefore(storage, wallet.provider)
+      leave()
+      wallet.state.ready = false
+      load(pageConfig(storage, wallet.provider))
+      await advance(200)
+      expect(restoring()).toBe('true')
+      wallet.state.ready = true
+      await advance(600)
+      expect(restoring()).toBe('false')
+    })
+
+    it('gives up saying "restoring" after the UI window when the wallet stays unavailable', async () => {
+      const storage = memoryStorage()
+      const wallet = extensionWallet()
+      await connectedBefore(storage, wallet.provider)
+      leave()
+      wallet.state.ready = false
+      load(pageConfig(storage, wallet.provider))
+      await advance(200)
+      expect(restoring()).toBe('true')
+      await advance(4_000)
+      expect(restoring()).toBe('false')
+    })
+
+    it('never says "restoring" in a fresh browser or after the user disconnected', async () => {
+      load(pageConfig(memoryStorage(), extensionWallet().provider))
+      await advance(200)
+      expect(restoring()).toBe('false')
+      cleanup()
+
+      const storage = memoryStorage()
+      const wallet = extensionWallet()
+      const first = await connectedBefore(storage, wallet.provider)
+      await act(async () => void (await disconnect(first)))
+      leave()
+      load(pageConfig(storage, wallet.provider))
+      await advance(200)
+      expect(restoring()).toBe('false')
+    })
   })
 })

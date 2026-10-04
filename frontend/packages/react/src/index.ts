@@ -43,6 +43,7 @@ export {
   type WalletState,
   type DemoWalletState,
 } from './wallet'
+export { useWalletRestoring } from './wallet/reconnect'
 
 // tx runner
 export { useTxRunner, __resetTxRunners, getTxMachine, type TxRunner, type UseTxRunnerOptions } from './tx/use-tx-runner'

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { Popover } from 'radix-ui'
-import { usePine, usePineSession, useWallet } from '@pine/react'
+import { usePine, usePineSession, useWallet, useWalletRestoring } from '@pine/react'
 import { formatAmount, shortHash } from '@pine/core'
 import { getChainOrDefault } from '@pine/core/chains'
 import { Wallet } from 'lucide-react'
@@ -36,9 +36,19 @@ function PineSessionLine({ address }: { address: string }) {
 export function WalletButton({ className, block }: { className?: string; block?: boolean }) {
   const mounted = useMounted()
   const w = useWallet()
+  const restoring = useWalletRestoring()
   const { env } = usePine()
   if (!mounted) {
     return <span className={cn('skeleton inline-block h-9 w-32', block && 'w-full', className)} aria-hidden />
+  }
+  if ((!w.isConnected || !w.address) && restoring && !w.isDemo) {
+    // A wallet connected before this load is still waking up (a slow extension): not "disconnected" yet.
+    return (
+      <span role="status" className={cn('btn btn-glass btn-sm cursor-default gap-2', block && 'w-full', className)}>
+        <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-lumen-3" />
+        <span className="text-[0.78rem] text-lumen-2">Reconnecting wallet</span>
+      </span>
+    )
   }
   if (!w.isConnected || !w.address) {
     return (
