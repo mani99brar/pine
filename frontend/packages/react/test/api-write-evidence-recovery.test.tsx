@@ -1,4 +1,8 @@
-/** useApiEvidence recovery: empty files are refused before a commit, and a seal that already holds one says why. */
+/**
+ * useApiEvidence recovery: empty files are refused before a commit; a seal whose commit confirmation was lost (a reload
+ * while the wallet prompt was open) is reconciled with Pine's read model by its commitment and never committed twice;
+ * seals written by another tab show without a reload.
+ */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import { computeEvidenceCommitment, encodeEvidenceManifest, type Address, type Hex32 } from '@pine/core/pine-shared'
@@ -176,5 +180,66 @@ describe('a seal committed with an empty file', () => {
     })
     expect(result.current.ev.error?.message).toMatch(/does not store empty files, so empty\.txt cannot be uploaded/)
     expect(fake.of(/^\/api\/v1\/evidence\/(artifacts|manifests|reveal-template)$/)).toEqual([])
+  })
+})
+
+describe('a commit whose confirmation this browser never saw', () => {
+  it('is committed once Pine indexed its commitment, and its reveal is offered', async () => {
+    const seal = await startedSeal()
+    state.indexed = [{ commitment: seal.commitment }]
+    const { result } = render()
+    await connect(result)
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('committed'))
+    expect(result.current.ev.seals[0]).toMatchObject({ submissionId: '7', revealOpen: true, commitTxHash: MINED_TX })
+    expect(readSeal(getBrowserStorage(), MARKET, seal.contentSha256, ACCOUNT)?.committedAt).toBe(new Date((NOW_S - 30) * 1000).toISOString())
+    expect(fake.of(/\/evidence\/plans\/commit$/)).toEqual([])
+  })
+
+  it('is followed until Pine indexes it', async () => {
+    const seal = await startedSeal()
+    const { result } = render()
+    await connect(result)
+    await waitFor(() => expect(fake.of(/\/evidence$/).length).toBeGreaterThan(1))
+    expect(result.current.ev.seals[0]?.state).toBe('committing')
+    state.indexed = [{ commitment: seal.commitment }]
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('committed'))
+  })
+
+  it('stays unconfirmed when only another wallet or another registry has that commitment', async () => {
+    const seal = await startedSeal()
+    state.indexed = [
+      { commitment: seal.commitment, submitter: OTHER },
+      { commitment: seal.commitment, registry: `0x${'99'.repeat(20)}` as Address },
+    ]
+    const { result } = render()
+    await connect(result)
+    await waitFor(() => expect(fake.of(/\/evidence$/).length).toBeGreaterThan(1))
+    expect(result.current.ev.seals[0]?.state).toBe('committing')
+    expect(result.current.ev.seals[0]?.submissionId).toBeUndefined()
+  })
+
+  it('SEC-TX-08 committing the same evidence again adopts the indexed submission instead of sending a second commit', async () => {
+    const seal = await startedSeal()
+    state.indexed = [{ commitment: seal.commitment }]
+    let release: () => void = () => undefined
+    state.listGate = new Promise<void>((r) => (release = r))
+    const { result } = render()
+    await connect(result)
+    await act(async () => {
+      expect(await result.current.ev.prepare(composition())).not.toBeNull()
+    })
+    expect(result.current.ev.prepared?.contentSha256).toBe(seal.contentSha256)
+    let done: Promise<void> = Promise.resolve()
+    act(() => {
+      done = result.current.ev.commit()
+    })
+    await act(async () => {
+      release()
+      await done
+    })
+    await waitFor(() => expect(result.current.ev.seals[0]?.state).toBe('committed'))
+    expect(result.current.ev.error?.message).toMatch(/already committed/)
+    expect(fake.of(/\/evidence\/plans\/commit$/)).toEqual([])
+    expect(result.current.ev.runner.runner.steps.every((s) => !s.txHash)).toBe(true)
   })
 })

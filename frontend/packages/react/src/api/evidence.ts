@@ -354,6 +354,15 @@ export async function findCommittedSubmission(api: PineWriteApi, market: Address
   return null
 }
 
+/**
+ * The indexed submission of a seal whose commit confirmation this browser did not record (the page was reloaded or
+ * closed while the wallet prompt was open or the transaction pending): the caller's commitment, in the seal's registry.
+ */
+export async function findSealSubmission(api: PineWriteApi, seal: EvidenceSeal): Promise<RevealCandidate | null> {
+  const found = await findCommittedSubmission(api, seal.market, seal.submitter, seal.commitment)
+  return found && found.registry.toLowerCase() === seal.registry ? found : null
+}
+
 /** Pine refuses empty uploads: an empty artifact (only an earlier seal can hold one) can never be uploaded. */
 function unavailable(a: EvidenceManifest['artifacts'][number]): boolean {
   return a.size === 0 || !sessionArtifacts.has(a.sha256)
@@ -582,6 +591,26 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
   /** An action whose transactions may still land cannot be replaced. */
   const inFlight = useCallback(() => runnerIsBusy(runner) || runner.runner.steps.some((s) => s.status === 'pending' || s.status === 'awaiting_signature'), [runner])
 
+  /**
+   * Records the indexed submission of a seal as its commit. When the stored action is that commit and nothing of it is
+   * in flight here, its stale progress is dropped, so it can never be sent again.
+   */
+  const adoptSubmission = useCallback(
+    (submitter: Address, seal: EvidenceSeal, submission: RevealCandidate) => {
+      updateSeal(submitter, seal.contentSha256, {
+        committedAt: new Date(submission.committedAt * 1000).toISOString(),
+        submissionId: submission.submissionId,
+        commitTxHash: seal.commitTxHash ?? (submission.committedTxHash.toLowerCase() as Hex),
+      })
+      const current = latest.current.action
+      if (current?.kind === 'commit' && current.contentSha256 === seal.contentSha256 && !inFlight()) {
+        runner.discard()
+        setAction(null)
+      }
+    },
+    [updateSeal, inFlight, runner, setAction],
+  )
+
   const start = useCallback(
     async (next: StoredEvidenceAction) => {
       if (inFlight()) {
@@ -662,6 +691,22 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
       setError({ code: 'UNKNOWN', action: 'none', message: 'This evidence is already committed. Reveal it before the reveal deadline.' })
       return
     }
+    if (existing && api && (existing.commitPlanId || existing.commitTxHash)) {
+      // A commit of this seal was started before and its progress may be lost (a reload while the wallet prompt was
+      // open): when Pine indexed its commitment, adopt that submission instead of sending a second commit.
+      let submission: RevealCandidate | null
+      try {
+        submission = await findSealSubmission(api, existing)
+      } catch (e) {
+        setError(describeWriteError(e))
+        return
+      }
+      if (submission) {
+        adoptSubmission(acct, existing, submission)
+        setError({ code: 'UNKNOWN', action: 'none', message: 'This evidence is already committed on chain. Reveal it before the reveal deadline.' })
+        return
+      }
+    }
     if (!existing) {
       // The salt is stored before any request, so a crash never leaves a commitment without its salt.
       const salt = newEvidenceSalt()
@@ -671,7 +716,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
       setSealVersion((v) => v + 1)
     }
     await start({ v: 1, kind: 'commit', contentSha256: p.contentSha256 })
-  }, [checkOpen, storage, m, env.defaultChainId, start])
+  }, [checkOpen, storage, m, env.defaultChainId, api, adoptSubmission, start])
 
   const reveal = useCallback(
     async (contentSha256: Hex32, opts: { files?: Blob[]; acknowledgeUnavailableContent?: boolean } = {}) => {
@@ -758,12 +803,35 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
     setAction(null)
   }, [inFlight, runner, setAction])
 
-  const seals = useMemo<SealedEvidenceView[]>(() => {
+  const stored = useMemo<EvidenceSeal[]>(() => {
     void sealVersion
-    if (!account) return []
+    return account ? listSeals(storage, m, account) : []
+  }, [sealVersion, account, storage, m])
+
+  // Commits started here whose confirmation this browser did not record are followed in Pine's read model by their
+  // commitment, except the commit this browser is sending now or that its wallet refused (nothing was sent).
+  const ownCommit = action?.kind === 'commit' && (runnerIsBusy(runner) || runner.runner.steps.some((s) => s.status === 'failed' && !s.txHash)) ? action.contentSha256 : null
+  const unconfirmed = stored.filter((s) => !s.committedAt && !s.revealTxHash && (s.commitPlanId || s.commitTxHash) && s.contentSha256 !== ownCommit)
+  usePolledStatus<{ seal: EvidenceSeal; submission: RevealCandidate | null }[]>({
+    key: account && api && unconfirmed.length > 0 ? `evidence-seals:${m}:${account}:${unconfirmed.map((s) => s.commitment).join(',')}` : null,
+    load: async () => {
+      const client = requireWriteApi(api)
+      const found: { seal: EvidenceSeal; submission: RevealCandidate | null }[] = []
+      for (const seal of unconfirmed) found.push({ seal, submission: await findSealSubmission(client, seal) })
+      return found
+    },
+    done: (v) => v.every((f) => f.submission !== null),
+    onValue: (v) => {
+      for (const { seal, submission } of v) if (submission) adoptSubmission(seal.submitter, seal, submission)
+    },
+    intervalMs: options.pollIntervalMs ?? 10_000,
+    sleep: options.sleep ? (ms) => options.sleep?.(ms) ?? Promise.resolve() : undefined,
+  })
+
+  const seals = useMemo<SealedEvidenceView[]>(() => {
     const revealDeadline = claim?.revealDeadline ?? null
     const now = nowSec()
-    return listSeals(storage, m, account).map((s) => {
+    return stored.map((s) => {
       const state: SealedEvidenceView['state'] = s.revealedAt ? 'revealed' : s.revealTxHash ? 'revealing' : s.committedAt ? 'committed' : s.commitTxHash || s.commitPlanId ? 'committing' : 'sealed'
       return {
         contentSha256: s.contentSha256,
@@ -778,7 +846,7 @@ export function useApiEvidence(market: Address, options: UseApiEvidenceOptions =
         missingArtifacts: s.manifest.artifacts.filter(unavailable).map((a) => ({ name: a.name, sha256: a.sha256 as Hex32, size: a.size })),
       }
     })
-  }, [sealVersion, account, claim?.revealDeadline, storage, m, nowSec, runner.runner.state])
+  }, [stored, claim?.revealDeadline, nowSec, runner.runner.state])
 
   return {
     claim,
