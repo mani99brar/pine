@@ -21,15 +21,22 @@ export async function connectAndSignIn(page: Page): Promise<void> {
     await page.getByRole('button', { name: /pine test wallet|browser wallet|injected/i }).first().click()
   }
   await signIn.click()
-  // Signed in: the backend session exists (the page now offers GitHub linking and sign-out).
-  await expect(page.getByRole('button', { name: /link github/i })).toBeVisible()
+  // Signed in: the backend session exists (the page now offers GitHub linking, or unlinking, and sign-out).
+  await expect(page.getByRole('button', { name: /^(un)?link github$/i }).first()).toBeVisible()
   await expect(page.getByRole('button', { name: /^sign out$/i })).toBeVisible()
   await expect(page.getByText(new RegExp(short, 'i')).first()).toBeVisible()
 }
 
 export async function linkGitHub(page: Page): Promise<void> {
+  // The stack's database keeps links between runs: unlink first (which signs out), so the link flow really runs.
+  const unlink = page.getByRole('button', { name: /^unlink github$/i })
+  if (await unlink.isVisible()) {
+    await unlink.click()
+    await page.getByRole('button', { name: /^unlink github and sign out$/i }).click()
+    await page.getByRole('button', { name: /sign in with ethereum/i }).click()
+  }
   await caption(page, 'Link GitHub through the backend (zero-permission app; PKCE and state bound to the session)')
-  await page.getByRole('button', { name: /link github/i }).click()
+  await page.getByRole('button', { name: /^link github$/i }).click()
   // The browser leaves /account: to github.com (intercepted), or, in local builds with NEXT_PUBLIC_PINE_DEV_GITHUB_ORIGIN,
   // to the dev stack's simulated consent page.
   await page.waitForURL((url) => !url.pathname.startsWith('/account'))

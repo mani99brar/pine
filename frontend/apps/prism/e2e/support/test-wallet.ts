@@ -1,4 +1,4 @@
-import type { BrowserContext } from '@playwright/test'
+import type { BrowserContext, Page } from '@playwright/test'
 
 /**
  * A test-only EIP-1193 wallet for the local e2e stack: the page gets `window.ethereum` (also announced through EIP-6963 as
@@ -10,6 +10,11 @@ export interface TestWalletOptions {
   rpcUrl: string
   account: `0x${string}`
   chainId: number
+  /**
+   * Like an extension wallet whose background is still waking up after a page load (MetaMask's service worker, Brave
+   * Wallet loading its keyring): for this long after each load, `eth_accounts` answers [] although the site is authorized.
+   */
+  wakeMs?: number
 }
 
 interface RpcPayload {
@@ -36,14 +41,20 @@ export async function installTestWallet(context: BrowserContext, opts: TestWalle
   const account = opts.account.toLowerCase() as `0x${string}`
   const chainHex = `0x${opts.chainId.toString(16)}`
   const requests: RpcPayload[] = []
+  const loadedAt = new WeakMap<Page, number>()
 
-  await context.exposeBinding('__pineTestWalletRpc', async (_source, payload: RpcPayload): Promise<RpcAnswer> => {
+  await context.exposeBinding('__pineTestWalletLoaded', ({ page }) => {
+    loadedAt.set(page, Date.now())
+  })
+  await context.exposeBinding('__pineTestWalletRpc', async ({ page }, payload: RpcPayload): Promise<RpcAnswer> => {
     requests.push(payload)
     const params = payload.params ?? []
+    const waking = Date.now() - (loadedAt.get(page) ?? 0) < (opts.wakeMs ?? 0)
     switch (payload.method) {
       case 'eth_requestAccounts':
-      case 'eth_accounts':
         return { result: [account] }
+      case 'eth_accounts':
+        return { result: waking ? [] : [account] }
       case 'eth_chainId':
         return { result: chainHex }
       case 'net_version':
@@ -77,6 +88,7 @@ export async function installTestWallet(context: BrowserContext, opts: TestWalle
 
   await context.addInitScript(
     ({ account: acct, chainHex: chain }) => {
+      void (window as unknown as { __pineTestWalletLoaded(): Promise<void> }).__pineTestWalletLoaded()
       type Listener = (...args: unknown[]) => void
       const listeners = new Map<string, Set<Listener>>()
       const provider = {

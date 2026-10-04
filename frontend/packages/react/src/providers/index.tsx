@@ -16,6 +16,7 @@ import {
 } from '@pine/data'
 import { PineContext, isDemoEnv, type PineContextValue } from './context'
 import { createPineWagmiConfig } from './wagmi-config'
+import { WalletReconnect } from '../wallet/reconnect'
 import { createApiTokenGetter } from '../internal/api-token'
 
 // The claim composer keeps its draft in the TanStack Query cache and binds it to controlled inputs.
@@ -130,6 +131,7 @@ export function PineProviders(props: PineProvidersProps): React.JSX.Element {
           >
             <PineContext.Provider value={value}>
               <DataSync data={value.data} />
+              <WalletReconnect />
               {children}
             </PineContext.Provider>
           </RainbowKitProvider>
