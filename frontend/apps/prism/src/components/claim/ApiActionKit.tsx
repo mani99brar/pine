@@ -141,18 +141,25 @@ export function PlanProgress({ runner, chainId, className }: { runner: ApiPlanRu
   )
 }
 
-/** Retry or forget a plan that stopped (a failed step, an expired offer). Nothing is offered while a step may land. */
+/**
+ * Retry, continue or forget a plan that stopped (a failed step, an expired offer, a reload part way). `onRetry` must go
+ * through the plan runner's `run()`, which verifies the stored plan again before anything is sent. Nothing is offered
+ * while a step is running, and a plan is not forgotten while one of its transactions may still land.
+ */
 export function PlanControls({ runner, onRetry, onAbandon, busy }: { runner: ApiPlanRunner; onRetry: () => void; onAbandon: () => void; busy: boolean }) {
   const failed = runner.runner.state === 'failed' || runner.phase === 'error'
-  if (!failed || busy) return null
+  if ((!failed && !runner.canResume) || busy) return null
+  const mayLand = runner.runner.steps.some((s) => s.status === 'pending' || s.status === 'awaiting_signature')
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button size="sm" onClick={onRetry}>
-        Try again
+        {failed ? 'Try again' : 'Continue'}
       </Button>
-      <Button size="sm" variant="ghost" onClick={onAbandon}>
-        Start over
-      </Button>
+      {!mayLand && (
+        <Button size="sm" variant="ghost" onClick={onAbandon}>
+          Start over
+        </Button>
+      )}
     </div>
   )
 }

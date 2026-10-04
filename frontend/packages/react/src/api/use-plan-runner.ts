@@ -61,6 +61,11 @@ export interface ApiPlanRunner {
   error: string | null
   /** Offer expiry of the loaded plan (ms since the epoch); null when no plan is loaded or it states none. */
   expiresAt: number | null
+  /**
+   * A verified plan stopped part way without failing (e.g. reloaded while a step waited in the wallet): `run()` continues
+   * it, verifying the stored plan again first.
+   */
+  canResume: boolean
   /** Creates and verifies the plan when needed, then starts (or resumes) the wallet steps. */
   run(): Promise<void>
   /** Forgets the stored plan and its progress (e.g. after it expired) so the next run creates a new one. */
@@ -109,6 +114,7 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
   const [plan, setPlan] = useState<TxPlan | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [expiresAt, setExpiresAt] = useState<number | null>(null)
+  const [active, setActive] = useState(false)
 
   const manifest = useMemo(() => {
     try {
@@ -212,6 +218,7 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
 
   const run = useCallback(async () => {
     setError(null)
+    setActive(true)
     try {
       const stored = readJson<StoredPlan>(storage, storeKey)
       let current: TxPlan
@@ -246,6 +253,8 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
     } catch (e) {
       setError(errorMessage(e))
       setPhase('error')
+    } finally {
+      setActive(false)
     }
   }, [storage, storeKey, verify, machine, manifest, clock])
 
@@ -255,5 +264,12 @@ export function useApiPlanRunner(spec: ApiPlanSpec): ApiPlanRunner {
     forget()
   }, [storage, storeKey, runner, forget])
 
-  return { phase, plan, steps, runner, error, expiresAt, run, discard, forget }
+  const canResume =
+    !active &&
+    phase === 'verified' &&
+    runner.steps.length > 0 &&
+    !runner.awaitingManual &&
+    (runner.state === 'paused' || runner.state === 'idle')
+
+  return { phase, plan, steps, runner, error, expiresAt, canResume, run, discard, forget }
 }
