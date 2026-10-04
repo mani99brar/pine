@@ -281,3 +281,21 @@ describe('the claims list search', () => {
   })
 })
 
+describe('the policy page', () => {
+  it('wraps a long ipfs:// URI instead of widening a phone screen', async () => {
+    const uri = 'ipfs://bafkreievo4wckp4t23rwz2dd7uodottyh3q725poymhtdkgk2cbmhuzqfa'
+    const bundled = getPolicy('FUNC-001')
+    if (!bundled) throw new Error('no bundled FUNC-001')
+    vi.doMock('@/lib/server/data', () => ({ getPolicyServerStrict: async () => ({ ...bundled, uri }) }))
+    vi.stubEnv('NEXT_PUBLIC_PINE_DATA_SOURCE', 'api')
+    try {
+      const { default: PolicyPage } = await prism<{ default: (p: { params: Promise<{ id: string }> }) => Promise<ReactElement> }>('app/policies/[id]/page.tsx')
+      const html = renderToStaticMarkup(await PolicyPage({ params: Promise.resolve({ id: 'FUNC-001' }) }))
+      const doc = new DOMParser().parseFromString(html, 'text/html')
+      const span = [...doc.querySelectorAll('span')].find((el) => el.textContent === uri)
+      expect(span?.className.split(/\s+/)).toEqual(expect.arrayContaining(['break-all', 'min-w-0']))
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+})

@@ -92,7 +92,7 @@ export default async function PolicyPage({ params }: Params) {
         <div className="mt-5 flex flex-wrap items-center gap-3">
           <HashChip value={p.contentHash} label="Content hash" />
           {p.publishedAt && <span className="text-[0.84375rem] text-lumen-3">Published {formatDate(p.publishedAt, 'short')}</span>}
-          {p.uri && <span className="t-code text-[0.78rem] text-lumen-3">{p.uri}</span>}
+          {p.uri && <span className="t-code min-w-0 break-all text-[0.78rem] text-lumen-3">{p.uri}</span>}
         </div>
         <div className="mt-6 flex flex-wrap gap-3">
           {gated ? (
