@@ -138,6 +138,7 @@ export {
   useGitHubLink,
   checkSiweChallenge,
   checkGitHubAuthorizationUrl,
+  githubConsentUrl,
   pineSessionSchema,
   SiweChallengeError,
   SIWE_TERMS_STATEMENT,

@@ -9,6 +9,10 @@
 //   GET  /dev/health              -> { ok, api, userContent, chainId, rpc, ipfs }
 //   GET  /dev/github/repos        -> the seeded repositories, branches, PRs and commit SHAs
 //   POST /dev/github/authorize    {authorizationUrl, githubUserId?, login?} -> {code, state, callbackUrl}
+//   GET  /login/oauth/authorize   the simulated github.com consent page for people testing by hand: the frontend sends
+//                                 the browser here instead of github.com when NEXT_PUBLIC_PINE_DEV_GITHUB_ORIGIN is set
+//                                 (local builds only); "Approve" completes the link through FakeGitHub and redirects to
+//                                 the API callback, exactly like GitHub would.
 //        (the "user approves on github.com" step; a Playwright test intercepts the github.com navigation and then
 //         navigates to callbackUrl)
 //
@@ -152,6 +156,51 @@ async function readBody(request: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+const escapeHtml = (value: string): string =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+
+/** A stable fake numeric GitHub id per login (distinct from the seeded owner's id). */
+function devGithubId(login: string): number {
+  let hash = 0;
+  for (const char of login.toLowerCase()) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return 300_000_000 + (hash % 100_000_000);
+}
+
+function sendHtml(response: ServerResponse, status: number, body: string, formTarget = ""): void {
+  const page = `<!doctype html><html><head><meta charset="utf-8"><title>GitHub (simulated)</title><style>
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0d1117;color:#e6edf3;font:16px/1.5 system-ui,sans-serif}
+main{width:min(460px,92vw);background:#161b22;border:1px solid #30363d;border-radius:12px;padding:28px}
+h1{font-size:20px;margin:0 0 6px}p{color:#9da7b3}label{display:block;margin:18px 0 6px;font-weight:600}
+input{width:100%;box-sizing:border-box;padding:10px 12px;border-radius:8px;border:1px solid #30363d;background:#0d1117;color:#e6edf3;font:inherit}
+button{margin-top:18px;width:100%;padding:11px;border:0;border-radius:8px;background:#238636;color:#fff;font:600 16px system-ui;cursor:pointer}
+.note{font-size:13px;margin-top:18px}code{background:#0d1117;padding:1px 5px;border-radius:5px}
+</style></head><body><main>${body}</main></body></html>`;
+  response.writeHead(status, { "content-type": "text/html; charset=utf-8", "cache-control": "no-store", "content-security-policy": `default-src 'none'; style-src 'unsafe-inline'; form-action 'self' ${formTarget}`.trim() });
+  response.end(page);
+}
+
+/** The simulated github.com consent screen (local manual testing only). */
+function consentPage(response: ServerResponse, url: URL, callbackOrigin: string): void {
+  if (url.searchParams.get("code_challenge_method") !== "S256" || !url.searchParams.get("state") || !url.searchParams.get("code_challenge")) {
+    return sendHtml(response, 400, "<p>Not a Pine authorization request (PKCE S256 and state are required).</p>");
+  }
+  const suggested = `dev-${(url.searchParams.get("state") ?? "x").replace(/[^A-Za-z0-9]/g, "").slice(0, 6).toLowerCase()}`;
+  const hidden = [...url.searchParams].map(([key, value]) => `<input type="hidden" name="${escapeHtml(key)}" value="${escapeHtml(value)}">`).join("");
+  sendHtml(
+    response,
+    200,
+    `<h1>Authorize Pine (local dev)</h1>
+<p>This is the local stack's <b>simulated GitHub</b>: nothing is sent to github.com and no GitHub permissions exist.</p>
+<form method="get" action="/login/oauth/authorize/approve">${hidden}
+<label for="pine_login">Sign in to GitHub as</label>
+<input id="pine_login" name="pine_login" value="${escapeHtml(suggested)}" pattern="[A-Za-z0-9][A-Za-z0-9-]{0,38}" required>
+<button type="submit">Approve</button></form>
+<p class="note">Each GitHub account links to one wallet only. <code>${escapeHtml(DEFAULT_IDENTITY.login)}</code> owns the seeded repositories but is already linked to the e2e test wallet; any other login works, and you can still open <code>pine-labs/keeper-bot</code> by name in the composer.</p>`,
+    // The approve step redirects to the API callback: CSP form-action also governs that redirect.
+    callbackOrigin,
+  );
+}
+
 interface ControlDeps {
   port: number;
   github: DevGitHub;
@@ -199,6 +248,27 @@ function startControlServer(deps: ControlDeps): Promise<ReturnType<typeof create
           callbackUrl = callback.toString();
         }
         return send(response, 200, { code: result.code, state: result.state, callbackUrl, identity });
+      }
+      if (request.method === "GET" && url.pathname === "/login/oauth/authorize") return consentPage(response, url, deps.callbackOrigin);
+      if (request.method === "GET" && url.pathname === "/login/oauth/authorize/approve") {
+        const login = url.searchParams.get("pine_login") ?? "";
+        if (!/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/.test(login)) return sendHtml(response, 400, "<p>Invalid GitHub login.</p>");
+        const github = new URL("https://github.com/login/oauth/authorize");
+        for (const [key, value] of url.searchParams) if (key !== "pine_login") github.searchParams.append(key, value);
+        const identity = login === DEFAULT_IDENTITY.login ? { ...DEFAULT_IDENTITY } : { githubUserId: devGithubId(login), login };
+        let result;
+        try {
+          result = deps.github.authorize(github.toString(), identity);
+        } catch (error) {
+          return sendHtml(response, 400, `<p>Authorization refused: ${escapeHtml(error instanceof Error ? error.message : "unknown error")}</p>`);
+        }
+        const redirect = github.searchParams.get("redirect_uri") ?? `${deps.callbackOrigin}/api/v1/auth/github/callback`;
+        if (hostOf(redirect) === null || new URL(redirect).origin !== deps.callbackOrigin) return sendHtml(response, 400, "<p>The callback is not on the API origin.</p>");
+        const callback = new URL(redirect);
+        callback.searchParams.set("code", result.code);
+        callback.searchParams.set("state", result.state);
+        response.writeHead(302, { location: callback.toString(), "cache-control": "no-store" });
+        return response.end();
       }
       return send(response, 404, { error: "not found" });
     })().catch(() => {

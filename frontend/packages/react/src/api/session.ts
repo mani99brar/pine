@@ -126,6 +126,35 @@ export function checkGitHubAuthorizationUrl(raw: string): string {
   return url.toString()
 }
 
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+/**
+ * Local development only: the dev stack simulates GitHub, so a checked github.com authorization URL is opened on its
+ * consent page instead (same path and query; `NEXT_PUBLIC_PINE_DEV_GITHUB_ORIGIN`, honoured only for a loopback
+ * http(s) origin). Production builds never set it and always go to github.com.
+ */
+export function githubConsentUrl(checkedUrl: string, devOrigin: string | undefined): string {
+  if (!devOrigin) return checkedUrl
+  let dev: URL
+  try {
+    dev = new URL(devOrigin)
+  } catch {
+    return checkedUrl
+  }
+  if ((dev.protocol !== 'http:' && dev.protocol !== 'https:') || !LOOPBACK.has(dev.hostname) || dev.pathname !== '/' || dev.search || dev.hash) return checkedUrl
+  const github = new URL(checkedUrl)
+  return `${dev.origin}${github.pathname}${github.search}`
+}
+
+function devGitHubOrigin(): string | undefined {
+  try {
+    const value = process.env.NEXT_PUBLIC_PINE_DEV_GITHUB_ORIGIN
+    return value && value.length > 0 ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
 function requireApi(api: PineApiClient | null): PineApiClient {
   if (!api) throw new Error('The Pine API is not configured (set NEXT_PUBLIC_PINE_DATA_SOURCE=api).')
   return api
@@ -290,7 +319,7 @@ export function useGitHubLink(): { link(): Promise<void>; unlink(): Promise<void
     setBusy(true)
     try {
       const { authorizationUrl } = await requireApi(api).post('/api/v1/auth/github/start', startSchema)
-      window.location.assign(checkGitHubAuthorizationUrl(authorizationUrl))
+      window.location.assign(githubConsentUrl(checkGitHubAuthorizationUrl(authorizationUrl), devGitHubOrigin()))
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
       setBusy(false)

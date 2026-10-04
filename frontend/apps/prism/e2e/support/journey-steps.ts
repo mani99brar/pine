@@ -30,7 +30,14 @@ export async function connectAndSignIn(page: Page): Promise<void> {
 export async function linkGitHub(page: Page): Promise<void> {
   await caption(page, 'Link GitHub through the backend (zero-permission app; PKCE and state bound to the session)')
   await page.getByRole('button', { name: /link github/i }).click()
-  await page.waitForURL(/\/(settings|account)/)
+  // The browser leaves /account: to github.com (intercepted), or, in local builds with NEXT_PUBLIC_PINE_DEV_GITHUB_ORIGIN,
+  // to the dev stack's simulated consent page.
+  await page.waitForURL((url) => !url.pathname.startsWith('/account'))
+  if (/\/login\/oauth\/authorize/.test(page.url())) {
+    await page.getByLabel(/sign in to github as/i).fill(stack.githubLogin)
+    await page.getByRole('button', { name: /^approve$/i }).click()
+    await page.waitForURL(/\/(settings|account)/)
+  }
   if (/\/settings/.test(page.url())) {
     const next = page.getByRole('link', { name: /continue to your account/i }).or(page.getByRole('button', { name: /continue to your account/i }))
     if (await next.count()) await next.first().click()

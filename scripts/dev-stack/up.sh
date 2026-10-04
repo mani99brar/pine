@@ -308,6 +308,8 @@ NEXT_PUBLIC_SITE_URL=$PUBLIC_ORIGIN
 PINE_DEV_CONTROL_URL=http://127.0.0.1:$CONTROL_PORT
 # Lets Next.js proxy /api/v1/* etc. to the local API (frontend/apps/prism/next.config.ts; loopback only, never production).
 PINE_DEV_PROXY=1
+# GitHub is simulated here: "Link GitHub" opens the dev control server's consent page instead of github.com.
+NEXT_PUBLIC_PINE_DEV_GITHUB_ORIGIN=http://127.0.0.1:$CONTROL_PORT
 EOF
 chmod 644 "$STATE_DIR/frontend.env"
 

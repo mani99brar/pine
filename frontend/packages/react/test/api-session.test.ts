@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createSiweMessage } from 'viem/siwe'
-import { checkGitHubAuthorizationUrl, checkSiweChallenge, SiweChallengeError } from '../src/api/session'
+import { checkGitHubAuthorizationUrl, checkSiweChallenge, githubConsentUrl, SiweChallengeError } from '../src/api/session'
 
 const ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8' as const
 const ORIGIN = 'https://app.pine.example'
@@ -110,5 +110,25 @@ describe('checkGitHubAuthorizationUrl', () => {
     expect(() => checkGitHubAuthorizationUrl('http://github.com/login/oauth/authorize')).toThrow()
     expect(() => checkGitHubAuthorizationUrl('https://github.com/settings/applications')).toThrow()
     expect(() => checkGitHubAuthorizationUrl('javascript:alert(1)')).toThrow()
+  })
+})
+
+describe('githubConsentUrl (local dev stack only)', () => {
+  const checked = 'https://github.com/login/oauth/authorize?client_id=x&state=y&code_challenge=z&code_challenge_method=S256'
+
+  it('keeps github.com when no dev origin is configured (every production build)', () => {
+    expect(githubConsentUrl(checked, undefined)).toBe(checked)
+    expect(githubConsentUrl(checked, '')).toBe(checked)
+  })
+
+  it('opens the dev stack consent page on a loopback dev origin, same path and query', () => {
+    expect(githubConsentUrl(checked, 'http://127.0.0.1:3999')).toBe('http://127.0.0.1:3999/login/oauth/authorize?client_id=x&state=y&code_challenge=z&code_challenge_method=S256')
+  })
+
+  it('ignores a dev origin that is not loopback, so a misconfigured build can never redirect elsewhere', () => {
+    expect(githubConsentUrl(checked, 'https://evil.example')).toBe(checked)
+    expect(githubConsentUrl(checked, 'http://192.168.1.15:3999')).toBe(checked)
+    expect(githubConsentUrl(checked, 'javascript:alert(1)')).toBe(checked)
+    expect(githubConsentUrl(checked, 'http://127.0.0.1:3999/path')).toBe(checked)
   })
 })
