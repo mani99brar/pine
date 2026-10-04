@@ -173,7 +173,14 @@ function MobileNav({ pathname }: { pathname: string }) {
             <RDialog.Overlay forceMount asChild>
               <motion.div className="fixed inset-0 z-[88] bg-[rgba(8,6,5,0.8)]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} />
             </RDialog.Overlay>
-            <RDialog.Content forceMount asChild>
+            <RDialog.Content
+              forceMount
+              asChild
+              onCloseAutoFocus={(e) => {
+                // A modal opened from the drawer (the wallet's connect modal) has focus by now: leave it there.
+                if (document.activeElement && document.activeElement !== document.body) e.preventDefault()
+              }}
+            >
               <motion.div
                 className="fixed inset-y-0 right-0 z-[89] flex w-[min(24rem,100vw)] flex-col overflow-y-auto border-l border-edge bg-[#1a1412] p-5 focus:outline-none"
                 initial={reduce ? { opacity: 0 } : { x: '100%' }}
@@ -213,7 +220,7 @@ function MobileNav({ pathname }: { pathname: string }) {
                   <Link href="/compose" onClick={() => setOpen(false)} className="btn btn-light w-full">
                     <Plus size={16} aria-hidden /> Compose a claim
                   </Link>
-                  <WalletButton block />
+                  <WalletButton block beforeModal={() => setOpen(false)} />
                 </div>
               </motion.div>
             </RDialog.Content>

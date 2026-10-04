@@ -33,7 +33,11 @@ function PineSessionLine({ address }: { address: string }) {
   )
 }
 
-export function WalletButton({ className, block }: { className?: string; block?: boolean }) {
+/**
+ * `beforeModal` runs before the button opens the wallet's connect modal. A modal drawer that holds the button closes
+ * there: its focus trap and pointer lock would otherwise sit on top of the connect modal, which renders outside it.
+ */
+export function WalletButton({ className, block, beforeModal }: { className?: string; block?: boolean; beforeModal?: () => void }) {
   const mounted = useMounted()
   const w = useWallet()
   const restoring = useWalletRestoring()
@@ -52,7 +56,10 @@ export function WalletButton({ className, block }: { className?: string; block?:
   }
   if (!w.isConnected || !w.address) {
     return (
-      <button type="button" onClick={() => w.connect()} className={cn('btn btn-glass btn-sm', block && 'w-full', className)}>
+      <button type="button" onClick={() => {
+          beforeModal?.()
+          w.connect()
+        }} className={cn('btn btn-glass btn-sm', block && 'w-full', className)}>
         <Wallet size={15} aria-hidden />
         {w.isDemo ? 'Connect demo wallet' : 'Connect wallet'}
       </button>
@@ -69,7 +76,8 @@ export function WalletButton({ className, block }: { className?: string; block?:
         </button>
       </Popover.Trigger>
       <Popover.Portal>
-        <Popover.Content align="end" sideOffset={8} className="glass-float cut-lg z-[80] w-[19rem] p-4 focus:outline-none">
+        {/* Above the mobile navigation drawer (z-[89]), which holds this button on a phone. */}
+        <Popover.Content align="end" sideOffset={8} className="glass-float cut-lg z-[90] w-[19rem] p-4 focus:outline-none">
           <p className="text-[0.8125rem] text-lumen-3">{w.isDemo ? 'Simulated demo wallet. No real funds move.' : 'Connected wallet'}</p>
           <HashChip value={w.address} label="Address" className="mt-2 w-full" />
           <dl className="mt-3 grid grid-cols-2 gap-2 text-[0.84375rem]">
